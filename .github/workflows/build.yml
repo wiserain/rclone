@@ -14,13 +14,33 @@ on:
   pull_request:
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - 
+        name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: rclone mod
+          body: Auto-generated release
+          draft: true
+          prerelease: false
   build:
+    needs:
+      - create-release
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        job_name: ['linux', 'mac', 'windows_amd64', 'windows_386', 'other_os', 'go1.11', 'go1.12', 'go1.13', 'go1.14']
-
+        # job_name: ['linux', 'mac', 'windows_amd64', 'windows_386', 'other_os', 'go1.11', 'go1.12', 'go1.13', 'go1.14']
+        job_name: ['linux', 'mac', 'windows_amd64']
         include:
           - job_name: linux
             os: ubuntu-latest
@@ -50,43 +70,43 @@ jobs:
             racequicktest: true
             deploy: true
 
-          - job_name: windows_386
-            os: windows-latest
-            go: '1.15.x'
-            gotags: cmount
-            goarch: '386'
-            cgo: '1'
-            build_flags: '-include "^windows/386" -cgo'
-            quicktest: true
-            deploy: true
+          # - job_name: windows_386
+          #   os: windows-latest
+          #   go: '1.15.x'
+          #   gotags: cmount
+          #   goarch: '386'
+          #   cgo: '1'
+          #   build_flags: '-include "^windows/386" -cgo'
+          #   quicktest: true
+          #   deploy: true
 
-          - job_name: other_os
-            os: ubuntu-latest
-            go: '1.15.x'
-            build_flags: '-exclude "^(windows/|darwin/amd64|linux/)"'
-            compile_all: true
-            deploy: true
+          # - job_name: other_os
+          #   os: ubuntu-latest
+          #   go: '1.15.x'
+          #   build_flags: '-exclude "^(windows/|darwin/amd64|linux/)"'
+          #   compile_all: true
+          #   deploy: true
 
-          - job_name: go1.11
-            os: ubuntu-latest
-            go: '1.11.x'
-            quicktest: true
+          # - job_name: go1.11
+          #   os: ubuntu-latest
+          #   go: '1.11.x'
+          #   quicktest: true
 
-          - job_name: go1.12
-            os: ubuntu-latest
-            go: '1.12.x'
-            quicktest: true
+          # - job_name: go1.12
+          #   os: ubuntu-latest
+          #   go: '1.12.x'
+          #   quicktest: true
 
-          - job_name: go1.13
-            os: ubuntu-latest
-            go: '1.13.x'
-            quicktest: true
+          # - job_name: go1.13
+          #   os: ubuntu-latest
+          #   go: '1.13.x'
+          #   quicktest: true
 
-          - job_name: go1.14
-            os: ubuntu-latest
-            go: '1.14.x'
-            quicktest: true
-            racequicktest: true
+          # - job_name: go1.14
+          #   os: ubuntu-latest
+          #   go: '1.14.x'
+          #   quicktest: true
+          #   racequicktest: true
 
     name: ${{ matrix.job_name }}
 
@@ -169,24 +189,24 @@ jobs:
         run: |
           make
 
-      - name: Run tests
-        shell: bash
-        run: |
-          make quicktest
-        if: matrix.quicktest
+      # - name: Run tests
+      #   shell: bash
+      #   run: |
+      #     make quicktest
+      #   if: matrix.quicktest
 
-      - name: Race test
-        shell: bash
-        run: |
-          make racequicktest
-        if: matrix.racequicktest
+      # - name: Race test
+      #   shell: bash
+      #   run: |
+      #     make racequicktest
+      #   if: matrix.racequicktest
 
-      - name: Code quality test
-        shell: bash
-        run: |
-          make build_dep
-          make check
-        if: matrix.check
+      # - name: Code quality test
+      #   shell: bash
+      #   run: |
+      #     make build_dep
+      #     make check
+      #   if: matrix.check
 
       - name: Compile all architectures test
         shell: bash
@@ -205,52 +225,59 @@ jobs:
           RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
         # working-directory: '$(modulePath)'
         # Deploy binaries if enabled in config && not a PR && not a fork
-        if: matrix.deploy && github.head_ref == '' && github.repository == 'rclone/rclone'
-
-  xgo:
-    timeout-minutes: 60
-    name: "xgo cross compile"
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout
-        uses: actions/checkout@v1
+        if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
+      - 
+        name: Upload Assets to Release with a wildcard
+        uses: csexton/release-asset-action@v2
         with:
-          # Checkout into a fixed path to avoid import path problems on go < 1.11
-          path: ./src/github.com/rclone/rclone
+          pattern: "build/*"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          release-url: ${{needs.create-release.outputs.upload_url}}
 
-      - name: Set environment variables
-        shell: bash
-        run: |
-          echo '::set-env name=GOPATH::${{ runner.workspace }}'
-          echo '::add-path::${{ runner.workspace }}/bin'
+  # xgo:
+  #   timeout-minutes: 60
+  #   name: "xgo cross compile"
+  #   runs-on: ubuntu-latest
 
-      - name: Cross-compile rclone
-        run: |
-          docker pull billziss/xgo-cgofuse
-          GO111MODULE=off go get -v github.com/karalabe/xgo # don't add to go.mod
-          # xgo \
-          #     -image=billziss/xgo-cgofuse \
-          #     -targets=darwin/amd64,linux/386,linux/amd64,windows/386,windows/amd64 \
-          #     -tags cmount \
-          #     -dest build \
-          #     .
-          xgo \
-              -image=billziss/xgo-cgofuse \
-              -targets=android/*,ios/* \
-              -dest build \
-              .
+  #   steps:
 
-      - name: Build rclone
-        shell: bash
-        run: |
-          make
+  #     - name: Checkout
+  #       uses: actions/checkout@v1
+  #       with:
+  #         # Checkout into a fixed path to avoid import path problems on go < 1.11
+  #         path: ./src/github.com/rclone/rclone
 
-      - name: Upload artifacts
-        run: |
-          make ci_upload
-        env:
-          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
-        # Upload artifacts if not a PR && not a fork
-        if: github.head_ref == '' && github.repository == 'rclone/rclone'
+  #     - name: Set environment variables
+  #       shell: bash
+  #       run: |
+  #         echo '::set-env name=GOPATH::${{ runner.workspace }}'
+  #         echo '::add-path::${{ runner.workspace }}/bin'
+
+  #     - name: Cross-compile rclone
+  #       run: |
+  #         docker pull billziss/xgo-cgofuse
+  #         GO111MODULE=off go get -v github.com/karalabe/xgo # don't add to go.mod
+  #         # xgo \
+  #         #     -image=billziss/xgo-cgofuse \
+  #         #     -targets=darwin/amd64,linux/386,linux/amd64,windows/386,windows/amd64 \
+  #         #     -tags cmount \
+  #         #     -dest build \
+  #         #     .
+  #         xgo \
+  #             -image=billziss/xgo-cgofuse \
+  #             -targets=android/*,ios/* \
+  #             -dest build \
+  #             .
+
+  #     - name: Build rclone
+  #       shell: bash
+  #       run: |
+  #         make
+
+  #     - name: Upload artifacts
+  #       run: |
+  #         make ci_upload
+  #       env:
+  #         RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+  #       # Upload artifacts if not a PR && not a fork
+  #       if: github.head_ref == '' && github.repository == 'rclone/rclone'
