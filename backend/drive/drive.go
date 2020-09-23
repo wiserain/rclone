@@ -15,9 +15,12 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"mime"
 	"net/http"
 	"path"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +64,7 @@ const (
 	timeFormatIn                = time.RFC3339
 	timeFormatOut               = "2006-01-02T15:04:05.000000000Z07:00"
 	defaultMinSleep             = fs.Duration(100 * time.Millisecond)
+	defaultSAMinSleep           = fs.Duration(100 * time.Millisecond)	// mod
 	defaultBurst                = 100
 	defaultExportExtensions     = "docx,xlsx,pptx,svg"
 	scopePrefix                 = "https://www.googleapis.com/auth/"
@@ -233,6 +237,20 @@ a non root folder as its starting point.
 		}, {
 			Name: "service_account_file",
 			Help: "Service Account Credentials JSON file path \nLeave blank normally.\nNeeded only if you want use SA instead of interactive login." + env.ShellExpandHelp,
+		}, { // mod
+			Name: "service_account_file_path",
+			Help: "Service Account Credentials JSON folder path.",
+		}, { // mod
+			Name:     "service_account_min_sleep",
+			Default:  defaultSAMinSleep,
+			Help:     "Minimum time to sleep between change service account.",
+			Hide:     fs.OptionHideConfigurator,
+			Advanced: true,
+		}, { // mod
+			Name:     "service_account_per_file",
+			Default:  false,
+			Help:     "Changes service account for each file copy.",
+			Advanced: true,
 		}, {
 			Name:     "service_account_credentials",
 			Help:     "Service Account Credentials JSON blob\nLeave blank normally.\nNeeded only if you want use SA instead of interactive login.",
@@ -511,6 +529,9 @@ type Options struct {
 	Scope                     string               `config:"scope"`
 	RootFolderID              string               `config:"root_folder_id"`
 	ServiceAccountFile        string               `config:"service_account_file"`
+	ServiceAccountFilePath    string               `config:"service_account_file_path"` // Mod
+	ServiceAccountMinSleep    fs.Duration          `config:"service_account_min_sleep"` // Mod
+	ServiceAccountPerFile     bool                 `config:"service_account_per_file"` // Mod
 	ServiceAccountCredentials string               `config:"service_account_credentials"`
 	TeamDriveID               string               `config:"team_drive"`
 	AuthOwnerOnly             bool                 `config:"auth_owner_only"`
@@ -563,6 +584,13 @@ type Fs struct {
 	grouping         int32               // number of IDs to search at once in ListR - read with atomic
 	listRmu          *sync.Mutex         // protects listRempties
 	listRempties     map[string]struct{} // IDs of supposedly empty directories which triggered grouping disable
+	// mod
+	useSArotate      bool
+	saFiles          []string
+	changeSAmu       *sync.Mutex
+	changeSAtime     time.Time
+	FileObj          *fs.Object
+	FileName         string
 }
 
 type baseObject struct {
@@ -632,7 +660,16 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 		}
 		if len(gerr.Errors) > 0 {
 			reason := gerr.Errors[0].Reason
-			if reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" {
+			message := gerr.Errors[0].Message
+			if reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" || (reason == "dailyLimitExceededUnreg" || strings.HasPrefix(message, "Daily Limit")) {
+				// mod - try changing service account
+				if f.useSArotate {
+					f.changeSAmu.Lock()
+					defer f.changeSAmu.Unlock()
+					if saerr := f.changeSAfile(); saerr == nil {
+						return true, err
+					}
+				}
 				if f.opt.StopOnUploadLimit && gerr.Errors[0].Message == "User rate limit exceeded." {
 					fs.Errorf(f, "Received upload limit error: %v", err)
 					return false, fserrors.FatalError(err)
@@ -645,6 +682,35 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 		}
 	}
 	return false, err
+}
+
+// mod - Changing SA file
+func (f *Fs) changeSAfile() (err error) {
+	// check min sleep
+	if fs.Duration(time.Now().Sub(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
+		fs.Debugf("sarot", "retrying with the same service account")
+		return nil
+	}
+	// reloading SA files
+	if len(f.saFiles) < 1 {
+		fs.Debugf("sarot", "service account files exhausted. reloading ...")
+		newSAFiles, err := getServiceAccountFiles(&f.opt)
+		if err != nil {
+			fs.Debugf("sarot", err.Error())
+			return err
+		}
+		f.saFiles = newSAFiles
+		fs.Debugf("sarot", "keep rotating with a new batch")
+	}
+	// draw one
+	newSAFile := f.saFiles[len(f.saFiles)-1]
+	f.saFiles = f.saFiles[:len(f.saFiles)-1]
+	err = f.changeServiceAccountFile(newSAFile)
+	if err == nil {
+		f.changeSAtime = time.Now()
+		f.pacer = fs.NewPacer(pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
+	}
+	return err
 }
 
 // parseParse parses a drive 'url'
@@ -984,6 +1050,38 @@ func getServiceAccountClient(opt *Options, credentialsData []byte) (*http.Client
 	return oauth2.NewClient(ctxWithSpecialClient, conf.TokenSource(ctxWithSpecialClient)), nil
 }
 
+// mod
+func getServiceAccountFiles(opt *Options) ([]string, error) {
+	dirList, err := ioutil.ReadDir(opt.ServiceAccountFilePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to read service_account_file_path")
+	}
+	var saFiles []string
+	for _, v := range dirList {
+		filePath := filepath.Join(opt.ServiceAccountFilePath, v.Name())
+		if path.Ext(filePath) == ".json" {
+			saFiles = append(saFiles, filePath)
+		}
+	}
+	if len(saFiles) == 0 {
+		return nil, fmt.Errorf("unable to locate service account files in \"%s\"", opt.ServiceAccountFilePath)
+	}	
+	// make shuffled
+	rand.Seed(time.Now().Unix())
+	rand.Shuffle(len(saFiles), func(i, j int) {
+		saFiles[i], saFiles[j] = saFiles[j], saFiles[i]
+	})
+	// supply one if not provided
+	if opt.ServiceAccountFile == "" {
+		opt.ServiceAccountFile = saFiles[len(saFiles)-1]
+		saFiles = saFiles[:len(saFiles)-1]
+	}
+	if len(saFiles) == 0 {
+		return nil, fmt.Errorf("not enough service account files in \"%s\"", opt.ServiceAccountFilePath)
+	}
+	return saFiles, nil
+}
+
 func createOAuthClient(opt *Options, name string, m configmap.Mapper) (*http.Client, error) {
 	var oAuthClient *http.Client
 	var err error
@@ -1041,6 +1139,33 @@ func (f *Fs) setUploadCutoff(cs fs.SizeSuffix) (old fs.SizeSuffix, err error) {
 	return
 }
 
+// mod - from fclone
+func parseRootID(s string) (rootID string, err error) {
+	re := regexp.MustCompile(`\{([^}]{5,})\}`)
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return "", errors.Errorf("%s doesn't not contain valid id", s)
+	}
+	rootID = m[1]
+
+	if strings.HasPrefix(rootID, "http") {
+		// folders - https://drive.google.com/drive/u/0/folders/
+		// file - https://drive.google.com/file/d/
+		re := regexp.MustCompile(`\/(folders|files|file\/d)(\/([A-Za-z0-9_-]{6,}))+\/?`)
+		if m := re.FindStringSubmatch(rootID); m != nil {
+			rootID = m[len(m)-1]
+			return
+		}
+		// id - https://drive.google.com/open?id=
+		re = regexp.MustCompile(`.+id=([A-Za-z0-9_-]{6,}).?`)
+		if m := re.FindStringSubmatch(rootID); m != nil {
+			rootID = m[1]
+			return
+		}
+	}
+	return
+}
+
 // newFs partially constructs Fs from the path
 //
 // It constructs a valid Fs but doesn't attempt to figure out whether
@@ -1049,6 +1174,13 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
+
+	// mod - parse object id from path remote:{ID}
+	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+		name += rootID
+		path = path[strings.Index(path, "}")+1:]
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -1059,6 +1191,15 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 	err = checkUploadChunkSize(opt.ChunkSize)
 	if err != nil {
 		return nil, errors.Wrap(err, "drive: chunk size")
+	}
+
+	// mod
+	var ServiceAccountFiles []string
+	if opt.ServiceAccountFilePath != "" {
+		ServiceAccountFiles, err = getServiceAccountFiles(opt)
+		if err != nil {
+			fs.Debugf(nil, "SA rotation disabled: %s", err.Error())
+		}
 	}
 
 	oAuthClient, err := createOAuthClient(opt, name, m)
@@ -1091,6 +1232,13 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 		ServerSideAcrossConfigs: opt.ServerSideAcrossConfigs,
 	}).Fill(f)
 
+	// mod
+	if ServiceAccountFiles != nil {
+		f.useSArotate = true
+		f.saFiles = ServiceAccountFiles
+		f.changeSAmu = new(sync.Mutex)
+	}
+
 	// Create a new authorized Drive client.
 	f.client = oAuthClient
 	f.svc, err = drive.New(f.client)
@@ -1114,6 +1262,38 @@ func NewFs(name, path string, m configmap.Mapper) (fs.Fs, error) {
 	f, err := newFs(name, path, m)
 	if err != nil {
 		return nil, err
+	}
+
+	// mod -  parse object id from path remote:{ID}
+	var srcFile *drive.File
+	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+		f.opt.RootFolderID = rootID
+
+		err = f.pacer.Call(func() (bool, error) {
+			srcFile, err = f.svc.Files.Get(rootID).
+				Fields("name", "id", "size", "mimeType", "driveId").
+				SupportsAllDrives(true).
+				Do()
+			return f.shouldRetry(err)
+		})
+		if err == nil {
+			if srcFile.MimeType != "" && srcFile.MimeType != "application/vnd.google-apps.folder" {
+				fs.Debugf(nil, "Root ID (File): %s", rootID)
+			} else {
+				if srcFile.DriveId == rootID {
+					fs.Debugf(nil, "Root ID (Drive): %s", rootID)
+					f.opt.RootFolderID = ""
+					f.opt.TeamDriveID = rootID
+				} else {
+					fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+					f.opt.RootFolderID = rootID
+				}
+				srcFile = nil
+			}
+			f.isTeamDrive = f.opt.TeamDriveID != ""
+		} else {
+			return nil, err
+		}
 	}
 
 	// Set the root folder ID
@@ -1156,6 +1336,22 @@ func NewFs(name, path string, m configmap.Mapper) (fs.Fs, error) {
 	_, f.importMimeTypes, err = parseExtensions(f.opt.ImportExtensions)
 	if err != nil {
 		return nil, err
+	}
+
+	// mod
+	if srcFile != nil {
+		tempF := *f
+		newRoot := ""
+		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
+		tempF.root = newRoot
+		f.dirCache = tempF.dirCache
+		f.root = tempF.root
+
+		extension, exportName, exportMimeType, isDocument := f.findExportFormat(srcFile)
+		obj, _ := f.newObjectWithExportInfo(srcFile.Name, srcFile, extension, exportName, exportMimeType, isDocument)
+		f.root = "isFile:" + srcFile.Name
+		f.FileObj = &obj
+		return f, fs.ErrorIsFile
 	}
 
 	// Find the current root
@@ -1355,6 +1551,11 @@ func (f *Fs) newObjectWithExportInfo(
 // NewObject finds the Object at remote.  If it can't be found
 // it returns the error fs.ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	// mod
+	if f.FileObj != nil {
+		return *f.FileObj, nil
+	}
+
 	info, extension, exportName, exportMimeType, isDocument, err := f.getRemoteInfoWithExport(ctx, remote)
 	if err != nil {
 		return nil, err
@@ -2316,6 +2517,10 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	var info *drive.File
 	err = f.pacer.Call(func() (bool, error) {
+		// mod
+		if f.useSArotate && f.opt.ServiceAccountPerFile {
+			f.changeSAfile()
+		}
 		info, err = f.svc.Files.Copy(id, createInfo).
 			Fields(partialFields).
 			SupportsAllDrives(true).
@@ -2752,7 +2957,7 @@ func (f *Fs) changeChunkSize(chunkSizeString string) (err error) {
 }
 
 func (f *Fs) changeServiceAccountFile(file string) (err error) {
-	fs.Debugf(nil, "Changing Service Account File from %s to %s", f.opt.ServiceAccountFile, file)
+	fs.Debugf(nil, "Changing Service Account File from %s to %s", filepath.Base(f.opt.ServiceAccountFile), filepath.Base(file)) // mod - shorter debug log
 	if file == f.opt.ServiceAccountFile {
 		return nil
 	}
@@ -3130,6 +3335,22 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			dir = arg[0]
 		}
 		return f.unTrashDir(ctx, dir, true)
+	case "getid":
+		if len(arg) == 0 {
+			// assuming it is a dir
+			id, err := f.dirCache.FindDir(ctx, "", false)
+			if err != nil {
+				return nil, err
+			}
+			return shortcutID(id), nil
+		} else {
+			// it should be a file
+			o, err := f.NewObject(ctx, arg[0])
+			if err != nil {
+				return nil, err
+			}
+			return shortcutID(o.(fs.IDer).ID()), nil
+		}
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}
