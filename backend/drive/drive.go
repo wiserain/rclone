@@ -3264,6 +3264,19 @@ Result:
         "Errors": 0
     }
 `,
+}, { // mod
+	Name:  "getid",
+	Short: "Get IDs of files or directories",
+	Long: `This command is to obtain IDs of files or directories.
+
+Usage:
+
+    rclone backend getid drive:directory
+    rclone backend getid drive:directory filename
+
+The directory should be a directory. Use an optional filename to get
+an ID of a file located in drive:directory.
+`,
 }}
 
 // Command the backend to run a named command
