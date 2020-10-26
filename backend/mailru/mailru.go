@@ -37,6 +37,7 @@ import (
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/oauthutil"
 	"github.com/rclone/rclone/lib/pacer"
+	"github.com/rclone/rclone/lib/readers"
 	"github.com/rclone/rclone/lib/rest"
 
 	"github.com/pkg/errors"
@@ -655,9 +656,14 @@ func (f *Fs) itemToDirEntry(ctx context.Context, item *api.ListItem) (entry fs.D
 	if err != nil {
 		return nil, -1, err
 	}
+	mTime := int64(item.Mtime)
+	if mTime < 0 {
+		fs.Debugf(f, "Fixing invalid timestamp %d on mailru file %q", mTime, remote)
+		mTime = 0
+	}
 	switch item.Kind {
 	case "folder":
-		dir := fs.NewDir(remote, time.Unix(item.Mtime, 0)).SetSize(item.Size)
+		dir := fs.NewDir(remote, time.Unix(mTime, 0)).SetSize(item.Size)
 		dirSize := item.Count.Files + item.Count.Folders
 		return dir, dirSize, nil
 	case "file":
@@ -671,7 +677,7 @@ func (f *Fs) itemToDirEntry(ctx context.Context, item *api.ListItem) (entry fs.D
 			hasMetaData: true,
 			size:        item.Size,
 			mrHash:      binHash,
-			modTime:     time.Unix(item.Mtime, 0),
+			modTime:     time.Unix(mTime, 0),
 		}
 		return file, -1, nil
 	default:
@@ -1861,30 +1867,30 @@ func (f *Fs) uploadShard(ctx context.Context) (string, error) {
 		return f.shardURL, nil
 	}
 
-	token, err := f.accessToken()
-	if err != nil {
-		return "", err
-	}
-
 	opts := rest.Opts{
-		Method: "GET",
-		Path:   "/api/m1/dispatcher",
-		Parameters: url.Values{
-			"client_id":    {api.OAuthClientID},
-			"access_token": {token},
-		},
+		RootURL: api.DispatchServerURL,
+		Method:  "GET",
+		Path:    "/u",
 	}
 
-	var info api.ShardInfoResponse
+	var (
+		res *http.Response
+		url string
+		err error
+	)
 	err = f.pacer.Call(func() (bool, error) {
-		res, err := f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(res, err, f, &opts)
+		res, err = f.srv.Call(ctx, &opts)
+		if err == nil {
+			url, err = readBodyWord(res)
+		}
+		return fserrors.ShouldRetry(err), err
 	})
 	if err != nil {
+		closeBody(res)
 		return "", err
 	}
 
-	f.shardURL = info.Body.Upload[0].URL
+	f.shardURL = url
 	f.shardExpiry = time.Now().Add(shardExpirySec * time.Second)
 	fs.Debugf(f, "new upload shard: %s", f.shardURL)
 
@@ -2116,7 +2122,18 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, err
 	}
 
-	start, end, partial := getTransferRange(o.size, options...)
+	start, end, partialRequest := getTransferRange(o.size, options...)
+
+	headers := map[string]string{
+		"Accept":       "*/*",
+		"Content-Type": "application/octet-stream",
+	}
+	if partialRequest {
+		rangeStr := fmt.Sprintf("bytes=%d-%d", start, end-1)
+		headers["Range"] = rangeStr
+		// headers["Content-Range"] = rangeStr
+		headers["Accept-Ranges"] = "bytes"
+	}
 
 	// TODO: set custom timeouts
 	opts := rest.Opts{
@@ -2127,10 +2144,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 			"client_id": {api.OAuthClientID},
 			"token":     {token},
 		},
-		ExtraHeaders: map[string]string{
-			"Accept": "*/*",
-			"Range":  fmt.Sprintf("bytes=%d-%d", start, end-1),
-		},
+		ExtraHeaders: headers,
 	}
 
 	var res *http.Response
@@ -2151,17 +2165,35 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, err
 	}
 
-	var hasher gohash.Hash
-	if !partial {
+	// Server should respond with Status 206 and Content-Range header to a range
+	// request. Status 200 (and no Content-Range) means a full-content response.
+	partialResponse := res.StatusCode == 206
+
+	var (
+		hasher     gohash.Hash
+		wrapStream io.ReadCloser
+	)
+	if !partialResponse {
 		// Cannot check hash of partial download
 		hasher = mrhash.New()
 	}
-	wrapStream := &endHandler{
+	wrapStream = &endHandler{
 		ctx:    ctx,
 		stream: res.Body,
 		hasher: hasher,
 		o:      o,
 		server: server,
+	}
+	if partialRequest && !partialResponse {
+		fs.Debugf(o, "Server returned full content instead of range")
+		if start > 0 {
+			// Discard the beginning of the data
+			_, err = io.CopyN(ioutil.Discard, wrapStream, start)
+			if err != nil {
+				return nil, err
+			}
+		}
+		wrapStream = readers.NewLimitedReadCloser(wrapStream, end-start)
 	}
 	return wrapStream, nil
 }

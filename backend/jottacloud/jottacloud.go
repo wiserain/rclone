@@ -373,6 +373,9 @@ func v2config(ctx context.Context, name string, m configmap.Mapper) {
 	fmt.Printf("Login Token> ")
 	loginToken := config.ReadLine()
 
+	m.Set(configClientID, "jottacli")
+	m.Set(configClientSecret, "")
+
 	token, err := doAuthV2(ctx, srv, loginToken, m)
 	if err != nil {
 		log.Fatalf("Failed to get oauth token: %s", err)
@@ -384,7 +387,6 @@ func v2config(ctx context.Context, name string, m configmap.Mapper) {
 
 	fmt.Printf("\nDo you want to use a non standard device/mountpoint e.g. for accessing files uploaded using the official Jottacloud client?\n\n")
 	if config.Confirm(false) {
-		oauthConfig.ClientID = "jottacli"
 		oAuthClient, _, err := oauthutil.NewClient(name, m, oauthConfig)
 		if err != nil {
 			log.Fatalf("Failed to load oAuthClient: %s", err)
@@ -551,7 +553,7 @@ func (f *Fs) setEndpointURL() {
 	if f.opt.Mountpoint == "" {
 		f.opt.Mountpoint = defaultMountpoint
 	}
-	f.endpointURL = urlPathEscape(path.Join(f.user, f.opt.Device, f.opt.Mountpoint))
+	f.endpointURL = path.Join(f.user, f.opt.Device, f.opt.Mountpoint)
 }
 
 // readMetaDataForPath reads the metadata from the path
@@ -1087,8 +1089,7 @@ func (f *Fs) copyOrMove(ctx context.Context, method, src, dest string) (info *ap
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, &info)
-		retry, _ := shouldRetry(resp, err)
-		return (retry && resp.StatusCode != 500), err
+		return shouldRetry(resp, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1192,18 +1193,6 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 
 	_, err = f.copyOrMove(ctx, "mvDir", path.Join(f.endpointURL, f.opt.Enc.FromStandardPath(srcPath))+"/", dstRemote)
 
-	// surprise! jottacloud fucked up dirmove - the api spits out an error but
-	// dir gets moved regardless
-	if apiErr, ok := err.(*api.Error); ok {
-		if apiErr.StatusCode == 500 {
-			_, err := f.NewObject(ctx, dstRemote)
-			if err == fs.ErrorNotAFile {
-				log.Printf("FIXME: ignoring DirMove error - move succeeded anyway\n")
-				return nil
-			}
-			return err
-		}
-	}
 	if err != nil {
 		return errors.Wrap(err, "couldn't move directory")
 	}

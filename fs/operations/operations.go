@@ -172,9 +172,12 @@ func equal(ctx context.Context, src fs.ObjectInfo, dst fs.Object, opt equalOpt) 
 			return false
 		}
 		if ht == hash.None {
-			checksumWarning.Do(func() {
-				fs.Logf(dst.Fs(), "--checksum is in use but the source and destination have no hashes in common; falling back to --size-only")
-			})
+			common := src.Fs().Hashes().Overlap(dst.Fs().Hashes())
+			if common.Count() == 0 {
+				checksumWarning.Do(func() {
+					fs.Logf(dst.Fs(), "--checksum is in use but the source and destination have no hashes in common; falling back to --size-only")
+				})
+			}
 			fs.Debugf(src, "Size of src and dst objects identical")
 		} else {
 			fs.Debugf(src, "Size and %v of src and dst objects identical", ht)
@@ -1522,12 +1525,11 @@ func BackupDir(fdst fs.Fs, fsrc fs.Fs, srcFileName string) (backupDir fs.Fs, err
 				}
 			}
 		}
-	} else {
-		if srcFileName == "" {
-			return nil, fserrors.FatalError(errors.New("--suffix must be used with a file or with --backup-dir"))
-		}
+	} else if fs.Config.Suffix != "" {
 		// --backup-dir is not set but --suffix is - use the destination as the backupDir
 		backupDir = fdst
+	} else {
+		return nil, fserrors.FatalError(errors.New("internal error: BackupDir called when --backup-dir and --suffix both empty"))
 	}
 	if !CanServerSideMove(backupDir) {
 		return nil, fserrors.FatalError(errors.New("can't use --backup-dir on a remote which doesn't support server side move or copy"))

@@ -117,7 +117,7 @@ type ListItem struct {
 	Name      string `json:"name"`
 	Home      string `json:"home"`
 	Size      int64  `json:"size"`
-	Mtime     int64  `json:"mtime,omitempty"`
+	Mtime     uint64 `json:"mtime,omitempty"`
 	Hash      string `json:"hash,omitempty"`
 	VirusScan string `json:"virus_scan,omitempty"`
 	Tree      string `json:"tree,omitempty"`
@@ -157,71 +157,6 @@ type FolderInfoResponse struct {
 	Time   int64  `json:"time"`
 	Status int    `json:"status"`
 	Email  string `json:"email"`
-}
-
-// ShardInfoResponse ...
-type ShardInfoResponse struct {
-	Email string `json:"email"`
-	Body  struct {
-		Video []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"video"`
-		ViewDirect []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"view_direct"`
-		WeblinkView []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"weblink_view"`
-		WeblinkVideo []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"weblink_video"`
-		WeblinkGet []struct {
-			Count int    `json:"count"`
-			URL   string `json:"url"`
-		} `json:"weblink_get"`
-		Stock []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"stock"`
-		WeblinkThumbnails []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"weblink_thumbnails"`
-		PublicUpload []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"public_upload"`
-		Auth []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"auth"`
-		Web []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"web"`
-		View []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"view"`
-		Upload []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"upload"`
-		Get []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"get"`
-		Thumbnails []struct {
-			Count string `json:"count"`
-			URL   string `json:"url"`
-		} `json:"thumbnails"`
-	} `json:"body"`
-	Time   int64 `json:"time"`
-	Status int   `json:"status"`
 }
 
 // CleanupResponse ...
