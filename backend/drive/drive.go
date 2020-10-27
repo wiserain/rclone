@@ -2226,6 +2226,10 @@ func (f *Fs) createFileInfo(ctx context.Context, remote string, modTime time.Tim
 //
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	// mod
+	if f.useSArotate && f.opt.ServiceAccountPerFile {
+		f.changeSAfile()
+	}
 	exisitingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
