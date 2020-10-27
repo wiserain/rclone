@@ -12,7 +12,7 @@ set -e
 #when adding a tool to the list make sure to also add its corresponding command further in the script
 unzip_tools_list=('unzip' '7z' 'busybox')
 
-usage() { echo "Usage: curl https://rclone.org/install.sh | sudo bash [-s beta]" 1>&2; exit 1; }
+usage() { echo "Usage: curl https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash" 1>&2; exit 1; }
 
 
 if [[ $(id -u) -ne 0 ]]; then
@@ -51,6 +51,13 @@ fi
 
 # Make sure we don't create a root owned .config/rclone directory #2127
 export XDG_CONFIG_HOME=config
+
+#check installed version of rclone to determine if update is necessary
+version=`rclone --version 2>>errors | head -n 1 | cut -d ' ' -f 2`
+if [ "$version" = "$tag_name" ]; then
+    printf "\nThe latest version of rclone mod ${version} is already installed.\n\n"
+    exit 3
+fi
 
 
 
