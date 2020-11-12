@@ -283,3 +283,32 @@ jobs:
   #         RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
   #       # Upload artifacts if not a PR && not a fork
   #       if: github.head_ref == '' && github.repository == 'rclone/rclone'
+
+  build-termux:
+    needs:
+      - create-release
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: 'wiserain/termux-packages'
+      - name: build
+        shell: bash
+        run: |
+          cd ./scripts
+          ./run-docker.sh ./build-package.sh -a aarch64 rclone
+          ./run-docker.sh ./build-package.sh -a arm rclone
+          cd ../debs
+          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-v\1-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+          echo $(pwd)
+        if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+      - 
+        name: Upload Assets to Release with a wildcard
+        uses: csexton/release-asset-action@v2
+        with:
+          pattern: "debs/*.deb"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          release-url: ${{needs.create-release.outputs.upload_url}}
