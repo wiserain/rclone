@@ -2,8 +2,10 @@
 package random
 
 import (
+	cryptorand "crypto/rand"
 	"encoding/base64"
-	"math/rand"
+	"encoding/binary"
+	mathrand "math/rand"
 
 	"github.com/pkg/errors"
 )
@@ -23,7 +25,7 @@ func String(n int) string {
 	for i := range out {
 		source := pattern[p]
 		p = (p + 1) % len(pattern)
-		out[i] = source[rand.Intn(len(source))]
+		out[i] = source[mathrand.Intn(len(source))]
 	}
 	return string(out)
 }
@@ -41,7 +43,7 @@ func Password(bits int) (password string, err error) {
 		bytes++
 	}
 	var pw = make([]byte, bytes)
-	n, err := rand.Read(pw)
+	n, err := cryptorand.Read(pw)
 	if err != nil {
 		return "", errors.Wrap(err, "password read failed")
 	}
@@ -50,4 +52,20 @@ func Password(bits int) (password string, err error) {
 	}
 	password = base64.RawURLEncoding.EncodeToString(pw)
 	return password, nil
+}
+
+// Seed the global math/rand with crypto strong data
+//
+// This doesn't make it OK to use math/rand in crypto sensitive
+// environments - don't do that! However it does help to mitigate the
+// problem if that happens accidentally. This would have helped with
+// CVE-2020-28924 - #4783
+func Seed() error {
+	var seed int64
+	err := binary.Read(cryptorand.Reader, binary.LittleEndian, &seed)
+	if err != nil {
+		return errors.Wrap(err, "failed to read random seed")
+	}
+	mathrand.Seed(seed)
+	return nil
 }
