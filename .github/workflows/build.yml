@@ -66,6 +66,7 @@ jobs:
             go: '1.15.x'
             gotags: cmount
             build_flags: '-include "^windows/amd64" -cgo'
+            build_args: '-buildmode exe'
             quicktest: true
             racequicktest: true
             deploy: true
@@ -77,6 +78,7 @@ jobs:
           #   goarch: '386'
           #   cgo: '1'
           #   build_flags: '-include "^windows/386" -cgo'
+          #   build_args: '-buildmode exe'
           #   quicktest: true
           #   deploy: true
 
@@ -129,6 +131,7 @@ jobs:
         run: |
           echo 'GOTAGS=${{ matrix.gotags }}' >> $GITHUB_ENV
           echo 'BUILD_FLAGS=${{ matrix.build_flags }}' >> $GITHUB_ENV
+          echo 'BUILD_ARGS=${{ matrix.build_args }}' >> $GITHUB_ENV
           if [[ "${{ matrix.goarch }}" != "" ]]; then echo 'GOARCH=${{ matrix.goarch }}' >> $GITHUB_ENV ; fi
           if [[ "${{ matrix.cgo }}" != "" ]]; then echo 'CGO_ENABLED=${{ matrix.cgo }}' >> $GITHUB_ENV ; fi
 
@@ -144,10 +147,8 @@ jobs:
       - name: Install Libraries on macOS
         shell: bash
         run: |
-          brew untap local/homebrew-openssl  # workaround for https://github.com/actions/virtual-environments/issues/1811
-          brew untap local/homebrew-python2  # workaround for https://github.com/actions/virtual-environments/issues/1811
           brew update
-          brew cask install osxfuse
+          brew install --cask osxfuse
         if: matrix.os == 'macOS-latest'
 
       - name: Install Libraries on Windows

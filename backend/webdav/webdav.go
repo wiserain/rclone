@@ -1129,10 +1129,14 @@ func (o *Object) Storable() bool {
 // Open an object for read
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
 	var resp *http.Response
+	fs.FixRangeOption(options, o.size)
 	opts := rest.Opts{
 		Method:  "GET",
 		Path:    o.filePath(),
 		Options: options,
+		ExtraHeaders: map[string]string{
+			"Depth": "0",
+		},
 	}
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)

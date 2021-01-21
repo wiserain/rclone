@@ -79,6 +79,15 @@ func Reshape(out interface{}, in interface{}) error {
 	return nil
 }
 
+// Copy shallow copies the Params
+func (p Params) Copy() (out Params) {
+	out = make(Params, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
+}
+
 // Get gets a parameter from the input
 //
 // If the parameter isn't found then error will be of type
@@ -112,15 +121,15 @@ func (p Params) GetHTTPRequest() (*http.Request, error) {
 //
 // If the parameter isn't found then error will be of type
 // ErrParamNotFound and the returned value will be nil.
-func (p Params) GetHTTPResponseWriter() (*http.ResponseWriter, error) {
+func (p Params) GetHTTPResponseWriter() (http.ResponseWriter, error) {
 	key := "_response"
 	value, err := p.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	request, ok := value.(*http.ResponseWriter)
+	request, ok := value.(http.ResponseWriter)
 	if !ok {
-		return nil, ErrParamInvalid{errors.Errorf("expecting *http.ResponseWriter value for key %q (was %T)", key, value)}
+		return nil, ErrParamInvalid{errors.Errorf("expecting http.ResponseWriter value for key %q (was %T)", key, value)}
 	}
 	return request, nil
 }
