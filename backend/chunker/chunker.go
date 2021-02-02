@@ -42,7 +42,7 @@ import (
 // used mostly for consistency checks (lazily for performance reasons).
 // Other formats can be developed that use an external meta store
 // free of these limitations, but this needs some support from
-// rclone core (eg. metadata store interfaces).
+// rclone core (e.g. metadata store interfaces).
 //
 // The following types of chunks are supported:
 // data and control, active and temporary.
@@ -97,7 +97,8 @@ var (
 //
 // And still chunker's primary function is to chunk large files
 // rather than serve as a generic metadata container.
-const maxMetadataSize = 255
+const maxMetadataSize = 1023
+const maxMetadataSizeWritten = 255
 
 // Current/highest supported metadata format.
 const metadataVersion = 1
@@ -142,7 +143,7 @@ func init() {
 			Name:     "remote",
 			Required: true,
 			Help: `Remote to chunk/unchunk.
-Normally should contain a ':' and a path, eg "myremote:path/to/dir",
+Normally should contain a ':' and a path, e.g. "myremote:path/to/dir",
 "myremote:bucket" or maybe "myremote:" (not recommended).`,
 		}, {
 			Name:     "chunk_size",
@@ -152,6 +153,7 @@ Normally should contain a ':' and a path, eg "myremote:path/to/dir",
 		}, {
 			Name:     "name_format",
 			Advanced: true,
+			Hide:     fs.OptionHideCommandLine,
 			Default:  `*.rclone_chunk.###`,
 			Help: `String format of chunk file names.
 The two placeholders are: base file name (*) and chunk number (#...).
@@ -162,12 +164,14 @@ Possible chunk files are ignored if their name does not match given format.`,
 		}, {
 			Name:     "start_from",
 			Advanced: true,
+			Hide:     fs.OptionHideCommandLine,
 			Default:  1,
 			Help: `Minimum valid chunk number. Usually 0 or 1.
 By default chunk numbers start from 1.`,
 		}, {
 			Name:     "meta_format",
 			Advanced: true,
+			Hide:     fs.OptionHideCommandLine,
 			Default:  "simplejson",
 			Help: `Format of the metadata object or "none". By default "simplejson".
 Metadata is a small JSON file named after the composite file.`,
@@ -225,7 +229,7 @@ It has the following fields: ver, size, nchunks, md5, sha1.`,
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, rpath string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, rpath string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -250,12 +254,12 @@ func NewFs(name, rpath string, m configmap.Mapper) (fs.Fs, error) {
 	}
 	// Look for a file first
 	remotePath := fspath.JoinRootPath(basePath, rpath)
-	baseFs, err := cache.Get(baseName + remotePath)
+	baseFs, err := cache.Get(ctx, baseName+remotePath)
 	if err != fs.ErrorIsFile && err != nil {
 		return nil, errors.Wrapf(err, "failed to make remote %q to wrap", baseName+remotePath)
 	}
 	if !operations.CanServerSideMove(baseFs) {
-		return nil, errors.New("can't use chunker on a backend which doesn't support server side move or copy")
+		return nil, errors.New("can't use chunker on a backend which doesn't support server-side move or copy")
 	}
 
 	f := &Fs{
@@ -278,7 +282,7 @@ func NewFs(name, rpath string, m configmap.Mapper) (fs.Fs, error) {
 	// (yet can't satisfy fstest.CheckListing, will ignore)
 	if err == nil && !f.useMeta && strings.Contains(rpath, "/") {
 		firstChunkPath := f.makeChunkName(remotePath, 0, "", "")
-		_, testErr := cache.Get(baseName + firstChunkPath)
+		_, testErr := cache.Get(ctx, baseName+firstChunkPath)
 		if testErr == fs.ErrorIsFile {
 			err = testErr
 		}
@@ -291,12 +295,14 @@ func NewFs(name, rpath string, m configmap.Mapper) (fs.Fs, error) {
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		DuplicateFiles:          true,
-		ReadMimeType:            true,
+		ReadMimeType:            false, // Object.MimeType not supported
 		WriteMimeType:           true,
 		BucketBased:             true,
 		CanHaveEmptyDirectories: true,
 		ServerSideAcrossConfigs: true,
-	}).Fill(f).Mask(baseFs).WrapsFs(f, baseFs)
+	}).Fill(ctx, f).Mask(ctx, baseFs).WrapsFs(f, baseFs)
+
+	f.features.Disable("ListR") // Recursive listing may cause chunker skip files
 
 	f.features.Disable("ListR") // Recursive listing may cause chunker skip files
 
@@ -466,7 +472,7 @@ func (f *Fs) setChunkNameFormat(pattern string) error {
 // filePath can be name, relative or absolute path of main file.
 //
 // chunkNo must be a zero based index of data chunk.
-// Negative chunkNo eg. -1 indicates a control chunk.
+// Negative chunkNo e.g. -1 indicates a control chunk.
 // ctrlType is type of control chunk (must be valid).
 // ctrlType must be "" for data chunks.
 //
@@ -725,6 +731,9 @@ func (f *Fs) processEntries(ctx context.Context, origEntries fs.DirEntries, dirP
 					fs.Infof(f, "ignore non-data chunk %q", remote)
 				}
 				// need to read metadata to ensure actual object type
+				// no need to read if metaobject is too big or absent,
+				// use the fact that before calling validate()
+				// the `size` field caches metaobject size, if any
 				if f.useMeta && mainObject != nil && mainObject.size <= maxMetadataSize {
 					mainObject.unsure = true
 				}
@@ -802,9 +811,10 @@ func (f *Fs) scanObject(ctx context.Context, remote string, quickScan bool) (fs.
 	}
 
 	var (
-		o       *Object
-		baseObj fs.Object
-		err     error
+		o        *Object
+		baseObj  fs.Object
+		err      error
+		sameMain bool
 	)
 
 	if f.useMeta {
@@ -818,6 +828,7 @@ func (f *Fs) scanObject(ctx context.Context, remote string, quickScan bool) (fs.
 		// as a hard limit. Anything larger than that is treated as a
 		// non-chunked file without even checking its contents, so it's
 		// paramount to prevent metadata from exceeding the maximum size.
+		// Anything smaller is additionally checked for format.
 		o = f.newObject("", baseObj, nil)
 		if o.size > maxMetadataSize {
 			return o, nil
@@ -847,18 +858,27 @@ func (f *Fs) scanObject(ctx context.Context, remote string, quickScan bool) (fs.
 		return nil, errors.Wrap(err, "can't detect composite file")
 	}
 
+	caseInsensitive := f.features.CaseInsensitive
 	for _, dirOrObject := range entries {
 		entry, ok := dirOrObject.(fs.Object)
 		if !ok {
 			continue
 		}
 		entryRemote := entry.Remote()
-		if !strings.Contains(entryRemote, remote) {
+		if !caseInsensitive && !strings.Contains(entryRemote, remote) {
 			continue // bypass regexp to save cpu
 		}
 		mainRemote, chunkNo, ctrlType, xactID := f.parseChunkName(entryRemote)
-		if mainRemote == "" || mainRemote != remote {
-			continue // skip non-conforming chunks
+		if mainRemote == "" {
+			continue // skip non-chunks
+		}
+		if caseInsensitive {
+			sameMain = strings.EqualFold(mainRemote, remote)
+		} else {
+			sameMain = mainRemote == remote
+		}
+		if !sameMain {
+			continue // skip alien chunks
 		}
 		if ctrlType != "" || xactID != "" {
 			if f.useMeta {
@@ -906,11 +926,22 @@ func (f *Fs) scanObject(ctx context.Context, remote string, quickScan bool) (fs.
 	return o, nil
 }
 
+// readMetadata reads composite object metadata and caches results,
+// in case of critical errors metadata is not cached.
+// Returns ErrMetaUnknown if an unsupported metadata format is detected.
+// If object is not chunked but marked by List or NewObject for recheck,
+// readMetadata will attempt to parse object as composite with fallback
+// to non-chunked representation if the attempt fails.
 func (o *Object) readMetadata(ctx context.Context) error {
+	// return quickly if metadata is absent or has been already cached
+	if !o.f.useMeta {
+		o.isFull = true
+	}
 	if o.isFull {
 		return nil
 	}
-	if !o.f.useMeta || (!o.isComposite() && !o.unsure) {
+	if !o.isComposite() && !o.unsure {
+		// this for sure is a non-chunked standalone file
 		o.isFull = true
 		return nil
 	}
@@ -928,6 +959,7 @@ func (o *Object) readMetadata(ctx context.Context) error {
 		return ErrMetaTooBig
 	}
 
+	// size is within limits, perform consistency checks
 	reader, err := metaObject.Open(ctx)
 	if err != nil {
 		return err
@@ -965,7 +997,7 @@ func (o *Object) readMetadata(ctx context.Context) error {
 		o.sha1 = metaInfo.sha1
 	}
 
-	o.isFull = true
+	o.isFull = true // cache results
 	return nil
 }
 
@@ -974,11 +1006,14 @@ func (f *Fs) put(
 	ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options []fs.OpenOption,
 	basePut putFn, action string, target fs.Object) (obj fs.Object, err error) {
 
+	// Perform consistency checks
 	if err := f.forbidChunk(src, remote); err != nil {
 		return nil, errors.Wrap(err, action+" refused")
 	}
 	if target == nil {
 		// Get target object with a quick directory scan
+		// skip metadata check if target object does not exist.
+		// ignore not-chunked objects, skip chunk size checks.
 		if obj, err := f.scanObject(ctx, remote, true); err == nil {
 			target = obj
 		}
@@ -991,6 +1026,7 @@ func (f *Fs) put(
 		}
 	}
 
+	// Prepare to upload
 	c := f.newChunkingReader(src)
 	wrapIn := c.wrapStream(ctx, in, src)
 
@@ -1061,7 +1097,7 @@ func (f *Fs) put(
 		}
 
 		// Wrapped remote may or may not have seen EOF from chunking reader,
-		// eg. the box multi-uploader reads exactly the chunk size specified
+		// e.g. the box multi-uploader reads exactly the chunk size specified
 		// and skips the "EOF" read. Hence, switch to next limit here.
 		if !(c.chunkLimit == 0 || c.chunkLimit == c.chunkSize || c.sizeTotal == -1 || c.done) {
 			silentlyRemove(ctx, chunk)
@@ -1197,6 +1233,12 @@ func (c *chunkingReader) wrapStream(ctx context.Context, in io.Reader, src fs.Ob
 
 	switch {
 	case c.fs.useMD5:
+		srcObj := fs.UnWrapObjectInfo(src)
+		if srcObj != nil && srcObj.Fs().Features().SlowHash {
+			fs.Debugf(src, "skip slow MD5 on source file, hashing in-transit")
+			c.hasher = md5.New()
+			break
+		}
 		if c.md5, _ = src.Hash(ctx, hash.MD5); c.md5 == "" {
 			if c.fs.hashFallback {
 				c.sha1, _ = src.Hash(ctx, hash.SHA1)
@@ -1205,6 +1247,12 @@ func (c *chunkingReader) wrapStream(ctx context.Context, in io.Reader, src fs.Ob
 			}
 		}
 	case c.fs.useSHA1:
+		srcObj := fs.UnWrapObjectInfo(src)
+		if srcObj != nil && srcObj.Fs().Features().SlowHash {
+			fs.Debugf(src, "skip slow SHA1 on source file, hashing in-transit")
+			c.hasher = sha1.New()
+			break
+		}
 		if c.sha1, _ = src.Hash(ctx, hash.SHA1); c.sha1 == "" {
 			if c.fs.hashFallback {
 				c.md5, _ = src.Hash(ctx, hash.MD5)
@@ -1238,7 +1286,7 @@ func (c *chunkingReader) Read(buf []byte) (bytesRead int, err error) {
 	if c.chunkLimit <= 0 {
 		// Chunk complete - switch to next one.
 		// Note #1:
-		// We might not get here because some remotes (eg. box multi-uploader)
+		// We might not get here because some remotes (e.g. box multi-uploader)
 		// read the specified size exactly and skip the concluding EOF Read.
 		// Then a check in the put loop will kick in.
 		// Note #2:
@@ -1277,7 +1325,7 @@ func (c *chunkingReader) accountBytes(bytesRead int64) {
 	}
 }
 
-// dummyRead updates accounting, hashsums etc by simulating reads
+// dummyRead updates accounting, hashsums, etc. by simulating reads
 func (c *chunkingReader) dummyRead(in io.Reader, size int64) error {
 	if c.hasher == nil && c.readCount+size > maxMetadataSize {
 		c.accountBytes(size)
@@ -1429,7 +1477,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 // However, if rclone dies unexpectedly, it can leave hidden temporary
 // chunks, which cannot be discovered using the `list` command.
 // Remove does not try to search for such chunks or to delete them.
-// Sometimes this can lead to strange results eg. when `list` shows that
+// Sometimes this can lead to strange results e.g. when `list` shows that
 // directory is empty but `rmdir` refuses to remove it because on the
 // level of wrapped remote it's actually *not* empty.
 // As a workaround users can use `purge` to forcibly remove it.
@@ -1581,6 +1629,8 @@ func (f *Fs) okForServerSide(ctx context.Context, src fs.Object, opName string) 
 		diff = "chunk sizes"
 	case f.opt.NameFormat != obj.f.opt.NameFormat:
 		diff = "chunk name formats"
+	case f.opt.StartFrom != obj.f.opt.StartFrom:
+		diff = "chunk numbering"
 	case f.opt.MetaFormat != obj.f.opt.MetaFormat:
 		diff = "meta formats"
 	}
@@ -1624,7 +1674,7 @@ func (f *Fs) okForServerSide(ctx context.Context, src fs.Object, opName string) 
 	return
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -1645,7 +1695,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	return f.copyOrMove(ctx, obj, remote, baseCopy, md5, sha1, "copy")
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -1690,7 +1740,7 @@ func (f *Fs) baseMove(ctx context.Context, src fs.Object, remote string, delMode
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1770,6 +1820,16 @@ func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryT
 	do(ctx, wrappedNotifyFunc, pollIntervalChan)
 }
 
+// Shutdown the backend, closing any background tasks and any
+// cached connections.
+func (f *Fs) Shutdown(ctx context.Context) error {
+	do := f.base.Features().Shutdown
+	if do == nil {
+		return nil
+	}
+	return do(ctx)
+}
+
 // Object represents a composite file wrapping one or more data chunks
 type Object struct {
 	remote string
@@ -1798,6 +1858,9 @@ func (o *Object) addChunk(chunk fs.Object, chunkNo int) error {
 		newChunks := make([]fs.Object, (chunkNo + 1), (chunkNo+1)*2)
 		copy(newChunks, o.chunks)
 		o.chunks = newChunks
+	}
+	if o.chunks[chunkNo] != nil {
+		return fmt.Errorf("duplicate chunk number %d", chunkNo+o.f.opt.StartFrom)
 	}
 	o.chunks[chunkNo] = chunk
 	return nil
@@ -2226,15 +2289,17 @@ func marshalSimpleJSON(ctx context.Context, size int64, nChunks int, md5, sha1 s
 		SHA1: sha1,
 	}
 	data, err := json.Marshal(&metadata)
-	if err == nil && data != nil && len(data) >= maxMetadataSize {
+	if err == nil && data != nil && len(data) >= maxMetadataSizeWritten {
 		// be a nitpicker, never produce something you can't consume
 		return nil, errors.New("metadata can't be this big, please report to rclone developers")
 	}
 	return data, err
 }
 
-// unmarshalSimpleJSON
+// unmarshalSimpleJSON parses metadata.
 //
+// In case of errors returns a flag telling whether input has been
+// produced by incompatible version of rclone vs wasn't metadata at all.
 // Only metadata format version 1 is supported atm.
 // Future releases will transparently migrate older metadata objects.
 // New format will have a higher version number and cannot be correctly
@@ -2244,7 +2309,7 @@ func marshalSimpleJSON(ctx context.Context, size int64, nChunks int, md5, sha1 s
 func unmarshalSimpleJSON(ctx context.Context, metaObject fs.Object, data []byte) (info *ObjectInfo, madeByChunker bool, err error) {
 	// Be strict about JSON format
 	// to reduce possibility that a random small file resembles metadata.
-	if data != nil && len(data) > maxMetadataSize {
+	if data != nil && len(data) > maxMetadataSizeWritten {
 		return nil, false, ErrMetaTooBig
 	}
 	if data == nil || len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
@@ -2346,6 +2411,7 @@ var (
 	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.Wrapper         = (*Fs)(nil)
 	_ fs.ChangeNotifier  = (*Fs)(nil)
+	_ fs.Shutdowner      = (*Fs)(nil)
 	_ fs.ObjectInfo      = (*ObjectInfo)(nil)
 	_ fs.Object          = (*Object)(nil)
 	_ fs.ObjectUnWrapper = (*Object)(nil)

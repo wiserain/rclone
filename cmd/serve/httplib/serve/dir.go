@@ -132,7 +132,7 @@ func Error(what interface{}, w http.ResponseWriter, text string, err error) {
 	}
 }
 
-// ProcessQueryParams takes and sorts/orders based on the request sort/order parameters and default is namedirfist/asc
+// ProcessQueryParams takes and sorts/orders based on the request sort/order parameters and default is namedirfirst/asc
 func (d *Directory) ProcessQueryParams(sortParm string, orderParm string) *Directory {
 	d.Sort = sortParm
 	d.Order = orderParm
@@ -225,7 +225,7 @@ const (
 func (d *Directory) Serve(w http.ResponseWriter, r *http.Request) {
 	// Account the transfer
 	tr := accounting.Stats(r.Context()).NewTransferRemoteSize(d.DirRemote, -1)
-	defer tr.Done(nil)
+	defer tr.Done(r.Context(), nil)
 
 	fs.Infof(d.DirRemote, "%s: Serving directory", r.RemoteAddr)
 

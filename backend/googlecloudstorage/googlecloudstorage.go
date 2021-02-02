@@ -76,14 +76,14 @@ func init() {
 		Prefix:      "gcs",
 		Description: "Google Cloud Storage (this is not Google Drive)",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
 			saFile, _ := m.Get("service_account_file")
 			saCreds, _ := m.Get("service_account_credentials")
 			anonymous, _ := m.Get("anonymous")
 			if saFile != "" || saCreds != "" || anonymous == "true" {
 				return
 			}
-			err := oauthutil.Config("google cloud storage", name, m, storageConfig, nil)
+			err := oauthutil.Config(ctx, "google cloud storage", name, m, storageConfig, nil)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
@@ -370,12 +370,12 @@ func (o *Object) split() (bucket, bucketPath string) {
 	return o.fs.split(o.remote)
 }
 
-func getServiceAccountClient(credentialsData []byte) (*http.Client, error) {
+func getServiceAccountClient(ctx context.Context, credentialsData []byte) (*http.Client, error) {
 	conf, err := google.JWTConfigFromJSON(credentialsData, storageConfig.Scopes...)
 	if err != nil {
 		return nil, errors.Wrap(err, "error processing credentials")
 	}
-	ctxWithSpecialClient := oauthutil.Context(fshttp.NewClient(fs.Config))
+	ctxWithSpecialClient := oauthutil.Context(ctx, fshttp.NewClient(ctx))
 	return oauth2.NewClient(ctxWithSpecialClient, conf.TokenSource(ctxWithSpecialClient)), nil
 }
 
@@ -386,8 +386,7 @@ func (f *Fs) setRoot(root string) {
 }
 
 // NewFs constructs an Fs from the path, bucket:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.TODO()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	var oAuthClient *http.Client
 
 	// Parse config into Options struct
@@ -412,14 +411,14 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		opt.ServiceAccountCredentials = string(loadedCreds)
 	}
 	if opt.Anonymous {
-		oAuthClient = &http.Client{}
+		oAuthClient = fshttp.NewClient(ctx)
 	} else if opt.ServiceAccountCredentials != "" {
-		oAuthClient, err = getServiceAccountClient([]byte(opt.ServiceAccountCredentials))
+		oAuthClient, err = getServiceAccountClient(ctx, []byte(opt.ServiceAccountCredentials))
 		if err != nil {
 			return nil, errors.Wrap(err, "failed configuring Google Cloud Storage Service Account")
 		}
 	} else {
-		oAuthClient, _, err = oauthutil.NewClient(name, m, storageConfig)
+		oAuthClient, _, err = oauthutil.NewClient(ctx, name, m, storageConfig)
 		if err != nil {
 			ctx := context.Background()
 			oAuthClient, err = google.DefaultClient(ctx, storage.DevstorageFullControlScope)
@@ -433,7 +432,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		name:  name,
 		root:  root,
 		opt:   *opt,
-		pacer: fs.NewPacer(pacer.NewGoogleDrive(pacer.MinSleep(minSleep))),
+		pacer: fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(minSleep))),
 		cache: bucket.NewCache(),
 	}
 	f.setRoot(root)
@@ -442,7 +441,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		WriteMimeType:     true,
 		BucketBased:       true,
 		BucketBasedRootOK: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 
 	// Create a new authorized Drive client.
 	f.client = oAuthClient
@@ -565,7 +564,7 @@ func (f *Fs) list(ctx context.Context, bucket, directory, prefix string, addBuck
 				remote = path.Join(bucket, remote)
 			}
 			// is this a directory marker?
-			if isDirectory && object.Size == 0 {
+			if isDirectory {
 				continue // skip directory marker
 			}
 			err = fn(remote, object, false)
@@ -813,7 +812,7 @@ func (f *Fs) Precision() time.Duration {
 	return time.Nanosecond
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -1092,6 +1091,8 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 			object.ContentLanguage = value
 		case "content-type":
 			object.ContentType = value
+		case "x-goog-storage-class":
+			object.StorageClass = value
 		default:
 			const googMetaPrefix = "x-goog-meta-"
 			if strings.HasPrefix(lowerKey, googMetaPrefix) {

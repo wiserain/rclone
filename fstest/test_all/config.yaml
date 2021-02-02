@@ -85,11 +85,28 @@ backends:
    fastlist: true
    maxfile:  1k
  ## end chunker
+ ## begin compress
+ - backend:  "compress"
+   remote:   "TestCompress:"
+   fastlist: false
+ - backend:  "compress"
+   remote:   "TestCompressSwift:"
+   fastlist: false
+ - backend:  "compress"
+   remote:   "TestCompressDrive:"
+   fastlist: false
+ - backend:  "compress"
+   remote:   "TestCompressS3:"
+   fastlist: false
+## end compress
  - backend:  "drive"
    remote:   "TestDrive:"
    fastlist: true
  - backend:  "dropbox"
    remote:   "TestDropbox:"
+   fastlist: false
+ - backend:  "filefabric"
+   remote:   "TestFileFabric:"
    fastlist: false
  - backend:  "googlecloudstorage"
    remote:   "TestGoogleCloudStorage:"
@@ -109,6 +126,12 @@ backends:
    fastlist: true
  - backend:  "onedrive"
    remote:   "TestOneDrive:"
+   fastlist: false
+ - backend:  "onedrive"
+   remote:   "TestOneDriveBusiness:"
+   fastlist: false
+ - backend:  "onedrive"
+   remote:   "TestOneDriveCn:"
    fastlist: false
  - backend:  "s3"
    remote:   "TestS3:"
@@ -288,3 +311,11 @@ backends:
  - backend:  "tardigrade"
    remote:   "TestTardigrade:"
    fastlist: true
+ - backend:  "zoho"
+   remote:   "TestZoho:"
+   fastlist: false
+ - backend: "hdfs"
+   remote: "TestHdfs:"
+   fastlist: false
+   ignore:
+     - TestSyncUTFNorm

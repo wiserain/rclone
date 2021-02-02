@@ -8,7 +8,7 @@ description: "Rclone docs for Google drive"
 
 Paths are specified as `drive:path`
 
-Drive paths may be as deep as required, eg `drive:directory/subdirectory`.
+Drive paths may be as deep as required, e.g. `drive:directory/subdirectory`.
 
 The initial setup for drive involves getting a token from Google drive
 which you need to do in your browser.  `rclone config` walks you
@@ -397,7 +397,7 @@ be in multiple folders at once](https://cloud.google.com/blog/products/g-suite/s
 
 Shortcuts are files that link to other files on Google Drive somewhat
 like a symlink in unix, except they point to the underlying file data
-(eg the inode in unix terms) so they don't break if the source is
+(e.g. the inode in unix terms) so they don't break if the source is
 renamed or moved about.
 
 Be default rclone treats these as follows.
@@ -407,8 +407,8 @@ For shortcuts pointing to files:
 - When listing a file shortcut appears as the destination file.
 - When downloading the contents of the destination file is downloaded.
 - When updating shortcut file with a non shortcut file, the shortcut is removed then a new file is uploaded in place of the shortcut.
-- When server side moving (renaming) the shortcut is renamed, not the destination file.
-- When server side copying the shortcut is copied, not the contents of the shortcut.
+- When server-side moving (renaming) the shortcut is renamed, not the destination file.
+- When server-side copying the shortcut is copied, not the contents of the shortcut.
 - When deleting the shortcut is deleted not the linked file.
 - When setting the modification time, the modification time of the linked file will be set.
 
@@ -417,8 +417,8 @@ For shortcuts pointing to folders:
 - When listing the shortcut appears as a folder and that folder will contain the contents of the linked folder appear (including any sub folders)
 - When downloading the contents of the linked folder and sub contents are downloaded
 - When uploading to a shortcut folder the file will be placed in the linked folder
-- When server side moving (renaming) the shortcut is renamed, not the destination folder
-- When server side copying the contents of the linked folder is copied, not the shortcut.
+- When server-side moving (renaming) the shortcut is renamed, not the destination folder
+- When server-side copying the contents of the linked folder is copied, not the shortcut.
 - When deleting with `rclone rmdir` or `rclone purge` the shortcut is deleted not the linked folder.
 - **NB** When deleting with `rclone remove` or `rclone mount` the contents of the linked folder will be deleted.
 
@@ -490,7 +490,7 @@ Here are some examples for allowed and prohibited conversions.
 
 This limitation can be disabled by specifying `--drive-allow-import-name-change`.
 When using this flag, rclone can convert multiple files types resulting
-in the same document type at once, eg with `--drive-import-formats docx,odt,txt`,
+in the same document type at once, e.g. with `--drive-import-formats docx,odt,txt`,
 all files having these extension would result in a document represented as a docx file.
 This brings the additional risk of overwriting a document, if multiple files
 have the same stem. Many rclone operations will not handle this name change
@@ -739,8 +739,8 @@ Instructs rclone to operate on your "Shared with me" folder (where
 Google Drive lets you access the files and folders others have shared
 with you).
 
-This works both with the "list" (lsd, lsl, etc) and the "copy"
-commands (copy, sync, etc), and with all other commands too.
+This works both with the "list" (lsd, lsl, etc.) and the "copy"
+commands (copy, sync, etc.), and with all other commands too.
 
 - Config:      shared_with_me
 - Env Var:     RCLONE_DRIVE_SHARED_WITH_ME
@@ -958,9 +958,9 @@ Number of API calls to allow without sleeping.
 
 #### --drive-server-side-across-configs
 
-Allow server side operations (eg copy) to work across different drive configs.
+Allow server-side operations (e.g. copy) to work across different drive configs.
 
-This can be useful if you wish to do a server side copy between two
+This can be useful if you wish to do a server-side copy between two
 different Google drives.  Note that this isn't enabled by default
 because it isn't easy to tell if it will work between any two
 configurations.
@@ -1006,6 +1006,25 @@ See: https://github.com/rclone/rclone/issues/3857
 
 - Config:      stop_on_upload_limit
 - Env Var:     RCLONE_DRIVE_STOP_ON_UPLOAD_LIMIT
+- Type:        bool
+- Default:     false
+
+#### --drive-stop-on-download-limit
+
+Make download limit errors be fatal
+
+At the time of writing it is only possible to download 10TB of data from
+Google Drive a day (this is an undocumented limit). When this limit is
+reached Google Drive produces a slightly different error message. When
+this flag is set it causes these errors to be fatal.  These will stop
+the in-progress sync.
+
+Note that this detection is relying on error message strings which
+Google don't document so it may break in the future.
+
+
+- Config:      stop_on_download_limit
+- Env Var:     RCLONE_DRIVE_STOP_ON_DOWNLOAD_LIMIT
 - Type:        bool
 - Default:     false
 
@@ -1173,6 +1192,33 @@ Result:
     }
 
 
+#### copyid
+
+Copy files by ID
+
+    rclone backend copyid remote: [options] [<arguments>+]
+
+This command copies files by ID
+
+Usage:
+
+    rclone backend copyid drive: ID path
+    rclone backend copyid drive: ID1 path1 ID2 path2
+
+It copies the drive file with ID given to the path (an rclone path which
+will be passed internally to rclone copyto). The ID and path pairs can be
+repeated.
+
+The path should end with a / to indicate copy the file as named to
+this directory. If it doesn't end with a / then the last path
+component will be used as the file name.
+
+If the destination is a drive backend then server-side copying will be
+attempted if possible.
+
+Use the -i flag to see what would be copied before copying.
+
+
 {{< rem autogenerated options stop >}}
 
 ### Limitations ###
@@ -1184,13 +1230,13 @@ small files can take a long time.
 
 Server side copies are also subject to a separate rate limit. If you
 see User rate limit exceeded errors, wait at least 24 hours and retry.
-You can disable server side copies with `--disable copy` to download
+You can disable server-side copies with `--disable copy` to download
 and upload the files if you prefer.
 
 #### Limitations of Google Docs ####
 
 Google docs will appear as size -1 in `rclone ls` and as size 0 in
-anything which uses the VFS layer, eg `rclone mount`, `rclone serve`.
+anything which uses the VFS layer, e.g. `rclone mount`, `rclone serve`.
 
 This is because rclone can't find out the size of the Google docs
 without downloading them.

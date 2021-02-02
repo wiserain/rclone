@@ -5,8 +5,11 @@ description: "Remote controlling rclone with its API"
 
 # Remote controlling rclone with its API
 
-If rclone is run with the `--rc` flag then it starts an http server
+If rclone is run with the `--rc` flag then it starts an HTTP server
 which can be used to remote control rclone using its API.
+
+You can either use the [rclone rc](#api-rc) command to access the API
+or [use HTTP directly](#api-http).
 
 If you just want to run a remote control then see the [rcd command](/commands/rclone_rcd/).
 
@@ -147,7 +150,7 @@ use these methods.  The alternative is to use `--rc-user` and
 
 Default Off.
 
-## Accessing the remote control via the rclone rc command
+## Accessing the remote control via the rclone rc command {#api-rc}
 
 Rclone itself implements the remote control protocol in its `rclone
 rc` command.
@@ -218,7 +221,7 @@ background.  The `job/status` call can be used to get information of
 the background job.  The job can be queried for up to 1 minute after
 it has finished.
 
-It is recommended that potentially long running jobs, eg `sync/sync`,
+It is recommended that potentially long running jobs, e.g. `sync/sync`,
 `sync/copy`, `sync/move`, `operations/purge` are run with the `_async`
 flag to avoid any potential problems with the HTTP request and
 response timing out.
@@ -298,7 +301,7 @@ $ rclone rc --json '{ "group": "job/1" }' core/stats
 This takes the following parameters
 
 - command - a string with the command name
-- fs - a remote name string eg "drive:"
+- fs - a remote name string e.g. "drive:"
 - arg - a list of arguments for the backend command
 - opt - a map of string to string of options
 
@@ -371,7 +374,7 @@ Some valid examples are:
 "0:10" -> the first ten chunks
 
 Any parameter with a key that starts with "file" can be used to
-specify files to fetch, eg
+specify files to fetch, e.g.
 
     rclone rc cache/fetch chunks=0 file=hello file2=home/goodbye
 
@@ -474,18 +477,30 @@ See the [config update command](/commands/rclone_config_update/) command for mor
 
 ### core/bwlimit: Set the bandwidth limit. {#core-bwlimit}
 
-This sets the bandwidth limit to that passed in.
+This sets the bandwidth limit to the string passed in. This should be
+a single bandwidth limit entry or a pair of upload:download bandwidth.
 
 Eg
 
     rclone rc core/bwlimit rate=off
     {
         "bytesPerSecond": -1,
+        "bytesPerSecondTx": -1,
+        "bytesPerSecondRx": -1,
         "rate": "off"
     }
     rclone rc core/bwlimit rate=1M
     {
         "bytesPerSecond": 1048576,
+        "bytesPerSecondTx": 1048576,
+        "bytesPerSecondRx": 1048576,
+        "rate": "1M"
+    }
+    rclone rc core/bwlimit rate=1M:100k
+    {
+        "bytesPerSecond": 1048576,
+        "bytesPerSecondTx": 1048576,
+        "bytesPerSecondRx": 131072,
         "rate": "1M"
     }
 
@@ -495,6 +510,8 @@ If the rate parameter is not supplied then the bandwidth is queried
     rclone rc core/bwlimit
     {
         "bytesPerSecond": 1048576,
+        "bytesPerSecondTx": 1048576,
+        "bytesPerSecondRx": 1048576,
         "rate": "1M"
     }
 
@@ -700,7 +717,7 @@ Returns the following values:
 
 This shows the current version of go and the go runtime
 
-- version - rclone version, eg "v1.53.0"
+- version - rclone version, e.g. "v1.53.0"
 - decomposed - version number as [major, minor, patch]
 - isGit - boolean - true if this was compiled from the git version
 - isBeta - boolean - true if this is a beta version
@@ -764,11 +781,11 @@ Results
 
 - finished - boolean
 - duration - time in seconds that the job ran for
-- endTime - time the job finished (eg "2018-10-26T18:50:20.528746884+01:00")
+- endTime - time the job finished (e.g. "2018-10-26T18:50:20.528746884+01:00")
 - error - error from the job or empty string for no error
 - finished - boolean whether the job has finished or not
 - id - as passed in above
-- startTime - time the job started (eg "2018-10-26T18:50:20.528336039+01:00")
+- startTime - time the job started (e.g. "2018-10-26T18:50:20.528336039+01:00")
 - success - boolean - true for success false otherwise
 - output - output of the job as would have been returned if called synchronously
 - progress - output of the progress related to the underlying job
@@ -870,7 +887,7 @@ Eg
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
+- fs - a remote name string e.g. "drive:"
 
 The result is as returned from rclone about --json
 
@@ -882,7 +899,7 @@ See the [about command](/commands/rclone_size/) command for more information on 
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
+- fs - a remote name string e.g. "drive:"
 
 See the [cleanup command](/commands/rclone_cleanup/) command for more information on the above.
 
@@ -892,10 +909,10 @@ See the [cleanup command](/commands/rclone_cleanup/) command for more informatio
 
 This takes the following parameters
 
-- srcFs - a remote name string eg "drive:" for the source
-- srcRemote - a path within that remote eg "file.txt" for the source
-- dstFs - a remote name string eg "drive2:" for the destination
-- dstRemote - a path within that remote eg "file2.txt" for the destination
+- srcFs - a remote name string e.g. "drive:" for the source
+- srcRemote - a path within that remote e.g. "file.txt" for the source
+- dstFs - a remote name string e.g. "drive2:" for the destination
+- dstRemote - a path within that remote e.g. "file2.txt" for the destination
 
 **Authentication is required for this call.**
 
@@ -903,8 +920,8 @@ This takes the following parameters
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 - url - string, URL to read from
  - autoFilename - boolean, set to true to retrieve destination file name from url
 See the [copyurl command](/commands/rclone_copyurl/) command for more information on the above.
@@ -915,7 +932,7 @@ See the [copyurl command](/commands/rclone_copyurl/) command for more informatio
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
+- fs - a remote name string e.g. "drive:"
 
 See the [delete command](/commands/rclone_delete/) command for more information on the above.
 
@@ -925,8 +942,8 @@ See the [delete command](/commands/rclone_delete/) command for more information 
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 
 See the [deletefile command](/commands/rclone_deletefile/) command for more information on the above.
 
@@ -936,7 +953,7 @@ See the [deletefile command](/commands/rclone_deletefile/) command for more info
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
+- fs - a remote name string e.g. "drive:"
 
 This returns info about the remote passed in;
 
@@ -993,8 +1010,8 @@ This command does not have a command line equivalent so use this instead:
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 - opt - a dictionary of options to control the listing (optional)
     - recurse - If set recurse directories
     - noModTime - If set return modification time
@@ -1015,8 +1032,8 @@ See the [lsjson command](/commands/rclone_lsjson/) for more information on the a
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 
 See the [mkdir command](/commands/rclone_mkdir/) command for more information on the above.
 
@@ -1026,10 +1043,10 @@ See the [mkdir command](/commands/rclone_mkdir/) command for more information on
 
 This takes the following parameters
 
-- srcFs - a remote name string eg "drive:" for the source
-- srcRemote - a path within that remote eg "file.txt" for the source
-- dstFs - a remote name string eg "drive2:" for the destination
-- dstRemote - a path within that remote eg "file2.txt" for the destination
+- srcFs - a remote name string e.g. "drive:" for the source
+- srcRemote - a path within that remote e.g. "file.txt" for the source
+- dstFs - a remote name string e.g. "drive2:" for the destination
+- dstRemote - a path within that remote e.g. "file2.txt" for the destination
 
 **Authentication is required for this call.**
 
@@ -1037,10 +1054,10 @@ This takes the following parameters
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 - unlink - boolean - if set removes the link rather than adding it (optional)
-- expire - string - the expiry time of the link eg "1d" (optional)
+- expire - string - the expiry time of the link e.g. "1d" (optional)
 
 Returns
 
@@ -1054,8 +1071,8 @@ See the [link command](/commands/rclone_link/) command for more information on t
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 
 See the [purge command](/commands/rclone_purge/) command for more information on the above.
 
@@ -1065,8 +1082,8 @@ See the [purge command](/commands/rclone_purge/) command for more information on
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 
 See the [rmdir command](/commands/rclone_rmdir/) command for more information on the above.
 
@@ -1076,8 +1093,8 @@ See the [rmdir command](/commands/rclone_rmdir/) command for more information on
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 - leaveRoot - boolean, set to true not to delete the root
 
 See the [rmdirs command](/commands/rclone_rmdirs/) command for more information on the above.
@@ -1088,7 +1105,7 @@ See the [rmdirs command](/commands/rclone_rmdirs/) command for more information 
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:path/to/dir"
+- fs - a remote name string e.g. "drive:path/to/dir"
 
 Returns
 
@@ -1103,8 +1120,8 @@ See the [size command](/commands/rclone_size/) command for more information on t
 
 This takes the following parameters
 
-- fs - a remote name string eg "drive:"
-- remote - a path within that remote eg "dir"
+- fs - a remote name string e.g. "drive:"
+- remote - a path within that remote e.g. "dir"
 - each part in body represents a file to be uploaded
 See the [uploadfile command](/commands/rclone_uploadfile/) command for more information on the above.
 
@@ -1170,8 +1187,8 @@ This shows all possible plugins by a mime type
 
 This takes the following parameters
 
-- type: supported mime type by a loaded plugin eg (video/mp4, audio/mp3)
-- pluginType: filter plugins based on their type eg (DASHBOARD, FILE_HANDLER, TERMINAL) 
+- type: supported mime type by a loaded plugin e.g. (video/mp4, audio/mp3)
+- pluginType: filter plugins based on their type e.g. (DASHBOARD, FILE_HANDLER, TERMINAL) 
 
 and returns
 
@@ -1269,8 +1286,8 @@ check that parameter passing is working properly.
 
 This takes the following parameters
 
-- srcFs - a remote name string eg "drive:src" for the source
-- dstFs - a remote name string eg "drive:dst" for the destination
+- srcFs - a remote name string e.g. "drive:src" for the source
+- dstFs - a remote name string e.g. "drive:dst" for the destination
 
 
 See the [copy command](/commands/rclone_copy/) command for more information on the above.
@@ -1281,8 +1298,8 @@ See the [copy command](/commands/rclone_copy/) command for more information on t
 
 This takes the following parameters
 
-- srcFs - a remote name string eg "drive:src" for the source
-- dstFs - a remote name string eg "drive:dst" for the destination
+- srcFs - a remote name string e.g. "drive:src" for the source
+- dstFs - a remote name string e.g. "drive:dst" for the destination
 - deleteEmptySrcDirs - delete empty src directories if set
 
 
@@ -1294,8 +1311,8 @@ See the [move command](/commands/rclone_move/) command for more information on t
 
 This takes the following parameters
 
-- srcFs - a remote name string eg "drive:src" for the source
-- dstFs - a remote name string eg "drive:dst" for the destination
+- srcFs - a remote name string e.g. "drive:src" for the source
+- dstFs - a remote name string e.g. "drive:dst" for the destination
 
 
 See the [sync command](/commands/rclone_sync/) command for more information on the above.
@@ -1314,7 +1331,7 @@ directory cache.
 
 Otherwise pass files or dirs in as file=path or dir=path.  Any
 parameter key starting with file will forget that file and any
-starting with dir will forget that dir, eg
+starting with dir will forget that dir, e.g.
 
     rclone rc vfs/forget file=hello file2=goodbye dir=home/junk
  
@@ -1368,7 +1385,7 @@ If no paths are passed in then it will refresh the root directory.
     rclone rc vfs/refresh
 
 Otherwise pass directories in as dir=path. Any parameter key
-starting with dir will refresh that directory, eg
+starting with dir will refresh that directory, e.g.
 
     rclone rc vfs/refresh dir=home/junk dir2=data/misc
 
@@ -1382,7 +1399,7 @@ must be supplied.
 
 {{< rem autogenerated stop >}}
 
-## Accessing the remote control via HTTP
+## Accessing the remote control via HTTP {#api-http}
 
 Rclone implements a simple HTTP based protocol.
 
@@ -1401,9 +1418,9 @@ formatted to be reasonably human readable.
 
 ### Error returns
 
-If an error occurs then there will be an HTTP error status (eg 500)
+If an error occurs then there will be an HTTP error status (e.g. 500)
 and the body of the response will contain a JSON encoded error object,
-eg
+e.g.
 
 ```
 {

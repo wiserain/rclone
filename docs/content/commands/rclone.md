@@ -47,7 +47,7 @@ See the [global flags page](/flags/) for global options not listed here.
 * [rclone cryptcheck](/commands/rclone_cryptcheck/)	 - Cryptcheck checks the integrity of a crypted remote.
 * [rclone cryptdecode](/commands/rclone_cryptdecode/)	 - Cryptdecode returns unencrypted file names.
 * [rclone dedupe](/commands/rclone_dedupe/)	 - Interactively find duplicate filenames and delete/rename them.
-* [rclone delete](/commands/rclone_delete/)	 - Remove the contents of path.
+* [rclone delete](/commands/rclone_delete/)	 - Remove the files in path.
 * [rclone deletefile](/commands/rclone_deletefile/)	 - Remove a single file from remote.
 * [rclone genautocomplete](/commands/rclone_genautocomplete/)	 - Output completion script for a given shell.
 * [rclone gendocs](/commands/rclone_gendocs/)	 - Output markdown docs for rclone to the directory supplied.
@@ -70,7 +70,7 @@ See the [global flags page](/flags/) for global options not listed here.
 * [rclone rc](/commands/rclone_rc/)	 - Run a command against a running rclone.
 * [rclone rcat](/commands/rclone_rcat/)	 - Copies standard input to file on remote.
 * [rclone rcd](/commands/rclone_rcd/)	 - Run rclone listening to remote control commands only.
-* [rclone rmdir](/commands/rclone_rmdir/)	 - Remove the path if empty.
+* [rclone rmdir](/commands/rclone_rmdir/)	 - Remove the empty directory at path.
 * [rclone rmdirs](/commands/rclone_rmdirs/)	 - Remove empty directories under the path.
 * [rclone serve](/commands/rclone_serve/)	 - Serve a remote over a protocol.
 * [rclone settier](/commands/rclone_settier/)	 - Changes storage class/tier of objects in remote.

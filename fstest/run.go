@@ -102,7 +102,7 @@ func newRun() *Run {
 		r.Fatalf("Failed to create temp dir: %v", err)
 	}
 	r.LocalName = filepath.ToSlash(r.LocalName)
-	r.Flocal, err = fs.NewFs(r.LocalName)
+	r.Flocal, err = fs.NewFs(context.Background(), r.LocalName)
 	if err != nil {
 		r.Fatalf("Failed to make %q: %v", r.LocalName, err)
 	}
@@ -173,7 +173,7 @@ func newRunIndividual(t *testing.T, individual bool) *Run {
 	}
 	r.Logf = t.Logf
 	r.Fatalf = t.Fatalf
-	r.Logf("Remote %q, Local %q, Modify Window %q", r.Fremote, r.Flocal, fs.GetModifyWindow(r.Fremote))
+	r.Logf("Remote %q, Local %q, Modify Window %q", r.Fremote, r.Flocal, fs.GetModifyWindow(ctx, r.Fremote))
 	return r
 }
 
@@ -254,7 +254,7 @@ func (r *Run) WriteObjectTo(ctx context.Context, f fs.Fs, remote, content string
 	}
 	r.Mkdir(ctx, f)
 
-	// caclulate all hashes f supports for content
+	// calculate all hashes f supports for content
 	hash, err := hash.NewMultiHasherTypes(f.Hashes())
 	if err != nil {
 		r.Fatalf("Failed to make new multi hasher: %v", err)

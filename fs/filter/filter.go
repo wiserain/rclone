@@ -17,8 +17,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Active is the globally active filter
-var Active = mustNewFilter(nil)
+// This is the globally active filter
+//
+// This is accessed through GetConfig and AddConfig
+var globalConfig = mustNewFilter(nil)
 
 // rule is one filter rule
 type rule struct {
@@ -229,7 +231,7 @@ func NewFilter(opt *Opt) (f *Filter, err error) {
 			return nil, err
 		}
 	}
-	if fs.Config.Dump&fs.DumpFilters != 0 {
+	if fs.GetConfig(context.Background()).Dump&fs.DumpFilters != 0 {
 		fmt.Println("--- start filters ---")
 		fmt.Println(f.DumpFilters())
 		fmt.Println("--- end filters ---")
@@ -540,14 +542,16 @@ var errFilesFromNotSet = errors.New("--files-from not set so can't use Filter.Li
 // MakeListR makes function to return all the files set using --files-from
 func (f *Filter) MakeListR(ctx context.Context, NewObject func(ctx context.Context, remote string) (fs.Object, error)) fs.ListRFn {
 	return func(ctx context.Context, dir string, callback fs.ListRCallback) error {
+		ci := fs.GetConfig(ctx)
 		if !f.HaveFilesFrom() {
 			return errFilesFromNotSet
 		}
 		var (
-			remotes = make(chan string, fs.Config.Checkers)
-			g       errgroup.Group
+			checkers = ci.Checkers
+			remotes  = make(chan string, checkers)
+			g        errgroup.Group
 		)
-		for i := 0; i < fs.Config.Checkers; i++ {
+		for i := 0; i < checkers; i++ {
 			g.Go(func() (err error) {
 				var entries = make(fs.DirEntries, 1)
 				for remote := range remotes {
@@ -588,4 +592,39 @@ func (f *Filter) UsesDirectoryFilters() bool {
 		return false
 	}
 	return true
+}
+
+type configContextKeyType struct{}
+
+// Context key for config
+var configContextKey = configContextKeyType{}
+
+// GetConfig returns the global or context sensitive config
+func GetConfig(ctx context.Context) *Filter {
+	if ctx == nil {
+		return globalConfig
+	}
+	c := ctx.Value(configContextKey)
+	if c == nil {
+		return globalConfig
+	}
+	return c.(*Filter)
+}
+
+// AddConfig returns a mutable config structure based on a shallow
+// copy of that found in ctx and returns a new context with that added
+// to it.
+func AddConfig(ctx context.Context) (context.Context, *Filter) {
+	c := GetConfig(ctx)
+	cCopy := new(Filter)
+	*cCopy = *c
+	newCtx := context.WithValue(ctx, configContextKey, cCopy)
+	return newCtx, cCopy
+}
+
+// ReplaceConfig replaces the filter config in the ctx with the one
+// passed in and returns a new context with that added to it.
+func ReplaceConfig(ctx context.Context, f *Filter) context.Context {
+	newCtx := context.WithValue(ctx, configContextKey, f)
+	return newCtx
 }

@@ -22,8 +22,8 @@ func init() {
 			Title: name + " a directory from source remote to destination remote",
 			Help: `This takes the following parameters
 
-- srcFs - a remote name string eg "drive:src" for the source
-- dstFs - a remote name string eg "drive:dst" for the destination
+- srcFs - a remote name string e.g. "drive:src" for the source
+- dstFs - a remote name string e.g. "drive:dst" for the destination
 ` + moveHelp + `
 
 See the [` + name + ` command](/commands/rclone_` + name + `/) command for more information on the above.`,
@@ -33,11 +33,11 @@ See the [` + name + ` command](/commands/rclone_` + name + `/) command for more 
 
 // Sync/Copy/Move a file
 func rcSyncCopyMove(ctx context.Context, in rc.Params, name string) (out rc.Params, err error) {
-	srcFs, err := rc.GetFsNamed(in, "srcFs")
+	srcFs, err := rc.GetFsNamed(ctx, in, "srcFs")
 	if err != nil {
 		return nil, err
 	}
-	dstFs, err := rc.GetFsNamed(in, "dstFs")
+	dstFs, err := rc.GetFsNamed(ctx, in, "dstFs")
 	if err != nil {
 		return nil, err
 	}

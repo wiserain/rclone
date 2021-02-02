@@ -8,7 +8,7 @@ description: "Rclone docs for Dropbox"
 
 Paths are specified as `remote:path`
 
-Dropbox paths may be as deep as required, eg
+Dropbox paths may be as deep as required, e.g.
 `remote:directory/subdirectory`.
 
 The initial setup for dropbox involves getting a token from Dropbox
@@ -201,6 +201,39 @@ Impersonate this user when using a business account.
 - Env Var:     RCLONE_DROPBOX_IMPERSONATE
 - Type:        string
 - Default:     ""
+
+#### --dropbox-shared-files
+
+Instructs rclone to work on individual shared files.
+
+In this mode rclone's features are extremely limited - only list (ls, lsl, etc.) 
+operations and read operations (e.g. downloading) are supported in this mode.
+All other operations will be disabled.
+
+- Config:      shared_files
+- Env Var:     RCLONE_DROPBOX_SHARED_FILES
+- Type:        bool
+- Default:     false
+
+#### --dropbox-shared-folders
+
+Instructs rclone to work on shared folders.
+			
+When this flag is used with no path only the List operation is supported and 
+all available shared folders will be listed. If you specify a path the first part 
+will be interpreted as the name of shared folder. Rclone will then try to mount this 
+shared to the root namespace. On success shared folder rclone proceeds normally. 
+The shared folder is now pretty much a normal folder and all normal operations 
+are supported. 
+
+Note that we don't unmount the shared folder afterwards so the 
+--dropbox-shared-folders can be omitted after the first use of a particular 
+shared folder.
+
+- Config:      shared_folders
+- Env Var:     RCLONE_DROPBOX_SHARED_FOLDERS
+- Type:        bool
+- Default:     false
 
 #### --dropbox-encoding
 

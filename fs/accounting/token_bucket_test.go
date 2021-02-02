@@ -21,18 +21,47 @@ func TestRcBwLimit(t *testing.T) {
 	out, err := call.Fn(context.Background(), in)
 	require.NoError(t, err)
 	assert.Equal(t, rc.Params{
-		"bytesPerSecond": int64(1048576),
-		"rate":           "1M",
+		"bytesPerSecond":   int64(1048576),
+		"bytesPerSecondTx": int64(1048576),
+		"bytesPerSecondRx": int64(1048576),
+		"rate":             "1M",
 	}, out)
-	assert.Equal(t, rate.Limit(1048576), tokenBucket.Limit())
+	assert.Equal(t, rate.Limit(1048576), TokenBucket.curr[0].Limit())
 
 	// Query
 	in = rc.Params{}
 	out, err = call.Fn(context.Background(), in)
 	require.NoError(t, err)
 	assert.Equal(t, rc.Params{
-		"bytesPerSecond": int64(1048576),
-		"rate":           "1M",
+		"bytesPerSecond":   int64(1048576),
+		"bytesPerSecondTx": int64(1048576),
+		"bytesPerSecondRx": int64(1048576),
+		"rate":             "1M",
+	}, out)
+
+	// Set
+	in = rc.Params{
+		"rate": "10M:1M",
+	}
+	out, err = call.Fn(context.Background(), in)
+	require.NoError(t, err)
+	assert.Equal(t, rc.Params{
+		"bytesPerSecond":   int64(10485760),
+		"bytesPerSecondTx": int64(10485760),
+		"bytesPerSecondRx": int64(1048576),
+		"rate":             "10M:1M",
+	}, out)
+	assert.Equal(t, rate.Limit(10485760), TokenBucket.curr[0].Limit())
+
+	// Query
+	in = rc.Params{}
+	out, err = call.Fn(context.Background(), in)
+	require.NoError(t, err)
+	assert.Equal(t, rc.Params{
+		"bytesPerSecond":   int64(10485760),
+		"bytesPerSecondTx": int64(10485760),
+		"bytesPerSecondRx": int64(1048576),
+		"rate":             "10M:1M",
 	}, out)
 
 	// Reset
@@ -42,18 +71,22 @@ func TestRcBwLimit(t *testing.T) {
 	out, err = call.Fn(context.Background(), in)
 	require.NoError(t, err)
 	assert.Equal(t, rc.Params{
-		"bytesPerSecond": int64(-1),
-		"rate":           "off",
+		"bytesPerSecond":   int64(-1),
+		"bytesPerSecondTx": int64(-1),
+		"bytesPerSecondRx": int64(-1),
+		"rate":             "off",
 	}, out)
-	assert.Nil(t, tokenBucket)
+	assert.Nil(t, TokenBucket.curr[0])
 
 	// Query
 	in = rc.Params{}
 	out, err = call.Fn(context.Background(), in)
 	require.NoError(t, err)
 	assert.Equal(t, rc.Params{
-		"bytesPerSecond": int64(-1),
-		"rate":           "off",
+		"bytesPerSecond":   int64(-1),
+		"bytesPerSecondTx": int64(-1),
+		"bytesPerSecondRx": int64(-1),
+		"rate":             "off",
 	}, out)
 
 }

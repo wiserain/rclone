@@ -85,7 +85,7 @@ For example
     
     1 directories, 5 files
 
-You can use any of the filtering options with the tree command (eg
+You can use any of the filtering options with the tree command (e.g.
 --include and --exclude).  You can also use --fast-list.
 
 The tree command has many options for controlling the listing which
@@ -108,8 +108,9 @@ short options as they conflict with rclone's short options.
 		opts.CTimeSort = opts.CTimeSort || sort == "ctime"
 		opts.NameSort = sort == "name"
 		opts.SizeSort = sort == "size"
+		ci := fs.GetConfig(context.Background())
 		if opts.DeepLevel == 0 {
-			opts.DeepLevel = fs.Config.MaxDepth
+			opts.DeepLevel = ci.MaxDepth
 		}
 		cmd.Run(false, false, command, func() error {
 			return Tree(fsrc, outFile, &opts)

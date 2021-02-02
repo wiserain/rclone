@@ -925,14 +925,15 @@ func (r *run) newCacheFs(t *testing.T, remote, id string, needRemote, purge bool
 	boltDb, err := cache.GetPersistent(runInstance.dbPath, runInstance.chunkPath, &cache.Features{PurgeDb: true})
 	require.NoError(t, err)
 
-	fs.Config.LowLevelRetries = 1
+	ci := fs.GetConfig(context.Background())
+	ci.LowLevelRetries = 1
 
 	// Instantiate root
 	if purge {
 		boltDb.PurgeTempUploads()
 		_ = os.RemoveAll(path.Join(runInstance.tmpUploadDir, id))
 	}
-	f, err := cache.NewFs(remote, id, m)
+	f, err := cache.NewFs(context.Background(), remote, id, m)
 	require.NoError(t, err)
 	cfs, err := r.getCacheFs(f)
 	require.NoError(t, err)

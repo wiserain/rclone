@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/rclone/rclone/fs/rc"
-	"golang.org/x/time/rate"
 
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
@@ -26,6 +25,10 @@ var ErrorMaxTransferLimitReached = errors.New("Max transfer limit reached as set
 // transfer limit is reached.
 var ErrorMaxTransferLimitReachedFatal = fserrors.FatalError(ErrorMaxTransferLimitReached)
 
+// ErrorMaxTransferLimitReachedGraceful is returned from operations.Copy when the max
+// transfer limit is reached and a graceful stop is required.
+var ErrorMaxTransferLimitReachedGraceful = fserrors.NoRetryError(ErrorMaxTransferLimitReached)
+
 // Account limits and accounts for one transfer
 type Account struct {
 	stats *StatsInfo
@@ -37,6 +40,7 @@ type Account struct {
 	mu      sync.Mutex // mutex protects these values
 	in      io.Reader
 	ctx     context.Context // current context for transfer - may change
+	ci      *fs.ConfigInfo
 	origIn  io.ReadCloser
 	close   io.Closer
 	size    int64
@@ -45,7 +49,7 @@ type Account struct {
 	exit    chan struct{} // channel that will be closed when transfer is finished
 	withBuf bool          // is using a buffered in
 
-	tokenBucket *rate.Limiter // per file bandwidth limiter (may be nil)
+	tokenBucket buckets // per file bandwidth limiter (may be nil)
 
 	values accountValues
 }
@@ -70,6 +74,7 @@ func newAccountSizeName(ctx context.Context, stats *StatsInfo, in io.ReadCloser,
 		stats:  stats,
 		in:     in,
 		ctx:    ctx,
+		ci:     fs.GetConfig(ctx),
 		close:  in,
 		origIn: in,
 		size:   size,
@@ -81,11 +86,11 @@ func newAccountSizeName(ctx context.Context, stats *StatsInfo, in io.ReadCloser,
 			max:    -1,
 		},
 	}
-	if fs.Config.CutoffMode == fs.CutoffModeHard {
-		acc.values.max = int64((fs.Config.MaxTransfer))
+	if acc.ci.CutoffMode == fs.CutoffModeHard {
+		acc.values.max = int64((acc.ci.MaxTransfer))
 	}
-	currLimit := fs.Config.BwLimitFile.LimitAt(time.Now())
-	if currLimit.Bandwidth > 0 {
+	currLimit := acc.ci.BwLimitFile.LimitAt(time.Now())
+	if currLimit.Bandwidth.IsSet() {
 		fs.Debugf(acc.name, "Limiting file transfer to %v", currLimit.Bandwidth)
 		acc.tokenBucket = newTokenBucket(currLimit.Bandwidth)
 	}
@@ -103,14 +108,14 @@ func (acc *Account) WithBuffer() *Account {
 	}
 	acc.withBuf = true
 	var buffers int
-	if acc.size >= int64(fs.Config.BufferSize) || acc.size == -1 {
-		buffers = int(int64(fs.Config.BufferSize) / asyncreader.BufferSize)
+	if acc.size >= int64(acc.ci.BufferSize) || acc.size == -1 {
+		buffers = int(int64(acc.ci.BufferSize) / asyncreader.BufferSize)
 	} else {
 		buffers = int(acc.size / asyncreader.BufferSize)
 	}
 	// On big files add a buffer
 	if buffers > 0 {
-		rc, err := asyncreader.New(acc.origIn, buffers)
+		rc, err := asyncreader.New(acc.ctx, acc.origIn, buffers)
 		if err != nil {
 			fs.Errorf(acc.name, "Failed to make buffer: %v", err)
 		} else {
@@ -252,7 +257,7 @@ func (acc *Account) checkReadAfter(bytesUntilLimit int64, n int, err error) (out
 	return n, err
 }
 
-// ServerSideCopyStart should be called at the start of a server side copy
+// ServerSideCopyStart should be called at the start of a server-side copy
 //
 // This pretends a transfer has started
 func (acc *Account) ServerSideCopyStart() {
@@ -274,10 +279,16 @@ func (acc *Account) ServerSideCopyEnd(n int64) {
 	acc.stats.Bytes(n)
 }
 
+// DryRun accounts for statistics without running the operation
+func (acc *Account) DryRun(n int64) {
+	acc.ServerSideCopyStart()
+	acc.ServerSideCopyEnd(n)
+}
+
 // Account for n bytes from the current file bandwidth limit (if any)
 func (acc *Account) limitPerFileBandwidth(n int) {
 	acc.values.mu.Lock()
-	tokenBucket := acc.tokenBucket
+	tokenBucket := acc.tokenBucket[TokenBucketSlotAccounting]
 	acc.values.mu.Unlock()
 
 	if tokenBucket != nil {
@@ -298,7 +309,7 @@ func (acc *Account) accountRead(n int) {
 
 	acc.stats.Bytes(int64(n))
 
-	limitBandwidth(n)
+	TokenBucket.LimitBandwidth(TokenBucketSlotAccounting, n)
 	acc.limitPerFileBandwidth(n)
 }
 
@@ -446,7 +457,7 @@ func shortenName(in string, size int) string {
 		return in
 	}
 	name := []rune(in)
-	size-- // don't count elipsis rune
+	size-- // don't count ellipsis rune
 	suffixLength := size / 2
 	prefixLength := size - suffixLength
 	suffixStart := len(name) - suffixLength
@@ -468,7 +479,7 @@ func (acc *Account) String() string {
 		}
 	}
 
-	if fs.Config.DataRateUnit == "bits" {
+	if acc.ci.DataRateUnit == "bits" {
 		cur = cur * 8
 	}
 
@@ -478,8 +489,8 @@ func (acc *Account) String() string {
 	}
 
 	return fmt.Sprintf("%*s:%3d%% /%s, %s/s, %s",
-		fs.Config.StatsFileNameLength,
-		shortenName(acc.name, fs.Config.StatsFileNameLength),
+		acc.ci.StatsFileNameLength,
+		shortenName(acc.name, acc.ci.StatsFileNameLength),
 		percentageDone,
 		fs.SizeSuffix(b),
 		fs.SizeSuffix(cur),

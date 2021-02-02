@@ -8,7 +8,7 @@ description: "Rclone docs for OpenDrive"
 
 Paths are specified as `remote:path`
 
-Paths may be as deep as required, eg `remote:directory/subdirectory`.
+Paths may be as deep as required, e.g. `remote:directory/subdirectory`.
 
 Here is an example of how to make a remote called `remote`.  First run:
 
@@ -162,4 +162,13 @@ names.  These can't occur on Windows platforms, but on non-Windows
 platforms they are common.  Rclone will map these names to and from an
 identical looking unicode equivalent.  For example if a file has a `?`
 in it will be mapped to `？` instead.
+
+`rclone about` is not supported by the OpenDrive backend. Backends without
+this capability cannot determine free space for an rclone mount or
+use policy `mfs` (most free space) as a member of an rclone union
+remote.
+
+See [List of backends that do not support rclone about](https://rclone.org/overview/#optional-features)
+See [rclone about](https://rclone.org/commands/rclone_about/)
+
 

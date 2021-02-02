@@ -184,7 +184,7 @@ put them back in again.` >}}
   * Andres Alvarez <1671935+kir4h@users.noreply.github.com>
   * reddi1 <xreddi@gmail.com>
   * Matt Tucker <matthewtckr@gmail.com>
-  * Sebastian Bünger <buengese@gmail.com>
+  * Sebastian Bünger <buengese@gmail.com> <buengese@protonmail.com>
   * Martin Polden <mpolden@mpolden.no>
   * Alex Chen <Cnly@users.noreply.github.com>
   * Denis <deniskovpen@gmail.com>
@@ -409,3 +409,50 @@ put them back in again.` >}}
   * Lucas Kanashiro <lucas.kanashiro@canonical.com>
   * WarpedPixel <WarpedPixel@users.noreply.github.com>
   * Sam Edwards <sam@samedwards.ca>
+  * wjielai <gouki0123@gmail.com>
+  * Muffin King <jinxz_k@live.com>
+  * Christopher Stewart <6573710+1f47a@users.noreply.github.com>
+  * Russell Cattelan <cattelan@digitalelves.com>
+  * gyutw <30371241+gyutw@users.noreply.github.com>
+  * Hekmon <edouardhur@gmail.com>
+  * LaSombra <lasombra@users.noreply.github.com>
+  * Dov Murik <dov.murik@gmail.com>
+  * Ameer Dawood <ameer1234567890@gmail.com>
+  * Dan Hipschman <dan.hipschman@opendoor.com>
+  * Josh Soref <jsoref@users.noreply.github.com>
+  * David <david@staron.nl>
+  * Ingo <ingo@hoffmann.cx>
+  * Adam Plánský <adamplansky@users.noreply.github.com> <adamplansky@gmail.com>
+  * Manish Gupta <manishgupta.ait@gmail.com>
+  * Deepak Sah <sah.sslpu@gmail.com>
+  * Marcin Zelent <marcin@zelent.net>
+  * zhucan <zhucan.k8s@gmail.com>
+  * James Lim <james.lim@samsara.com>
+  * Laurens Janssen <BD69BM@insim.biz>
+  * Bob Bagwill <bobbagwill@gmail.com>
+  * Nathan Collins <colli372@msu.edu>
+  * lostheli <unknown>
+  * kelv <kelvin@acks.org>
+  * Milly <milly.ca@gmail.com>
+  * gtorelly <gtorelly@gmail.com>
+  * Brad Ackerman <brad@facefault.org>
+  * Mitsuo Heijo <mitsuo.heijo@gmail.com>
+  * Claudio Bantaloukas <rockdreamer@gmail.com>
+  * Benjamin Gustin <gustin.ben@gmail.com>
+  * Ingo Weiss <ingo@redhat.com>
+  * Kerry Su <me@sshockwave.net>
+  * Ilyess Bachiri <ilyess.bachiri@sonder.com>
+  * Yury Stankevich <urykhy@gmail.com>
+  * kice <wslikerqs@gmail.com>
+  * Denis Neuling <denisneuling@gmail.com>
+  * Janne Johansson <icepic.dz@gmail.com>
+  * Patrik Nordlén <patriki@gmail.com>
+  * CokeMine <aptx4561@gmail.com>
+  * Sơn Trần-Nguyễn <github@sntran.com>
+  * lluuaapp <266615+lluuaapp@users.noreply.github.com>
+  * Zach Kipp <kipp.zach@gmail.com>
+  * Riccardo Iaconelli <riccardo@kde.org>
+  * Sakuragawa Misty <gyc990326@gmail.com>
+  * Nicolas Rueff <nicolas@rueff.fr>
+  * Pau Rodriguez-Estivill <prodrigestivill@gmail.com>
+  * Bob Pusateri <BobPusateri@users.noreply.github.com>

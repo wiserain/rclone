@@ -30,7 +30,7 @@ var Help = `
 ### Server options
 
 Use --addr to specify which IP address and port the server should
-listen on, eg --addr 1.2.3.4:8000 or --addr :8080 to listen to all
+listen on, e.g. --addr 1.2.3.4:8000 or --addr :8080 to listen to all
 IPs.  By default it only listens on localhost.  You can use port
 :0 to let the OS choose an available port.
 
@@ -61,7 +61,7 @@ to be used within the template to server pages:
 | .Name       | The full path of a file/directory. |
 | .Title      | Directory listing of .Name |
 | .Sort       | The current sort used.  This is changeable via ?sort= parameter |
-|             | Sort Options: namedirfist,name,size,time (default namedirfirst) |
+|             | Sort Options: namedirfirst,name,size,time (default namedirfirst) |
 | .Order      | The current ordering used.  This is changeable via ?order= parameter |
 |             | Order Options: asc,desc (default asc) |
 | .Query      | Currently unused. |
@@ -379,8 +379,10 @@ func (s *Server) URL() string {
 		proto = "https"
 	}
 	addr := s.Opt.ListenAddr
-	if s.listener != nil {
-		// prefer actual listener address; required if using 0-port
+	// prefer actual listener address if using ":port" or "addr:0"
+	useActualAddress := addr == "" || addr[0] == ':' || addr[len(addr)-1] == ':' || strings.HasSuffix(addr, ":0")
+	if s.listener != nil && useActualAddress {
+		// use actual listener address; required if using 0-port
 		// (i.e. port assigned by operating system)
 		addr = s.listener.Addr().String()
 	}
@@ -402,6 +404,11 @@ func (s *Server) Path(w http.ResponseWriter, r *http.Request) (Path string, ok b
 		return Path, true
 	}
 	if !strings.HasPrefix(Path, s.Opt.BaseURL+"/") {
+		// Send a redirect if the BaseURL was requested without a /
+		if Path == s.Opt.BaseURL {
+			http.Redirect(w, r, s.Opt.BaseURL+"/", http.StatusPermanentRedirect)
+			return Path, false
+		}
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return Path, false
 	}

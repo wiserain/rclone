@@ -68,7 +68,7 @@ func parsePath(path string) (root string) {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (f fs.Fs, err error) {
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (f fs.Fs, err error) {
 	// defer log.Trace(name, "root=%v", root)("f=%+v, err=%v", &f, &err)
 	// Parse config into Options struct
 	opt := new(Options)
@@ -77,8 +77,8 @@ func NewFs(name, root string, m configmap.Mapper) (f fs.Fs, err error) {
 		return nil, err
 	}
 	root = parsePath(root)
-	httpClient := fshttp.NewClient(fs.Config)
-	oAuthClient, _, err := oauthutil.NewClientWithBaseClient(name, m, putioConfig, httpClient)
+	httpClient := fshttp.NewClient(ctx)
+	oAuthClient, _, err := oauthutil.NewClientWithBaseClient(ctx, name, m, putioConfig, httpClient)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to configure putio")
 	}
@@ -86,7 +86,7 @@ func NewFs(name, root string, m configmap.Mapper) (f fs.Fs, err error) {
 		name:        name,
 		root:        root,
 		opt:         *opt,
-		pacer:       fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 		client:      putio.NewClient(oAuthClient),
 		httpClient:  httpClient,
 		oAuthClient: oAuthClient,
@@ -95,9 +95,8 @@ func NewFs(name, root string, m configmap.Mapper) (f fs.Fs, err error) {
 		DuplicateFiles:          true,
 		ReadMimeType:            true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(p)
+	}).Fill(ctx, p)
 	p.dirCache = dircache.New(root, "0", p)
-	ctx := context.Background()
 	// Find the current root
 	err = p.dirCache.FindRoot(ctx, false)
 	if err != nil {
@@ -236,10 +235,10 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (o fs.Object, err error) {
 	// defer log.Trace(f, "src=%+v", src)("o=%+v, err=%v", &o, &err)
-	exisitingObj, err := f.NewObject(ctx, src.Remote())
+	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
-		return exisitingObj, exisitingObj.Update(ctx, in, src, options...)
+		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
 		// Not found so create it
 		return f.PutUnchecked(ctx, in, src, options...)
@@ -525,7 +524,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) (err error) {
 	return f.purgeCheck(ctx, dir, false)
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -564,7 +563,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (o fs.Objec
 	return f.NewObject(ctx, remote)
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -604,7 +603,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (o fs.Objec
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

@@ -44,8 +44,10 @@ const (
 	timeHeader          = headerPrefix + timeKey
 	sha1Key             = "large_file_sha1"
 	sha1Header          = "X-Bz-Content-Sha1"
-	sha1InfoHeader      = headerPrefix + sha1Key
 	testModeHeader      = "X-Bz-Test-Mode"
+	idHeader            = "X-Bz-File-Id"
+	nameHeader          = "X-Bz-File-Name"
+	timestampHeader     = "X-Bz-Upload-Timestamp"
 	retryAfterHeader    = "Retry-After"
 	minSleep            = 10 * time.Millisecond
 	maxSleep            = 5 * time.Minute
@@ -121,7 +123,7 @@ This value should be set no larger than 4.657GiB (== 5GB).`,
 			Name: "copy_cutoff",
 			Help: `Cutoff for switching to multipart copy
 
-Any files larger than this that need to be server side copied will be
+Any files larger than this that need to be server-side copied will be
 copied in chunks of this size.
 
 The minimum is 0 and the maximum is 4.6GB.`,
@@ -153,7 +155,9 @@ to start uploading.`,
 
 This is usually set to a Cloudflare CDN URL as Backblaze offers
 free egress for data downloaded through the Cloudflare network.
-This is probably only useful for a public bucket.
+Rclone works with private buckets by sending an "Authorization" header.
+If the custom endpoint rewrites the requests for authentication,
+e.g., in Cloudflare Workers, this header needs to be handled properly.
 Leave blank if you want to use the endpoint provided by Backblaze.`,
 			Advanced: true,
 		}, {
@@ -214,6 +218,7 @@ type Fs struct {
 	name            string                                 // name of this remote
 	root            string                                 // the path we are working on if any
 	opt             Options                                // parsed config options
+	ci              *fs.ConfigInfo                         // global config
 	features        *fs.Features                           // optional features
 	srv             *rest.Client                           // the connection to the b2 server
 	rootBucket      string                                 // bucket part of root (if any)
@@ -290,7 +295,7 @@ func (o *Object) split() (bucket, bucketPath string) {
 
 // retryErrorCodes is a slice of error codes that we will retry
 var retryErrorCodes = []int{
-	401, // Unauthorized (eg "Token has expired")
+	401, // Unauthorized (e.g. "Token has expired")
 	408, // Request Timeout
 	429, // Rate exceeded.
 	500, // Get occasional 500 Internal Server Error
@@ -391,8 +396,7 @@ func (f *Fs) setRoot(root string) {
 }
 
 // NewFs constructs an Fs from the path, bucket:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -416,20 +420,22 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	if opt.Endpoint == "" {
 		opt.Endpoint = defaultEndpoint
 	}
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:        name,
 		opt:         *opt,
-		srv:         rest.NewClient(fshttp.NewClient(fs.Config)).SetErrorHandler(errorHandler),
+		ci:          ci,
+		srv:         rest.NewClient(fshttp.NewClient(ctx)).SetErrorHandler(errorHandler),
 		cache:       bucket.NewCache(),
 		_bucketID:   make(map[string]string, 1),
 		_bucketType: make(map[string]string, 1),
 		uploads:     make(map[string][]*api.GetUploadURLResponse),
-		pacer:       fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
-		uploadToken: pacer.NewTokenDispenser(fs.Config.Transfers),
+		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		uploadToken: pacer.NewTokenDispenser(ci.Transfers),
 		pool: pool.New(
 			time.Duration(opt.MemoryPoolFlushTime),
 			int(opt.ChunkSize),
-			fs.Config.Transfers,
+			ci.Transfers,
 			opt.MemoryPoolUseMmap,
 		),
 	}
@@ -439,7 +445,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		WriteMimeType:     true,
 		BucketBased:       true,
 		BucketBasedRootOK: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	// Set the test flag if required
 	if opt.TestMode != "" {
 		testMode := strings.TrimSpace(opt.TestMode)
@@ -702,7 +708,7 @@ func (f *Fs) list(ctx context.Context, bucket, directory, prefix string, addBuck
 			remote := file.Name[len(prefix):]
 			// Check for directory
 			isDirectory := remote == "" || strings.HasSuffix(remote, "/")
-			if isDirectory {
+			if isDirectory && len(remote) > 1 {
 				remote = remote[:len(remote)-1]
 			}
 			if addBucket {
@@ -1168,10 +1174,10 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 	}
 
 	// Delete Config.Transfers in parallel
-	toBeDeleted := make(chan *api.File, fs.Config.Transfers)
+	toBeDeleted := make(chan *api.File, f.ci.Transfers)
 	var wg sync.WaitGroup
-	wg.Add(fs.Config.Transfers)
-	for i := 0; i < fs.Config.Transfers; i++ {
+	wg.Add(f.ci.Transfers)
+	for i := 0; i < f.ci.Transfers; i++ {
 		go func() {
 			defer wg.Done()
 			for object := range toBeDeleted {
@@ -1183,7 +1189,7 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 				tr := accounting.Stats(ctx).NewCheckingTransfer(oi)
 				err = f.deleteByID(ctx, object.ID, object.Name)
 				checkErr(err)
-				tr.Done(err)
+				tr.Done(ctx, err)
 			}
 		}()
 	}
@@ -1211,7 +1217,7 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 				toBeDeleted <- object
 			}
 			last = remote
-			tr.Done(nil)
+			tr.Done(ctx, nil)
 		}
 		return nil
 	}))
@@ -1234,7 +1240,7 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 	return f.purge(ctx, "", true)
 }
 
-// copy does a server side copy from dstObj <- srcObj
+// copy does a server-side copy from dstObj <- srcObj
 //
 // If newInfo is nil then the metadata will be copied otherwise it
 // will be replaced with newInfo
@@ -1291,7 +1297,7 @@ func (f *Fs) copy(ctx context.Context, dstObj *Object, srcObj *Object, newInfo *
 	return dstObj.decodeMetaDataFileInfo(&response)
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -1440,7 +1446,7 @@ func (o *Object) Size() int64 {
 // Make sure it is lower case
 //
 // Remove unverified prefix - see https://www.backblaze.com/b2/docs/uploading.html
-// Some tools (eg Cyberduck) use this
+// Some tools (e.g. Cyberduck) use this
 func cleanSHA1(sha1 string) (out string) {
 	out = strings.ToLower(sha1)
 	const unverified = "unverified:"
@@ -1494,8 +1500,11 @@ func (o *Object) decodeMetaDataFileInfo(info *api.FileInfo) (err error) {
 	return o.decodeMetaDataRaw(info.ID, info.SHA1, info.Size, info.UploadTimestamp, info.Info, info.ContentType)
 }
 
-// getMetaData gets the metadata from the object unconditionally
-func (o *Object) getMetaData(ctx context.Context) (info *api.File, err error) {
+// getMetaDataListing gets the metadata from the object unconditionally from the listing
+//
+// Note that listing is a class C transaction which costs more than
+// the B transaction used in getMetaData
+func (o *Object) getMetaDataListing(ctx context.Context) (info *api.File, err error) {
 	bucket, bucketPath := o.split()
 	maxSearched := 1
 	var timestamp api.Timestamp
@@ -1526,6 +1535,19 @@ func (o *Object) getMetaData(ctx context.Context) (info *api.File, err error) {
 		return nil, fs.ErrorObjectNotFound
 	}
 	return info, nil
+}
+
+// getMetaData gets the metadata from the object unconditionally
+func (o *Object) getMetaData(ctx context.Context) (info *api.File, err error) {
+	// If using versions and have a version suffix, need to list the directory to find the correct versions
+	if o.fs.opt.Versions {
+		timestamp, _ := api.RemoveVersion(o.remote)
+		if !timestamp.IsZero() {
+			return o.getMetaDataListing(ctx)
+		}
+	}
+	_, info, err = o.getOrHead(ctx, "HEAD", nil)
+	return info, err
 }
 
 // readMetaData gets the metadata if it hasn't already been fetched
@@ -1657,12 +1679,11 @@ func (file *openFile) Close() (err error) {
 // Check it satisfies the interfaces
 var _ io.ReadCloser = &openFile{}
 
-// Open an object for read
-func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
-	fs.FixRangeOption(options, o.size)
+func (o *Object) getOrHead(ctx context.Context, method string, options []fs.OpenOption) (resp *http.Response, info *api.File, err error) {
 	opts := rest.Opts{
-		Method:  "GET",
-		Options: options,
+		Method:     method,
+		Options:    options,
+		NoResponse: method == "HEAD",
 	}
 
 	// Use downloadUrl from backblaze if downloadUrl is not set
@@ -1680,36 +1701,66 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		bucket, bucketPath := o.split()
 		opts.Path += "/file/" + urlEncode(o.fs.opt.Enc.FromStandardName(bucket)) + "/" + urlEncode(o.fs.opt.Enc.FromStandardPath(bucketPath))
 	}
-	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
 		return o.fs.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open for download")
+		// 404 for files, 400 for directories
+		if resp != nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest) {
+			return nil, nil, fs.ErrorObjectNotFound
+		}
+		return nil, nil, errors.Wrapf(err, "failed to %s for download", method)
 	}
 
-	// Parse the time out of the headers if possible
-	err = o.parseTimeString(resp.Header.Get(timeHeader))
+	// NB resp may be Open here - don't return err != nil without closing
+
+	// Convert the Headers into an api.File
+	var uploadTimestamp api.Timestamp
+	err = uploadTimestamp.UnmarshalJSON([]byte(resp.Header.Get(timestampHeader)))
+	if err != nil {
+		fs.Debugf(o, "Bad "+timestampHeader+" header: %v", err)
+	}
+	var Info = make(map[string]string)
+	for k, vs := range resp.Header {
+		k = strings.ToLower(k)
+		for _, v := range vs {
+			if strings.HasPrefix(k, headerPrefix) {
+				Info[k[len(headerPrefix):]] = v
+			}
+		}
+	}
+	info = &api.File{
+		ID:              resp.Header.Get(idHeader),
+		Name:            resp.Header.Get(nameHeader),
+		Action:          "upload",
+		Size:            resp.ContentLength,
+		UploadTimestamp: uploadTimestamp,
+		SHA1:            resp.Header.Get(sha1Header),
+		ContentType:     resp.Header.Get("Content-Type"),
+		Info:            Info,
+	}
+	return resp, info, nil
+}
+
+// Open an object for read
+func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
+	fs.FixRangeOption(options, o.size)
+
+	resp, info, err := o.getOrHead(ctx, "GET", options)
+	if err != nil {
+		return nil, err
+	}
+
+	// Don't check length or hash or metadata on partial content
+	if resp.StatusCode == http.StatusPartialContent {
+		return resp.Body, nil
+	}
+
+	err = o.decodeMetaData(info)
 	if err != nil {
 		_ = resp.Body.Close()
 		return nil, err
-	}
-	// Read sha1 from header if it isn't set
-	if o.sha1 == "" {
-		o.sha1 = resp.Header.Get(sha1Header)
-		fs.Debugf(o, "Reading sha1 from header - %q", o.sha1)
-		// if sha1 header is "none" (in big files), then need
-		// to read it from the metadata
-		if o.sha1 == "none" {
-			o.sha1 = resp.Header.Get(sha1InfoHeader)
-			fs.Debugf(o, "Reading sha1 from info - %q", o.sha1)
-		}
-		o.sha1 = cleanSHA1(o.sha1)
-	}
-	// Don't check length or hash on partial content
-	if resp.StatusCode == http.StatusPartialContent {
-		return resp.Body, nil
 	}
 	return newOpenFile(o, resp), nil
 }

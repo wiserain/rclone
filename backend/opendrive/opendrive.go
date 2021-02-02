@@ -164,8 +164,7 @@ func (f *Fs) DirCacheFlush() {
 }
 
 // NewFs constructs an Fs from the path, bucket:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -188,8 +187,8 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		name:  name,
 		root:  root,
 		opt:   *opt,
-		srv:   rest.NewClient(fshttp.NewClient(fs.Config)).SetErrorHandler(errorHandler),
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		srv:   rest.NewClient(fshttp.NewClient(ctx)).SetErrorHandler(errorHandler),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 
 	f.dirCache = dircache.New(root, "0", f)
@@ -217,7 +216,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 
 	// Find the current root
 	err = f.dirCache.FindRoot(ctx, false)
@@ -338,7 +337,7 @@ func (f *Fs) Precision() time.Duration {
 	return time.Second
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -402,7 +401,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	return dstObj, nil
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -460,7 +459,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -722,7 +721,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 	for _, folder := range folderList.Folders {
 		// fs.Debugf(nil, "Folder: %s (%s)", folder.Name, folder.FolderID)
 
-		if leaf == folder.Name {
+		if strings.EqualFold(leaf, folder.Name) {
 			// found
 			return folder.FolderID, true, nil
 		}

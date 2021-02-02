@@ -4,6 +4,7 @@ package sftp
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/subtle"
@@ -33,20 +34,22 @@ type server struct {
 	f        fs.Fs
 	opt      Options
 	vfs      *vfs.VFS
+	ctx      context.Context // for global config
 	config   *ssh.ServerConfig
 	listener net.Listener
 	waitChan chan struct{} // for waiting on the listener to close
 	proxy    *proxy.Proxy
 }
 
-func newServer(f fs.Fs, opt *Options) *server {
+func newServer(ctx context.Context, f fs.Fs, opt *Options) *server {
 	s := &server{
 		f:        f,
+		ctx:      ctx,
 		opt:      *opt,
 		waitChan: make(chan struct{}),
 	}
 	if proxyflags.Opt.AuthProxy != "" {
-		s.proxy = proxy.New(&proxyflags.Opt)
+		s.proxy = proxy.New(ctx, &proxyflags.Opt)
 	} else {
 		s.vfs = vfs.New(f, &vfsflags.Opt)
 	}
@@ -149,7 +152,7 @@ func (s *server) serve() (err error) {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	s.config = &ssh.ServerConfig{
-		ServerVersion: "SSH-2.0-" + fs.Config.UserAgent,
+		ServerVersion: "SSH-2.0-" + fs.GetConfig(s.ctx).UserAgent,
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			fs.Debugf(describeConn(c), "Password login attempt for %s", c.User())
 			if s.proxy != nil {

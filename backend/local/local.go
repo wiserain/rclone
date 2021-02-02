@@ -71,6 +71,20 @@ points, as you explicitly acknowledge that they should be skipped.`,
 			NoPrefix: true,
 			Advanced: true,
 		}, {
+			Name: "zero_size_links",
+			Help: `Assume the Stat size of links is zero (and read them instead)
+
+On some virtual filesystems (such ash LucidLink), reading a link size via a Stat call always returns 0.
+However, on unix it reads as the length of the text in the link. This may cause errors like this when
+syncing:
+
+    Failed to copy: corrupted on transfer: sizes differ 0 vs 13
+
+Setting this flag causes rclone to read the link and use that as the size of the link
+instead of 0 which in most cases fixes the problem.`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name: "no_unicode_normalization",
 			Help: `Don't apply unicode normalization to paths and filenames (Deprecated)
 
@@ -87,13 +101,13 @@ Normally rclone checks the size and modification time of files as they
 are being uploaded and aborts with a message which starts "can't copy
 - source file is being updated" if the file changes during upload.
 
-However on some file systems this modification time check may fail (eg
+However on some file systems this modification time check may fail (e.g.
 [Glusterfs #2206](https://github.com/rclone/rclone/issues/2206)) so this
 check can be disabled with this flag.
 
 If this flag is set, rclone will use its best efforts to transfer a
 file which is being updated. If the file is only having things
-appended to it (eg a log) then rclone will transfer the log file with
+appended to it (e.g. a log) then rclone will transfer the log file with
 the size it had the first time rclone saw it.
 
 If the file is being modified throughout (not just appended to) then
@@ -170,6 +184,7 @@ type Options struct {
 	FollowSymlinks    bool                 `config:"copy_links"`
 	TranslateSymlinks bool                 `config:"links"`
 	SkipSymlinks      bool                 `config:"skip_links"`
+	ZeroSizeLinks     bool                 `config:"zero_size_links"`
 	NoUTFNorm         bool                 `config:"no_unicode_normalization"`
 	NoCheckUpdated    bool                 `config:"no_check_updated"`
 	NoUNC             bool                 `config:"nounc"`
@@ -217,7 +232,7 @@ type Object struct {
 var errLinksAndCopyLinks = errors.New("can't use -l/--links with -L/--copy-links")
 
 // NewFs constructs an Fs from the path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -245,7 +260,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		CanHaveEmptyDirectories: true,
 		IsLocal:                 true,
 		SlowHash:                true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	if opt.FollowSymlinks {
 		f.lstat = os.Stat
 	}
@@ -456,8 +471,8 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			if f.opt.FollowSymlinks && (mode&os.ModeSymlink) != 0 {
 				localPath := filepath.Join(fsDirPath, name)
 				fi, err = os.Stat(localPath)
-				if os.IsNotExist(err) {
-					// Skip bad symlinks
+				if os.IsNotExist(err) || isCircularSymlinkError(err) {
+					// Skip bad symlinks and circular symlinks
 					err = fserrors.NoRetryError(errors.Wrap(err, "symlink"))
 					fs.Errorf(newRemote, "Listing error: %v", err)
 					err = accounting.Stats(ctx).Error(err)
@@ -637,7 +652,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 	return os.RemoveAll(dir)
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -701,7 +716,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1232,7 +1247,8 @@ func (o *Object) setMetadata(info os.FileInfo) {
 	o.mode = info.Mode()
 	o.fs.objectMetaMu.Unlock()
 	// On Windows links read as 0 size so set the correct size here
-	if runtime.GOOS == "windows" && o.translatedLink {
+	// Optionally, users can turn this feature on with the zero_size_links flag
+	if (runtime.GOOS == "windows" || o.fs.opt.ZeroSizeLinks) && o.translatedLink {
 		linkdst, err := os.Readlink(o.path)
 		if err != nil {
 			fs.Errorf(o, "Failed to read link size: %v", err)

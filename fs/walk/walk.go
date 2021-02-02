@@ -59,11 +59,13 @@ type Func func(path string, entries fs.DirEntries, err error) error
 //
 // NB (f, path) to be replaced by fs.Dir at some point
 func Walk(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel int, fn Func) error {
-	if fs.Config.NoTraverse && filter.Active.HaveFilesFrom() {
-		return walkR(ctx, f, path, includeAll, maxLevel, fn, filter.Active.MakeListR(ctx, f.NewObject))
+	ci := fs.GetConfig(ctx)
+	fi := filter.GetConfig(ctx)
+	if ci.NoTraverse && fi.HaveFilesFrom() {
+		return walkR(ctx, f, path, includeAll, maxLevel, fn, fi.MakeListR(ctx, f.NewObject))
 	}
 	// FIXME should this just be maxLevel < 0 - why the maxLevel > 1
-	if (maxLevel < 0 || maxLevel > 1) && fs.Config.UseListR && f.Features().ListR != nil {
+	if (maxLevel < 0 || maxLevel > 1) && ci.UseListR && f.Features().ListR != nil {
 		return walkListR(ctx, f, path, includeAll, maxLevel, fn)
 	}
 	return walkListDirSorted(ctx, f, path, includeAll, maxLevel, fn)
@@ -138,15 +140,16 @@ func (l ListType) Filter(in *fs.DirEntries) {
 //
 // NB (f, path) to be replaced by fs.Dir at some point
 func ListR(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel int, listType ListType, fn fs.ListRCallback) error {
+	fi := filter.GetConfig(ctx)
 	// FIXME disable this with --no-fast-list ??? `--disable ListR` will do it...
 	doListR := f.Features().ListR
 
 	// Can't use ListR if...
 	if doListR == nil || // ...no ListR
-		filter.Active.HaveFilesFrom() || // ...using --files-from
+		fi.HaveFilesFrom() || // ...using --files-from
 		maxLevel >= 0 || // ...using bounded recursion
-		len(filter.Active.Opt.ExcludeFile) > 0 || // ...using --exclude-file
-		filter.Active.UsesDirectoryFilters() { // ...using any directory filters
+		len(fi.Opt.ExcludeFile) > 0 || // ...using --exclude-file
+		fi.UsesDirectoryFilters() { // ...using any directory filters
 		return listRwalk(ctx, f, path, includeAll, maxLevel, listType, fn)
 	}
 	return listR(ctx, f, path, includeAll, listType, fn, doListR, listType.Dirs() && f.Features().BucketBased)
@@ -205,7 +208,7 @@ func (dm *dirMap) add(dir string, sent bool) {
 			if !sent {
 				return
 			}
-			// currenSent == false && sent == true so needs overriding
+			// currentSent == false && sent == true so needs overriding
 		}
 		dm.m[dir] = sent
 		// Add parents in as unsent
@@ -274,9 +277,10 @@ func (dm *dirMap) sendEntries(fn fs.ListRCallback) (err error) {
 
 // listR walks the file tree using ListR
 func listR(ctx context.Context, f fs.Fs, path string, includeAll bool, listType ListType, fn fs.ListRCallback, doListR fs.ListRFn, synthesizeDirs bool) error {
-	includeDirectory := filter.Active.IncludeDirectory(ctx, f)
+	fi := filter.GetConfig(ctx)
+	includeDirectory := fi.IncludeDirectory(ctx, f)
 	if !includeAll {
-		includeAll = filter.Active.InActive()
+		includeAll = fi.InActive()
 	}
 	var dm *dirMap
 	if synthesizeDirs {
@@ -297,7 +301,7 @@ func listR(ctx context.Context, f fs.Fs, path string, includeAll bool, listType 
 				var include bool
 				switch x := entry.(type) {
 				case fs.Object:
-					include = filter.Active.IncludeObject(ctx, x)
+					include = fi.IncludeObject(ctx, x)
 				case fs.Directory:
 					include, err = includeDirectory(x.Remote())
 					if err != nil {
@@ -353,10 +357,11 @@ type listDirFunc func(ctx context.Context, fs fs.Fs, includeAll bool, dir string
 
 func walk(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel int, fn Func, listDir listDirFunc) error {
 	var (
-		wg         sync.WaitGroup // sync closing of go routines
-		traversing sync.WaitGroup // running directory traversals
-		doClose    sync.Once      // close the channel once
-		mu         sync.Mutex     // stop fn being called concurrently
+		wg         sync.WaitGroup      // sync closing of go routines
+		traversing sync.WaitGroup      // running directory traversals
+		doClose    sync.Once           // close the channel once
+		mu         sync.Mutex          // stop fn being called concurrently
+		ci         = fs.GetConfig(ctx) // current config
 	)
 	// listJob describe a directory listing that needs to be done
 	type listJob struct {
@@ -364,7 +369,7 @@ func walk(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel i
 		depth  int
 	}
 
-	in := make(chan listJob, fs.Config.Checkers)
+	in := make(chan listJob, ci.Checkers)
 	errs := make(chan error, 1)
 	quit := make(chan struct{})
 	closeQuit := func() {
@@ -377,7 +382,7 @@ func walk(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel i
 			}()
 		})
 	}
-	for i := 0; i < fs.Config.Checkers; i++ {
+	for i := 0; i < ci.Checkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -446,11 +451,12 @@ func walk(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel i
 }
 
 func walkRDirTree(ctx context.Context, f fs.Fs, startPath string, includeAll bool, maxLevel int, listR fs.ListRFn) (dirtree.DirTree, error) {
+	fi := filter.GetConfig(ctx)
 	dirs := dirtree.New()
 	// Entries can come in arbitrary order. We use toPrune to keep
 	// all directories to exclude later.
 	toPrune := make(map[string]bool)
-	includeDirectory := filter.Active.IncludeDirectory(ctx, f)
+	includeDirectory := fi.IncludeDirectory(ctx, f)
 	var mu sync.Mutex
 	err := listR(ctx, startPath, func(entries fs.DirEntries) error {
 		mu.Lock()
@@ -460,7 +466,7 @@ func walkRDirTree(ctx context.Context, f fs.Fs, startPath string, includeAll boo
 			switch x := entry.(type) {
 			case fs.Object:
 				// Make sure we don't delete excluded files if not required
-				if includeAll || filter.Active.IncludeObject(ctx, x) {
+				if includeAll || fi.IncludeObject(ctx, x) {
 					if maxLevel < 0 || slashes <= maxLevel-1 {
 						dirs.Add(x)
 					} else {
@@ -475,9 +481,9 @@ func walkRDirTree(ctx context.Context, f fs.Fs, startPath string, includeAll boo
 					fs.Debugf(x, "Excluded from sync (and deletion)")
 				}
 				// Check if we need to prune a directory later.
-				if !includeAll && len(filter.Active.Opt.ExcludeFile) > 0 {
+				if !includeAll && len(fi.Opt.ExcludeFile) > 0 {
 					basename := path.Base(x.Remote())
-					if basename == filter.Active.Opt.ExcludeFile {
+					if basename == fi.Opt.ExcludeFile {
 						excludeDir := parentDir(x.Remote())
 						toPrune[excludeDir] = true
 						fs.Debugf(basename, "Excluded from sync (and deletion) based on exclude file")
@@ -553,12 +559,14 @@ func walkNDirTree(ctx context.Context, f fs.Fs, path string, includeAll bool, ma
 //
 // NB (f, path) to be replaced by fs.Dir at some point
 func NewDirTree(ctx context.Context, f fs.Fs, path string, includeAll bool, maxLevel int) (dirtree.DirTree, error) {
+	ci := fs.GetConfig(ctx)
+	fi := filter.GetConfig(ctx)
 	// if --no-traverse and --files-from build DirTree just from files
-	if fs.Config.NoTraverse && filter.Active.HaveFilesFrom() {
-		return walkRDirTree(ctx, f, path, includeAll, maxLevel, filter.Active.MakeListR(ctx, f.NewObject))
+	if ci.NoTraverse && fi.HaveFilesFrom() {
+		return walkRDirTree(ctx, f, path, includeAll, maxLevel, fi.MakeListR(ctx, f.NewObject))
 	}
 	// if have ListR; and recursing; and not using --files-from; then build a DirTree with ListR
-	if ListR := f.Features().ListR; (maxLevel < 0 || maxLevel > 1) && ListR != nil && !filter.Active.HaveFilesFrom() {
+	if ListR := f.Features().ListR; (maxLevel < 0 || maxLevel > 1) && ListR != nil && !fi.HaveFilesFrom() {
 		return walkRDirTree(ctx, f, path, includeAll, maxLevel, ListR)
 	}
 	// otherwise just use List

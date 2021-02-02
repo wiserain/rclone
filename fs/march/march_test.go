@@ -193,6 +193,7 @@ func TestMarch(t *testing.T) {
 				cancel:     cancel,
 				noTraverse: false,
 			}
+			fi := filter.GetConfig(ctx)
 			m := &March{
 				Ctx:           ctx,
 				Fdst:          r.Fremote,
@@ -200,15 +201,15 @@ func TestMarch(t *testing.T) {
 				Dir:           "",
 				NoTraverse:    mt.noTraverse,
 				Callback:      mt,
-				DstIncludeAll: filter.Active.Opt.DeleteExcluded,
+				DstIncludeAll: fi.Opt.DeleteExcluded,
 			}
 
-			mt.processError(m.Run())
+			mt.processError(m.Run(ctx))
 			mt.cancel()
 			err := mt.currentError()
 			require.NoError(t, err)
 
-			precision := fs.GetModifyWindow(r.Fremote, r.Flocal)
+			precision := fs.GetModifyWindow(ctx, r.Fremote, r.Flocal)
 			fstest.CompareItems(t, mt.srcOnly, srcOnly, test.dirSrcOnly, precision, "srcOnly")
 			fstest.CompareItems(t, mt.dstOnly, dstOnly, test.dirDstOnly, precision, "dstOnly")
 			fstest.CompareItems(t, mt.match, match, test.dirMatch, precision, "match")
@@ -260,6 +261,7 @@ func TestMarchNoTraverse(t *testing.T) {
 				cancel:     cancel,
 				noTraverse: true,
 			}
+			fi := filter.GetConfig(ctx)
 			m := &March{
 				Ctx:           ctx,
 				Fdst:          r.Fremote,
@@ -267,15 +269,15 @@ func TestMarchNoTraverse(t *testing.T) {
 				Dir:           "",
 				NoTraverse:    mt.noTraverse,
 				Callback:      mt,
-				DstIncludeAll: filter.Active.Opt.DeleteExcluded,
+				DstIncludeAll: fi.Opt.DeleteExcluded,
 			}
 
-			mt.processError(m.Run())
+			mt.processError(m.Run(ctx))
 			mt.cancel()
 			err := mt.currentError()
 			require.NoError(t, err)
 
-			precision := fs.GetModifyWindow(r.Fremote, r.Flocal)
+			precision := fs.GetModifyWindow(ctx, r.Fremote, r.Flocal)
 			fstest.CompareItems(t, mt.srcOnly, srcOnly, test.dirSrcOnly, precision, "srcOnly")
 			fstest.CompareItems(t, mt.match, match, test.dirMatch, precision, "match")
 		})

@@ -1,6 +1,7 @@
 package accounting
 
 import (
+	"context"
 	"sync"
 
 	"github.com/rclone/rclone/fs"
@@ -13,9 +14,10 @@ type inProgress struct {
 }
 
 // newInProgress makes a new inProgress object
-func newInProgress() *inProgress {
+func newInProgress(ctx context.Context) *inProgress {
+	ci := fs.GetConfig(ctx)
 	return &inProgress{
-		m: make(map[string]*Account, fs.Config.Transfers),
+		m: make(map[string]*Account, ci.Transfers),
 	}
 }
 

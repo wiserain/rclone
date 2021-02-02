@@ -59,10 +59,10 @@ func rcRemoteStats(ctx context.Context, in rc.Params) (rc.Params, error) {
 		return rc.Params{}, err
 	}
 	if group != "" {
-		return StatsGroup(group).RemoteStats()
+		return StatsGroup(ctx, group).RemoteStats()
 	}
 
-	return groups.sum().RemoteStats()
+	return groups.sum(ctx).RemoteStats()
 }
 
 func init() {
@@ -129,9 +129,9 @@ func rcTransferredStats(ctx context.Context, in rc.Params) (rc.Params, error) {
 
 	out := make(rc.Params)
 	if group != "" {
-		out["transferred"] = StatsGroup(group).Transferred()
+		out["transferred"] = StatsGroup(ctx, group).Transferred()
 	} else {
-		out["transferred"] = groups.sum().Transferred()
+		out["transferred"] = groups.sum(ctx).Transferred()
 	}
 
 	return out, nil
@@ -265,28 +265,28 @@ func Stats(ctx context.Context) *StatsInfo {
 	if !ok {
 		return GlobalStats()
 	}
-	return StatsGroup(group)
+	return StatsGroup(ctx, group)
 }
 
 // StatsGroup gets stats by group name.
-func StatsGroup(group string) *StatsInfo {
+func StatsGroup(ctx context.Context, group string) *StatsInfo {
 	stats := groups.get(group)
 	if stats == nil {
-		return NewStatsGroup(group)
+		return NewStatsGroup(ctx, group)
 	}
 	return stats
 }
 
 // GlobalStats returns special stats used for global accounting.
 func GlobalStats() *StatsInfo {
-	return StatsGroup(globalStats)
+	return StatsGroup(context.Background(), globalStats)
 }
 
 // NewStatsGroup creates new stats under named group.
-func NewStatsGroup(group string) *StatsInfo {
-	stats := NewStats()
+func NewStatsGroup(ctx context.Context, group string) *StatsInfo {
+	stats := NewStats(ctx)
 	stats.group = group
-	groups.set(group, stats)
+	groups.set(ctx, group, stats)
 	return stats
 }
 
@@ -305,16 +305,17 @@ func newStatsGroups() *statsGroups {
 }
 
 // set marks the stats as belonging to a group
-func (sg *statsGroups) set(group string, stats *StatsInfo) {
+func (sg *statsGroups) set(ctx context.Context, group string, stats *StatsInfo) {
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
+	ci := fs.GetConfig(ctx)
 
 	// Limit number of groups kept in memory.
-	if len(sg.order) >= fs.Config.MaxStatsGroups {
+	if len(sg.order) >= ci.MaxStatsGroups {
 		group := sg.order[0]
 		fs.LogPrintf(fs.LogLevelDebug, nil, "Max number of stats groups reached removing %s", group)
 		delete(sg.m, group)
-		r := (len(sg.order) - fs.Config.MaxStatsGroups) + 1
+		r := (len(sg.order) - ci.MaxStatsGroups) + 1
 		sg.order = sg.order[r:]
 	}
 
@@ -343,11 +344,11 @@ func (sg *statsGroups) names() []string {
 }
 
 // sum returns aggregate stats that contains summation of all groups.
-func (sg *statsGroups) sum() *StatsInfo {
+func (sg *statsGroups) sum(ctx context.Context) *StatsInfo {
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
 
-	sum := NewStats()
+	sum := NewStats(ctx)
 	for _, stats := range sg.m {
 		stats.mu.RLock()
 		{
@@ -358,6 +359,7 @@ func (sg *statsGroups) sum() *StatsInfo {
 			sum.checks += stats.checks
 			sum.transfers += stats.transfers
 			sum.deletes += stats.deletes
+			sum.deletedDirs += stats.deletedDirs
 			sum.renames += stats.renames
 			sum.checking.merge(stats.checking)
 			sum.transferring.merge(stats.transferring)

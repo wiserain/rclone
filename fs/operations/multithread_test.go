@@ -17,64 +17,66 @@ import (
 )
 
 func TestDoMultiThreadCopy(t *testing.T) {
-	f := mockfs.NewFs("potato", "")
+	ctx := context.Background()
+	ci := fs.GetConfig(ctx)
+	f := mockfs.NewFs(ctx, "potato", "")
 	src := mockobject.New("file.txt").WithContent([]byte(random.String(100)), mockobject.SeekModeNone)
-	srcFs := mockfs.NewFs("sausage", "")
+	srcFs := mockfs.NewFs(ctx, "sausage", "")
 	src.SetFs(srcFs)
 
-	oldStreams := fs.Config.MultiThreadStreams
-	oldCutoff := fs.Config.MultiThreadCutoff
-	oldIsSet := fs.Config.MultiThreadSet
+	oldStreams := ci.MultiThreadStreams
+	oldCutoff := ci.MultiThreadCutoff
+	oldIsSet := ci.MultiThreadSet
 	defer func() {
-		fs.Config.MultiThreadStreams = oldStreams
-		fs.Config.MultiThreadCutoff = oldCutoff
-		fs.Config.MultiThreadSet = oldIsSet
+		ci.MultiThreadStreams = oldStreams
+		ci.MultiThreadCutoff = oldCutoff
+		ci.MultiThreadSet = oldIsSet
 	}()
 
-	fs.Config.MultiThreadStreams, fs.Config.MultiThreadCutoff = 4, 50
-	fs.Config.MultiThreadSet = false
+	ci.MultiThreadStreams, ci.MultiThreadCutoff = 4, 50
+	ci.MultiThreadSet = false
 
 	nullWriterAt := func(ctx context.Context, remote string, size int64) (fs.WriterAtCloser, error) {
 		panic("don't call me")
 	}
 	f.Features().OpenWriterAt = nullWriterAt
 
-	assert.True(t, doMultiThreadCopy(f, src))
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 
-	fs.Config.MultiThreadStreams = 0
-	assert.False(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadStreams = 1
-	assert.False(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadStreams = 2
-	assert.True(t, doMultiThreadCopy(f, src))
+	ci.MultiThreadStreams = 0
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadStreams = 1
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadStreams = 2
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 
-	fs.Config.MultiThreadCutoff = 200
-	assert.False(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadCutoff = 101
-	assert.False(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadCutoff = 100
-	assert.True(t, doMultiThreadCopy(f, src))
+	ci.MultiThreadCutoff = 200
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadCutoff = 101
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadCutoff = 100
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 
 	f.Features().OpenWriterAt = nil
-	assert.False(t, doMultiThreadCopy(f, src))
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
 	f.Features().OpenWriterAt = nullWriterAt
-	assert.True(t, doMultiThreadCopy(f, src))
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 
 	f.Features().IsLocal = true
 	srcFs.Features().IsLocal = true
-	assert.False(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadSet = true
-	assert.True(t, doMultiThreadCopy(f, src))
-	fs.Config.MultiThreadSet = false
-	assert.False(t, doMultiThreadCopy(f, src))
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadSet = true
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
+	ci.MultiThreadSet = false
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
 	srcFs.Features().IsLocal = false
-	assert.True(t, doMultiThreadCopy(f, src))
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 	srcFs.Features().IsLocal = true
-	assert.False(t, doMultiThreadCopy(f, src))
+	assert.False(t, doMultiThreadCopy(ctx, f, src))
 	f.Features().IsLocal = false
-	assert.True(t, doMultiThreadCopy(f, src))
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 	srcFs.Features().IsLocal = false
-	assert.True(t, doMultiThreadCopy(f, src))
+	assert.True(t, doMultiThreadCopy(ctx, f, src))
 }
 
 func TestMultithreadCalculateChunks(t *testing.T) {
@@ -105,6 +107,7 @@ func TestMultithreadCalculateChunks(t *testing.T) {
 func TestMultithreadCopy(t *testing.T) {
 	r := fstest.NewRun(t)
 	defer r.Finalise()
+	ctx := context.Background()
 
 	for _, test := range []struct {
 		size    int
@@ -121,25 +124,25 @@ func TestMultithreadCopy(t *testing.T) {
 			var err error
 			contents := random.String(test.size)
 			t1 := fstest.Time("2001-02-03T04:05:06.499999999Z")
-			file1 := r.WriteObject(context.Background(), "file1", contents, t1)
+			file1 := r.WriteObject(ctx, "file1", contents, t1)
 			fstest.CheckItems(t, r.Fremote, file1)
 			fstest.CheckItems(t, r.Flocal)
 
-			src, err := r.Fremote.NewObject(context.Background(), "file1")
+			src, err := r.Fremote.NewObject(ctx, "file1")
 			require.NoError(t, err)
 			accounting.GlobalStats().ResetCounters()
 			tr := accounting.GlobalStats().NewTransfer(src)
 
 			defer func() {
-				tr.Done(err)
+				tr.Done(ctx, err)
 			}()
-			dst, err := multiThreadCopy(context.Background(), r.Flocal, "file1", src, 2, tr)
+			dst, err := multiThreadCopy(ctx, r.Flocal, "file1", src, 2, tr)
 			require.NoError(t, err)
 			assert.Equal(t, src.Size(), dst.Size())
 			assert.Equal(t, "file1", dst.Remote())
 
-			fstest.CheckListingWithPrecision(t, r.Flocal, []fstest.Item{file1}, nil, fs.GetModifyWindow(r.Flocal, r.Fremote))
-			require.NoError(t, dst.Remove(context.Background()))
+			fstest.CheckListingWithPrecision(t, r.Flocal, []fstest.Item{file1}, nil, fs.GetModifyWindow(ctx, r.Flocal, r.Fremote))
+			require.NoError(t, dst.Remove(ctx))
 		})
 	}
 

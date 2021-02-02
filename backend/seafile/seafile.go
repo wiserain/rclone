@@ -147,7 +147,7 @@ type Fs struct {
 // ------------------------------------------------------------
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -197,15 +197,14 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		opt:           *opt,
 		endpoint:      u,
 		endpointURL:   u.String(),
-		srv:           rest.NewClient(fshttp.NewClient(fs.Config)).SetRoot(u.String()),
-		pacer:         getPacer(opt.URL),
+		srv:           rest.NewClient(fshttp.NewClient(ctx)).SetRoot(u.String()),
+		pacer:         getPacer(ctx, opt.URL),
 	}
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
 		BucketBased:             opt.LibraryName == "",
-	}).Fill(f)
+	}).Fill(ctx, f)
 
-	ctx := context.Background()
 	serverInfo, err := f.getServerInfo(ctx)
 	if err != nil {
 		return nil, err
@@ -297,7 +296,8 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 }
 
 // Config callback for 2FA
-func Config(name string, m configmap.Mapper) {
+func Config(ctx context.Context, name string, m configmap.Mapper) {
+	ci := fs.GetConfig(ctx)
 	serverURL, ok := m.Get(configURL)
 	if !ok || serverURL == "" {
 		// If there's no server URL, it means we're trying an operation at the backend level, like a "rclone authorize seafile"
@@ -306,7 +306,7 @@ func Config(name string, m configmap.Mapper) {
 	}
 
 	// Stop if we are running non-interactive config
-	if fs.Config.AutoConfirm {
+	if ci.AutoConfirm {
 		return
 	}
 
@@ -343,7 +343,7 @@ func Config(name string, m configmap.Mapper) {
 	if !strings.HasPrefix(url, "/") {
 		url += "/"
 	}
-	srv := rest.NewClient(fshttp.NewClient(fs.Config)).SetRoot(url)
+	srv := rest.NewClient(fshttp.NewClient(ctx)).SetRoot(url)
 
 	// We loop asking for a 2FA code
 	for {
@@ -663,7 +663,7 @@ func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) e
 
 // ==================== Optional Interface fs.Copier ====================
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -714,7 +714,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 // ==================== Optional Interface fs.Mover ====================
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -804,7 +804,7 @@ func (f *Fs) adjustDestination(ctx context.Context, libraryID, srcFilename, dstP
 // ==================== Optional Interface fs.DirMover ====================
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

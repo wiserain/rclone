@@ -2,6 +2,7 @@ package rcserver
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -54,7 +55,7 @@ func TestRcServer(t *testing.T) {
 	opt.Serve = true
 	opt.Files = testFs
 	mux := http.NewServeMux()
-	rcServer := newServer(&opt, mux)
+	rcServer := newServer(context.Background(), &opt, mux)
 	assert.NoError(t, rcServer.Serve())
 	defer func() {
 		rcServer.Close()
@@ -102,7 +103,7 @@ type testRun struct {
 func testServer(t *testing.T, tests []testRun, opt *rc.Options) {
 	mux := http.NewServeMux()
 	opt.HTTPOptions.Template = testTemplate
-	rcServer := newServer(opt, mux)
+	rcServer := newServer(context.Background(), opt, mux)
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			method := test.Method

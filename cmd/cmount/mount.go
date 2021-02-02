@@ -12,22 +12,27 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/cmd/mountlib"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/lib/atexit"
 	"github.com/rclone/rclone/vfs"
 )
 
 func init() {
 	name := "cmount"
-	if runtime.GOOS == "windows" {
+	cmountOnly := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	if cmountOnly {
 		name = "mount"
 	}
-	mountlib.NewMountCommand(name, false, mount)
+	cmd := mountlib.NewMountCommand(name, false, mount)
+	if cmountOnly {
+		cmd.Aliases = append(cmd.Aliases, "cmount")
+	}
 	mountlib.AddRc("cmount", mount)
 }
 
@@ -35,78 +40,64 @@ func init() {
 func mountOptions(VFS *vfs.VFS, device string, mountpoint string, opt *mountlib.Options) (options []string) {
 	// Options
 	options = []string{
-		"-o", "fsname=" + device,
-		"-o", "subtype=rclone",
-		"-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead),
 		"-o", fmt.Sprintf("attr_timeout=%g", opt.AttrTimeout.Seconds()),
-		// This causes FUSE to supply O_TRUNC with the Open
-		// call which is more efficient for cmount.  However
-		// it does not work with cgofuse on Windows with
-		// WinFSP so cmount must work with or without it.
-		"-o", "atomic_o_trunc",
 	}
 	if opt.DebugFUSE {
 		options = append(options, "-o", "debug")
 	}
 
-	// OSX options
-	if runtime.GOOS == "darwin" {
-		if opt.NoAppleDouble {
-			options = append(options, "-o", "noappledouble")
-		}
-		if opt.NoAppleXattr {
-			options = append(options, "-o", "noapplexattr")
-		}
-	}
-
-	// determine if ExtraOptions already has an opt in
-	hasOption := func(optionName string) bool {
-		optionName += "="
-		for _, option := range opt.ExtraOptions {
-			if strings.HasPrefix(option, optionName) {
-				return true
+	if runtime.GOOS == "windows" {
+		options = append(options, "-o", "uid=-1")
+		options = append(options, "-o", "gid=-1")
+		options = append(options, "--FileSystemName=rclone")
+		if opt.VolumeName != "" {
+			if opt.NetworkMode {
+				options = append(options, "--VolumePrefix="+opt.VolumeName)
+			} else {
+				options = append(options, "-o", "volname="+opt.VolumeName)
 			}
 		}
-		return false
-	}
-
-	// Windows options
-	if runtime.GOOS == "windows" {
-		// These cause WinFsp to mean the current user
-		if !hasOption("uid") {
-			options = append(options, "-o", "uid=-1")
+	} else {
+		options = append(options, "-o", "fsname="+device)
+		options = append(options, "-o", "subtype=rclone")
+		options = append(options, "-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead))
+		// This causes FUSE to supply O_TRUNC with the Open
+		// call which is more efficient for cmount.  However
+		// it does not work with cgofuse on Windows with
+		// WinFSP so cmount must work with or without it.
+		options = append(options, "-o", "atomic_o_trunc")
+		if opt.DaemonTimeout != 0 {
+			options = append(options, "-o", fmt.Sprintf("daemon_timeout=%d", int(opt.DaemonTimeout.Seconds())))
 		}
-		if !hasOption("gid") {
-			options = append(options, "-o", "gid=-1")
+		if opt.AllowNonEmpty {
+			options = append(options, "-o", "nonempty")
 		}
-		options = append(options, "--FileSystemName=rclone")
-	}
-
-	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		if opt.VolumeName != "" {
-			options = append(options, "-o", "volname="+opt.VolumeName)
+		if opt.AllowOther {
+			options = append(options, "-o", "allow_other")
 		}
-	}
-	if opt.AllowNonEmpty {
-		options = append(options, "-o", "nonempty")
-	}
-	if opt.AllowOther {
-		options = append(options, "-o", "allow_other")
-	}
-	if opt.AllowRoot {
-		options = append(options, "-o", "allow_root")
-	}
-	if opt.DefaultPermissions {
-		options = append(options, "-o", "default_permissions")
-	}
-	if VFS.Opt.ReadOnly {
-		options = append(options, "-o", "ro")
-	}
-	if opt.WritebackCache {
-		// FIXME? options = append(options, "-o", WritebackCache())
-	}
-	if opt.DaemonTimeout != 0 {
-		options = append(options, "-o", fmt.Sprintf("daemon_timeout=%d", int(opt.DaemonTimeout.Seconds())))
+		if opt.AllowRoot {
+			options = append(options, "-o", "allow_root")
+		}
+		if opt.DefaultPermissions {
+			options = append(options, "-o", "default_permissions")
+		}
+		if VFS.Opt.ReadOnly {
+			options = append(options, "-o", "ro")
+		}
+		if opt.WritebackCache {
+			// FIXME? options = append(options, "-o", WritebackCache())
+		}
+		if runtime.GOOS == "darwin" {
+			if opt.VolumeName != "" {
+				options = append(options, "-o", "volname="+opt.VolumeName)
+			}
+			if opt.NoAppleDouble {
+				options = append(options, "-o", "noappledouble")
+			}
+			if opt.NoAppleXattr {
+				options = append(options, "-o", "noapplexattr")
+			}
+		}
 	}
 	for _, option := range opt.ExtraOptions {
 		options = append(options, "-o", option)
@@ -137,22 +128,16 @@ func waitFor(fn func() bool) (ok bool) {
 //
 // returns an error, and an error channel for the serve process to
 // report an error when fusermount is called.
-func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error, func() error, error) {
-	f := VFS.Fs()
-	fs.Debugf(f, "Mounting on %q", mountpoint)
-
-	// Check the mountpoint - in Windows the mountpoint mustn't exist before the mount
-	if runtime.GOOS != "windows" {
-		fi, err := os.Stat(mountpoint)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "mountpoint")
-		}
-		if !fi.IsDir() {
-			return nil, nil, errors.New("mountpoint is not a directory")
-		}
+func mount(VFS *vfs.VFS, mountPath string, opt *mountlib.Options) (<-chan error, func() error, error) {
+	// Get mountpoint using OS specific logic
+	mountpoint, err := getMountpoint(mountPath, opt)
+	if err != nil {
+		return nil, nil, err
 	}
+	fs.Debugf(nil, "Mounting on %q (%q)", mountpoint, opt.VolumeName)
 
 	// Create underlying FS
+	f := VFS.Fs()
 	fsys := NewFS(VFS)
 	host := fuse.NewFileSystemHost(fsys)
 	host.SetCapReaddirPlus(true) // only works on Windows
@@ -183,9 +168,20 @@ func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error
 	unmount := func() error {
 		// Shutdown the VFS
 		fsys.VFS.Shutdown()
-		fs.Debugf(nil, "Calling host.Unmount")
-		if host.Unmount() {
-			fs.Debugf(nil, "host.Unmount succeeded")
+		var umountOK bool
+		if atomic.LoadInt32(&fsys.destroyed) != 0 {
+			fs.Debugf(nil, "Not calling host.Unmount as mount already Destroyed")
+			umountOK = true
+		} else if atexit.Signalled() {
+			// If we have received a signal then FUSE will be shutting down already
+			fs.Debugf(nil, "Not calling host.Unmount as signal received")
+			umountOK = true
+		} else {
+			fs.Debugf(nil, "Calling host.Unmount")
+			umountOK = host.Unmount()
+		}
+		if umountOK {
+			fs.Debugf(nil, "Unmounted successfully")
 			if runtime.GOOS == "windows" {
 				if !waitFor(func() bool {
 					_, err := os.Stat(mountpoint)

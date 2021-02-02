@@ -1,6 +1,7 @@
 package accounting
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"testing"
@@ -67,7 +68,8 @@ func TestPercentage(t *testing.T) {
 }
 
 func TestStatsError(t *testing.T) {
-	s := NewStats()
+	ctx := context.Background()
+	s := NewStats(ctx)
 	assert.Equal(t, int64(0), s.GetErrors())
 	assert.False(t, s.HadFatalError())
 	assert.False(t, s.HadRetryError())
@@ -132,6 +134,7 @@ func TestStatsError(t *testing.T) {
 }
 
 func TestStatsTotalDuration(t *testing.T) {
+	ctx := context.Background()
 	startTime := time.Now()
 	time1 := startTime.Add(-40 * time.Second)
 	time2 := time1.Add(10 * time.Second)
@@ -139,7 +142,7 @@ func TestStatsTotalDuration(t *testing.T) {
 	time4 := time3.Add(10 * time.Second)
 
 	t.Run("Single completed transfer", func(t *testing.T) {
-		s := NewStats()
+		s := NewStats(ctx)
 		tr1 := &Transfer{
 			startedAt:   time1,
 			completedAt: time2,
@@ -158,7 +161,7 @@ func TestStatsTotalDuration(t *testing.T) {
 	})
 
 	t.Run("Single uncompleted transfer", func(t *testing.T) {
-		s := NewStats()
+		s := NewStats(ctx)
 		tr1 := &Transfer{
 			startedAt: time1,
 		}
@@ -174,7 +177,7 @@ func TestStatsTotalDuration(t *testing.T) {
 	})
 
 	t.Run("Overlapping without ending", func(t *testing.T) {
-		s := NewStats()
+		s := NewStats(ctx)
 		tr1 := &Transfer{
 			startedAt:   time2,
 			completedAt: time3,
@@ -218,7 +221,7 @@ func TestStatsTotalDuration(t *testing.T) {
 	})
 
 	t.Run("Mixed completed and uncompleted transfers", func(t *testing.T) {
-		s := NewStats()
+		s := NewStats(ctx)
 		s.AddTransfer(&Transfer{
 			startedAt:   time1,
 			completedAt: time2,
@@ -382,6 +385,8 @@ func TestTimeRangeDuration(t *testing.T) {
 }
 
 func TestPruneTransfers(t *testing.T) {
+	ctx := context.Background()
+	ci := fs.GetConfig(ctx)
 	for _, test := range []struct {
 		Name                     string
 		Transfers                int
@@ -392,7 +397,7 @@ func TestPruneTransfers(t *testing.T) {
 			Name:                     "Limited number of StartedTransfers",
 			Limit:                    100,
 			Transfers:                200,
-			ExpectedStartedTransfers: 100 + fs.Config.Transfers,
+			ExpectedStartedTransfers: 100 + ci.Transfers,
 		},
 		{
 			Name:                     "Unlimited number of StartedTransfers",
@@ -406,7 +411,7 @@ func TestPruneTransfers(t *testing.T) {
 			MaxCompletedTransfers = test.Limit
 			defer func() { MaxCompletedTransfers = prevLimit }()
 
-			s := NewStats()
+			s := NewStats(ctx)
 			for i := int64(1); i <= int64(test.Transfers); i++ {
 				s.AddTransfer(&Transfer{
 					startedAt:   time.Unix(i, 0),

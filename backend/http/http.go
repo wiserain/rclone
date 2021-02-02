@@ -58,7 +58,7 @@ The input format is comma separated list of key,value pairs.  Standard
 
 For example to set a Cookie use 'Cookie,name=value', or '"Cookie","name=value"'.
 
-You can set multiple headers, eg '"Cookie","name=value","Authorization","xxx"'.
+You can set multiple headers, e.g. '"Cookie","name=value","Authorization","xxx"'.
 `,
 			Default:  fs.CommaSepList{},
 			Advanced: true,
@@ -115,8 +115,9 @@ type Options struct {
 type Fs struct {
 	name        string
 	root        string
-	features    *fs.Features // optional features
-	opt         Options      // options for this backend
+	features    *fs.Features   // optional features
+	opt         Options        // options for this backend
+	ci          *fs.ConfigInfo // global config
 	endpoint    *url.URL
 	endpointURL string // endpoint as a string
 	httpClient  *http.Client
@@ -145,8 +146,7 @@ func statusError(res *http.Response, err error) error {
 
 // NewFs creates a new Fs object from the name and root. It connects to
 // the host specified in the config file.
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.TODO()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -172,7 +172,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		return nil, err
 	}
 
-	client := fshttp.NewClient(fs.Config)
+	client := fshttp.NewClient(ctx)
 
 	var isFile = false
 	if !strings.HasSuffix(u.String(), "/") {
@@ -210,17 +210,19 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		return nil, err
 	}
 
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:        name,
 		root:        root,
 		opt:         *opt,
+		ci:          ci,
 		httpClient:  client,
 		endpoint:    u,
 		endpointURL: u.String(),
 	}
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	if isFile {
 		return f, fs.ErrorIsFile
 	}
@@ -440,14 +442,15 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 	var (
 		entriesMu sync.Mutex // to protect entries
 		wg        sync.WaitGroup
-		in        = make(chan string, fs.Config.Checkers)
+		checkers  = f.ci.Checkers
+		in        = make(chan string, checkers)
 	)
 	add := func(entry fs.DirEntry) {
 		entriesMu.Lock()
 		entries = append(entries, entry)
 		entriesMu.Unlock()
 	}
-	for i := 0; i < fs.Config.Checkers; i++ {
+	for i := 0; i < checkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -585,7 +588,7 @@ func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 	return errorReadOnly
 }
 
-// Storable returns whether the remote http file is a regular file (not a directory, symbolic link, block device, character device, named pipe, etc)
+// Storable returns whether the remote http file is a regular file (not a directory, symbolic link, block device, character device, named pipe, etc.)
 func (o *Object) Storable() bool {
 	return true
 }

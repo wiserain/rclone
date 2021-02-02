@@ -19,13 +19,13 @@ func setDefaultFromEnv(flags *pflag.FlagSet, name string) {
 	if found {
 		flag := flags.Lookup(name)
 		if flag == nil {
-			log.Fatalf("Couldn't find flag %q", name)
+			log.Fatalf("Couldn't find flag --%q", name)
 		}
 		err := flag.Value.Set(newValue)
 		if err != nil {
-			log.Fatalf("Invalid value for environment variable %q: %v", key, err)
+			log.Fatalf("Invalid value for environment variable %q when setting default for --%s: %v", key, name, err)
 		}
-		fs.Debugf(nil, "Set default for %q from %q to %q (%v)", name, key, newValue, flag.Value)
+		fs.Debugf(nil, "Set default for --%q from %q to %q (%v)", name, key, newValue, flag.Value)
 		flag.DefValue = newValue
 	}
 }
@@ -154,6 +154,15 @@ func VarP(value pflag.Value, name, shorthand, usage string) {
 func FVarP(flags *pflag.FlagSet, value pflag.Value, name, shorthand, usage string) {
 	flags.VarP(value, name, shorthand, usage)
 	setDefaultFromEnv(flags, name)
+}
+
+// VarPF defines a flag which can be overridden by an environment variable
+//
+// It is a thin wrapper around pflag.VarPF
+func VarPF(flags *pflag.FlagSet, value pflag.Value, name, shorthand, usage string) *pflag.Flag {
+	flag := flags.VarPF(value, name, shorthand, usage)
+	setDefaultFromEnv(flags, name)
+	return flag
 }
 
 // StringArrayP defines a flag which can be overridden by an environment variable

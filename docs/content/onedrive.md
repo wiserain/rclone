@@ -8,7 +8,7 @@ description: "Rclone docs for Microsoft OneDrive"
 
 Paths are specified as `remote:path`
 
-Paths may be as deep as required, eg `remote:directory/subdirectory`.
+Paths may be as deep as required, e.g. `remote:directory/subdirectory`.
 
 The initial setup for OneDrive involves getting a token from
 Microsoft which you need to do in your browser.  `rclone config` walks
@@ -128,7 +128,7 @@ If you are having problems with them (E.g., seeing a lot of throttling), you can
 Client ID and Key by following the steps below:
 
 1. Open https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade and then click `New registration`.
-2. Enter a name for your app, choose account type `Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)`, select `Web` in `Redirect URI` Enter `http://localhost:53682/` and click Register. Copy and keep the `Application (client) ID` under the app name for later use.
+2. Enter a name for your app, choose account type `Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)`, select `Web` in `Redirect URI`, then type (do not copy and paste) `http://localhost:53682/` and click Register. Copy and keep the `Application (client) ID` under the app name for later use.
 3. Under `manage` select `Certificates & secrets`, click `New client secret`. Copy and keep that secret for later use.
 4. Under `manage` select `API permissions`, click `Add a permission` and select `Microsoft Graph` then select `delegated permissions`.
 5. Search and select the following permissions: `Files.Read`, `Files.ReadWrite`, `Files.Read.All`, `Files.ReadWrite.All`, `offline_access`, `User.Read`. Once selected click `Add permissions` at the bottom.
@@ -163,8 +163,6 @@ the following characters are also replaced:
 | ?         | 0x3F  | ？          |
 | \         | 0x5C  | ＼          |
 | \|        | 0x7C  | ｜          |
-| #         | 0x23  | ＃          |
-| %         | 0x25  | ％          |
 
 File names can also not end with the following characters.
 These only get replaced if they are the last character in the name:
@@ -216,6 +214,24 @@ Leave blank normally.
 - Env Var:     RCLONE_ONEDRIVE_CLIENT_SECRET
 - Type:        string
 - Default:     ""
+
+#### --onedrive-region
+
+Choose national cloud region for OneDrive.
+
+- Config:      region
+- Env Var:     RCLONE_ONEDRIVE_REGION
+- Type:        string
+- Default:     "global"
+- Examples:
+    - "global"
+        - Microsoft Cloud Global
+    - "us"
+        - Microsoft Cloud for US Government
+    - "de"
+        - Microsoft Cloud Germany
+    - "cn"
+        - Azure and Office 365 operated by 21Vianet in China
 
 ### Advanced Options
 
@@ -298,12 +314,11 @@ listing, set this option.
 
 #### --onedrive-server-side-across-configs
 
-Allow server side operations (eg copy) to work across different onedrive configs.
+Allow server-side operations (e.g. copy) to work across different onedrive configs.
 
-This can be useful if you wish to do a server side copy between two
-different Onedrives.  Note that this isn't enabled by default
-because it isn't easy to tell if it will work between any two
-configurations.
+This will only work if you are copying between two OneDrive *Personal* drives AND
+the files to copy are already shared between them.  In other cases, rclone will
+fall back to normal copy (which will be slightly slower).
 
 - Config:      server_side_across_configs
 - Env Var:     RCLONE_ONEDRIVE_SERVER_SIDE_ACROSS_CONFIGS
@@ -331,6 +346,48 @@ this flag there.
 - Type:        bool
 - Default:     false
 
+#### --onedrive-link-scope
+
+Set the scope of the links created by the link command.
+
+- Config:      link_scope
+- Env Var:     RCLONE_ONEDRIVE_LINK_SCOPE
+- Type:        string
+- Default:     "anonymous"
+- Examples:
+    - "anonymous"
+        - Anyone with the link has access, without needing to sign in. This may include people outside of your organization. Anonymous link support may be disabled by an administrator.
+    - "organization"
+        - Anyone signed into your organization (tenant) can use the link to get access. Only available in OneDrive for Business and SharePoint.
+
+#### --onedrive-link-type
+
+Set the type of the links created by the link command.
+
+- Config:      link_type
+- Env Var:     RCLONE_ONEDRIVE_LINK_TYPE
+- Type:        string
+- Default:     "view"
+- Examples:
+    - "view"
+        - Creates a read-only link to the item.
+    - "edit"
+        - Creates a read-write link to the item.
+    - "embed"
+        - Creates an embeddable link to the item.
+
+#### --onedrive-link-password
+
+Set the password for links created by the link command.
+
+At the time of writing this only works with OneDrive personal paid accounts.
+
+
+- Config:      link_password
+- Env Var:     RCLONE_ONEDRIVE_LINK_PASSWORD
+- Type:        string
+- Default:     ""
+
 #### --onedrive-encoding
 
 This sets the encoding for the backend.
@@ -340,7 +397,7 @@ See: the [encoding section in the overview](/overview/#encoding) for more info.
 - Config:      encoding
 - Env Var:     RCLONE_ONEDRIVE_ENCODING
 - Type:        MultiEncoder
-- Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,Hash,Percent,BackSlash,Del,Ctl,LeftSpace,LeftTilde,RightSpace,RightPeriod,InvalidUtf8,Dot
+- Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,LeftSpace,LeftTilde,RightSpace,RightPeriod,InvalidUtf8,Dot
 
 {{< rem autogenerated options stop >}}
 
@@ -364,7 +421,7 @@ in it will be mapped to `？` instead.
 
 #### File sizes ####
 
-The largest allowed file size is 100GB for both OneDrive Personal and OneDrive for Business [(Updated 17 June 2020)](https://support.microsoft.com/en-us/office/invalid-file-names-and-file-types-in-onedrive-and-sharepoint-64883a5d-228e-48f5-b3d2-eb39e07630fa?ui=en-us&rs=en-us&ad=us#individualfilesize).
+The largest allowed file size is 250GB for both OneDrive Personal and OneDrive for Business [(Updated 13 Jan 2021)](https://support.microsoft.com/en-us/office/invalid-file-names-and-file-types-in-onedrive-and-sharepoint-64883a5d-228e-48f5-b3d2-eb39e07630fa?ui=en-us&rs=en-us&ad=us#individualfilesize).
 
 #### Path length ####
 

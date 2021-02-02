@@ -58,28 +58,30 @@ func init() {
 
 // Initialise rclone for testing
 func Initialise() {
+	ctx := context.Background()
+	ci := fs.GetConfig(ctx)
 	// Never ask for passwords, fail instead.
 	// If your local config is encrypted set environment variable
 	// "RCLONE_CONFIG_PASS=hunter2" (or your password)
-	fs.Config.AskPassword = false
+	ci.AskPassword = false
 	// Override the config file from the environment - we don't
 	// parse the flags any more so this doesn't happen
 	// automatically
 	if envConfig := os.Getenv("RCLONE_CONFIG"); envConfig != "" {
 		config.ConfigPath = envConfig
 	}
-	config.LoadConfig()
+	config.LoadConfig(ctx)
 	if *Verbose {
-		fs.Config.LogLevel = fs.LogLevelDebug
+		ci.LogLevel = fs.LogLevelDebug
 	}
 	if *DumpHeaders {
-		fs.Config.Dump |= fs.DumpHeaders
+		ci.Dump |= fs.DumpHeaders
 	}
 	if *DumpBodies {
-		fs.Config.Dump |= fs.DumpBodies
+		ci.Dump |= fs.DumpBodies
 	}
-	fs.Config.LowLevelRetries = *LowLevelRetries
-	fs.Config.UseListR = *UseListR
+	ci.LowLevelRetries = *LowLevelRetries
+	ci.UseListR = *UseListR
 }
 
 // Item represents an item for checking
@@ -344,7 +346,7 @@ func CheckListing(t *testing.T, f fs.Fs, items []Item) {
 // CheckItems checks the fs to see if it has only the items passed in
 // using a precision of fs.Config.ModifyWindow
 func CheckItems(t *testing.T, f fs.Fs, items ...Item) {
-	CheckListingWithPrecision(t, f, items, nil, fs.GetModifyWindow(f))
+	CheckListingWithPrecision(t, f, items, nil, fs.GetModifyWindow(context.TODO(), f))
 }
 
 // CompareItems compares a set of DirEntries to a slice of items and a list of dirs
@@ -453,7 +455,7 @@ func RandomRemote() (fs.Fs, string, func(), error) {
 		return nil, "", nil, err
 	}
 
-	remote, err := fs.NewFs(remoteName)
+	remote, err := fs.NewFs(context.Background(), remoteName)
 	if err != nil {
 		return nil, "", nil, err
 	}

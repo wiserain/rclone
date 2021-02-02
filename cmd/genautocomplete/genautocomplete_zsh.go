@@ -19,7 +19,7 @@ var zshCommandDefinition = &cobra.Command{
 Generates a zsh autocompletion script for rclone.
 
 This writes to /usr/share/zsh/vendor-completions/_rclone by default so will
-probably need to be run with sudo or as root, eg
+probably need to be run with sudo or as root, e.g.
 
     sudo rclone genautocomplete zsh
 
@@ -30,11 +30,20 @@ them directly
 
 If you supply a command line argument the script will be written
 there.
+
+If output_file is "-", then the output will be written to stdout.
 `,
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(0, 1, command, args)
 		out := "/usr/share/zsh/vendor-completions/_rclone"
 		if len(args) > 0 {
+			if args[0] == "-" {
+				err := cmd.Root.GenZshCompletion(os.Stdout)
+				if err != nil {
+					log.Fatal(err)
+				}
+				return
+			}
 			out = args[0]
 		}
 		outFile, err := os.Create(out)

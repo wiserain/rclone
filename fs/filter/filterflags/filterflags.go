@@ -2,6 +2,8 @@
 package filterflags
 
 import (
+	"context"
+
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/rc"
@@ -14,9 +16,14 @@ var (
 )
 
 // Reload the filters from the flags
-func Reload() (err error) {
-	filter.Active, err = filter.NewFilter(&Opt)
-	return err
+func Reload(ctx context.Context) (err error) {
+	fi := filter.GetConfig(ctx)
+	newFilter, err := filter.NewFilter(&Opt)
+	if err != nil {
+		return err
+	}
+	*fi = *newFilter
+	return nil
 }
 
 // AddFlags adds the non filing system specific flags to the command

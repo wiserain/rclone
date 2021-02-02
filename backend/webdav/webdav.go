@@ -81,7 +81,7 @@ func init() {
 			IsPassword: true,
 		}, {
 			Name: "bearer_token",
-			Help: "Bearer token instead of user/pass (eg a Macaroon)",
+			Help: "Bearer token instead of user/pass (e.g. a Macaroon)",
 		}, {
 			Name:     "bearer_token_command",
 			Help:     "Command to run to get a bearer token",
@@ -299,8 +299,7 @@ func (o *Object) filePath() string {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -337,13 +336,13 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		opt:         *opt,
 		endpoint:    u,
 		endpointURL: u.String(),
-		srv:         rest.NewClient(fshttp.NewClient(fs.Config)).SetRoot(u.String()),
-		pacer:       fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		srv:         rest.NewClient(fshttp.NewClient(ctx)).SetRoot(u.String()),
+		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 		precision:   fs.ModTimeNotSupported,
 	}
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	if opt.User != "" || opt.Pass != "" {
 		f.srv.SetUserPass(opt.User, opt.Pass)
 	} else if opt.BearerToken != "" {
@@ -832,7 +831,7 @@ func (f *Fs) Precision() time.Duration {
 	return f.precision
 }
 
-// Copy or Move src to this remote using server side copy operations.
+// Copy or Move src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -886,7 +885,7 @@ func (f *Fs) copyOrMove(ctx context.Context, src fs.Object, remote string, metho
 	return dstObj, nil
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -908,7 +907,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 	return f.purgeCheck(ctx, dir, false)
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -922,7 +921,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

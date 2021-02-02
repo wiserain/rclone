@@ -1,0 +1,37 @@
+#!/bin/bash
+
+set -e
+
+NAME=rclone-hdfs
+KERBEROS=${KERBEROS-"false"}
+
+. $(dirname "$0")/docker.bash
+
+start() {
+    docker run --rm -d --name "rclone-hdfs" \
+        --hostname "rclone-hdfs" \
+        -e "KERBEROS=$KERBEROS"  \
+        -p 127.0.0.1:9866:9866   \
+        -p 127.0.0.1:8020:8020   \
+        -p 127.0.0.1:750:750     \
+        -p 127.0.0.1:88:88       \
+        rclone/test-hdfs
+    sleep 10
+
+    if [ $KERBEROS = "true" ]; then
+        docker cp rclone-hdfs:/tmp/krb5cc_0 /tmp/krb5cc_`id -u`
+    fi
+
+    echo type=hdfs
+    echo namenode=127.0.0.1:8020
+    echo username=root
+}
+stop() {
+    if status ; then
+        docker logs $NAME > .stdout.log 2> .stderr.log
+        docker kill $NAME
+        echo "$NAME stopped"
+    fi
+}
+
+. $(dirname "$0")/run.bash

@@ -37,13 +37,14 @@ verifies checksums at all times. Transfers over limited bandwidth;
 intermittent connections, or subject to quota can be restarted, from
 the last good file transferred. You can
 [check](/commands/rclone_check/) the integrity of your files. Where
-possible, rclone employs server side transfers to minimise local
+possible, rclone employs server-side transfers to minimise local
 bandwidth use and transfers from one provider to another without
 using local disk.
 
 Virtual backends wrap local and cloud file systems to apply
 [encryption](/crypt/), 
 [caching](/cache/),
+[compression](/compress/)
 [chunking](/chunker/) and
 [joining](/union/).
 
@@ -86,7 +87,7 @@ Rclone helps you:
     - MD5, SHA1 hashes are checked at all times for file integrity
     - Timestamps are preserved on files
     - Operations can be restarted at any time
-    - Can be to and from network, eg two different cloud providers
+    - Can be to and from network, e.g. two different cloud providers
     - Can use multi-threaded downloads to local disk
 - [Copy](/commands/rclone_copy/) new or changed files to cloud storage
 - [Sync](/commands/rclone_sync/) (one way) to make a directory identical
@@ -114,10 +115,12 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="DigitalOcean Spaces" home="https://www.digitalocean.com/products/object-storage/" config="/s3/#digitalocean-spaces" >}}
 {{< provider name="Dreamhost" home="https://www.dreamhost.com/cloud/storage/" config="/s3/#dreamhost" >}}
 {{< provider name="Dropbox" home="https://www.dropbox.com/" config="/dropbox/" >}}
+{{< provider name="Enterprise File Fabric" home="https://storagemadeeasy.com/about/" config="/filefabric/" >}}
 {{< provider name="FTP" home="https://en.wikipedia.org/wiki/File_Transfer_Protocol" config="/ftp/" >}}
 {{< provider name="Google Cloud Storage" home="https://cloud.google.com/storage/" config="/googlecloudstorage/" >}}
 {{< provider name="Google Drive" home="https://www.google.com/drive/" config="/drive/" >}}
 {{< provider name="Google Photos" home="https://www.google.com/photos/about/" config="/googlephotos/" >}}
+{{< provider name="HDFS" home="https://hadoop.apache.org/" config="/hdfs/" >}}
 {{< provider name="HTTP" home="https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol" config="/http/" >}}
 {{< provider name="Hubic" home="https://hubic.com/" config="/hubic/" >}}
 {{< provider name="Jottacloud" home="https://www.jottacloud.com/en/" config="/jottacloud/" >}}
@@ -152,6 +155,7 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="Wasabi" home="https://wasabi.com/" config="/s3/#wasabi" >}}
 {{< provider name="WebDAV" home="https://en.wikipedia.org/wiki/WebDAV" config="/webdav/" >}}
 {{< provider name="Yandex Disk" home="https://disk.yandex.com/" config="/yandex/" >}}
+{{< provider name="Zoho WorkDrive" home="https://www.zoho.com/workdrive/" config="/zoho/" >}}
 {{< provider name="The local filesystem" home="/local/" config="/local/" end="true">}}
 {{< /provider_list >}}
 

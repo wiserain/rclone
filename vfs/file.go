@@ -135,7 +135,7 @@ func (f *File) Inode() uint64 {
 	return f.inode
 }
 
-// Node returns the Node assocuated with this - satisfies Noder interface
+// Node returns the Node associated with this - satisfies Noder interface
 func (f *File) Node() Node {
 	return f
 }
@@ -166,7 +166,7 @@ func (f *File) rename(ctx context.Context, destDir *Dir, newName string) error {
 	f.mu.RUnlock()
 
 	if features := d.Fs().Features(); features.Move == nil && features.Copy == nil {
-		err := errors.Errorf("Fs %q can't rename files (no server side Move or Copy)", d.Fs())
+		err := errors.Errorf("Fs %q can't rename files (no server-side Move or Copy)", d.Fs())
 		fs.Errorf(f.Path(), "Dir.Rename error: %v", err)
 		return err
 	}
@@ -403,6 +403,13 @@ func (f *File) _writingInProgress() bool {
 	return f.o == nil || len(f.writers) != 0
 }
 
+// writingInProgress returns true of there are any open writers
+func (f *File) writingInProgress() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.o == nil || len(f.writers) != 0
+}
+
 // Update the size while writing
 func (f *File) setSize(n int64) {
 	atomic.StoreInt64(&f.size, n)
@@ -499,7 +506,7 @@ func (f *File) openWrite(flags int) (fh *WriteFileHandle, err error) {
 	return fh, nil
 }
 
-// openRW open the file for read and write using a temporay file
+// openRW open the file for read and write using a temporary file
 //
 // It uses the open flags passed in.
 func (f *File) openRW(flags int) (fh *RWFileHandle, err error) {
@@ -611,7 +618,7 @@ func (f *File) Fs() fs.Fs {
 //   O_CREATE create a new file if none exists.
 //   O_EXCL   used with O_CREATE, file must not exist
 //   O_SYNC   open for synchronous I/O.
-//   O_TRUNC  if possible, truncate file when opene
+//   O_TRUNC  if possible, truncate file when opened
 //
 // We ignore O_SYNC and O_EXCL
 func (f *File) Open(flags int) (fd Handle, err error) {

@@ -2,6 +2,7 @@
 package rcserver
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -41,7 +42,7 @@ var promHandler http.Handler
 var onlyOnceWarningAllowOrigin sync.Once
 
 func init() {
-	rcloneCollector := accounting.NewRcloneCollector()
+	rcloneCollector := accounting.NewRcloneCollector(context.Background())
 	prometheus.MustRegister(rcloneCollector)
 	promHandler = promhttp.Handler()
 }
@@ -49,11 +50,11 @@ func init() {
 // Start the remote control server if configured
 //
 // If the server wasn't configured the *Server returned may be nil
-func Start(opt *rc.Options) (*Server, error) {
+func Start(ctx context.Context, opt *rc.Options) (*Server, error) {
 	jobs.SetOpt(opt) // set the defaults for jobs
 	if opt.Enabled {
 		// Serve on the DefaultServeMux so can have global registrations appear
-		s := newServer(opt, http.DefaultServeMux)
+		s := newServer(ctx, opt, http.DefaultServeMux)
 		return s, s.Serve()
 	}
 	return nil, nil
@@ -62,12 +63,13 @@ func Start(opt *rc.Options) (*Server, error) {
 // Server contains everything to run the rc server
 type Server struct {
 	*httplib.Server
+	ctx            context.Context // for global config
 	files          http.Handler
 	pluginsHandler http.Handler
 	opt            *rc.Options
 }
 
-func newServer(opt *rc.Options, mux *http.ServeMux) *Server {
+func newServer(ctx context.Context, opt *rc.Options, mux *http.ServeMux) *Server {
 	fileHandler := http.Handler(nil)
 	pluginsHandler := http.Handler(nil)
 	// Add some more mime types which are often missing
@@ -113,6 +115,7 @@ func newServer(opt *rc.Options, mux *http.ServeMux) *Server {
 
 	s := &Server{
 		Server:         httplib.NewServer(mux, &opt.HTTPOptions),
+		ctx:            ctx,
 		opt:            opt,
 		files:          fileHandler,
 		pluginsHandler: pluginsHandler,
@@ -335,7 +338,7 @@ func (s *Server) serveRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveRemote(w http.ResponseWriter, r *http.Request, path string, fsName string) {
-	f, err := cache.Get(fsName)
+	f, err := cache.Get(s.ctx, fsName)
 	if err != nil {
 		writeError(path, nil, w, errors.Wrap(err, "failed to make Fs"), http.StatusInternalServerError)
 		return

@@ -86,7 +86,7 @@ func newTransferRemoteSize(stats *StatsInfo, remote string, size int64, checking
 
 // Done ends the transfer.
 // Must be called after transfer is finished to run proper cleanups.
-func (tr *Transfer) Done(err error) {
+func (tr *Transfer) Done(ctx context.Context, err error) {
 	if err != nil {
 		err = tr.stats.Error(err)
 
@@ -99,10 +99,11 @@ func (tr *Transfer) Done(err error) {
 	acc := tr.acc
 	tr.mu.RUnlock()
 
+	ci := fs.GetConfig(ctx)
 	if acc != nil {
 		// Close the file if it is still open
 		if err := acc.Close(); err != nil {
-			fs.LogLevelPrintf(fs.Config.StatsLogLevel, nil, "can't close account: %+v\n", err)
+			fs.LogLevelPrintf(ci.StatsLogLevel, nil, "can't close account: %+v\n", err)
 		}
 		// Signal done with accounting
 		acc.Done()
@@ -123,15 +124,16 @@ func (tr *Transfer) Done(err error) {
 }
 
 // Reset allows to switch the Account to another transfer method.
-func (tr *Transfer) Reset() {
+func (tr *Transfer) Reset(ctx context.Context) {
 	tr.mu.RLock()
 	acc := tr.acc
 	tr.acc = nil
 	tr.mu.RUnlock()
+	ci := fs.GetConfig(ctx)
 
 	if acc != nil {
 		if err := acc.Close(); err != nil {
-			fs.LogLevelPrintf(fs.Config.StatsLogLevel, nil, "can't close account: %+v\n", err)
+			fs.LogLevelPrintf(ci.StatsLogLevel, nil, "can't close account: %+v\n", err)
 		}
 	}
 }

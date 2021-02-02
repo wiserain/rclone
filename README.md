@@ -30,11 +30,13 @@ Rclone *("rsync for cloud storage")* is a command line program to sync files and
   * DigitalOcean Spaces [:page_facing_up:](https://rclone.org/s3/#digitalocean-spaces)
   * Dreamhost [:page_facing_up:](https://rclone.org/s3/#dreamhost)
   * Dropbox [:page_facing_up:](https://rclone.org/dropbox/)
+  * Enterprise File Fabric [:page_facing_up:](https://rclone.org/filefabric/)
   * FTP [:page_facing_up:](https://rclone.org/ftp/)
   * GetSky [:page_facing_up:](https://rclone.org/jottacloud/)
   * Google Cloud Storage [:page_facing_up:](https://rclone.org/googlecloudstorage/)
   * Google Drive [:page_facing_up:](https://rclone.org/drive/)
   * Google Photos [:page_facing_up:](https://rclone.org/googlephotos/)
+  * HDFS (Hadoop Distributed Filesystem) [:page_facing_up:](https://rclone.org/hdfs/)
   * HTTP [:page_facing_up:](https://rclone.org/http/)
   * Hubic [:page_facing_up:](https://rclone.org/hubic/)
   * Jottacloud [:page_facing_up:](https://rclone.org/jottacloud/)
@@ -68,6 +70,7 @@ Rclone *("rsync for cloud storage")* is a command line program to sync files and
   * Wasabi [:page_facing_up:](https://rclone.org/s3/#wasabi)
   * WebDAV [:page_facing_up:](https://rclone.org/webdav/)
   * Yandex Disk [:page_facing_up:](https://rclone.org/yandex/)
+  * Zoho WorkDrive [:page_facing_up:](https://rclone.org/zoho/)
   * The local filesystem [:page_facing_up:](https://rclone.org/local/)
   
 Please see [the full list of all storage providers and their features](https://rclone.org/overview/)
@@ -82,6 +85,7 @@ Please see [the full list of all storage providers and their features](https://r
   * [Check](https://rclone.org/commands/rclone_check/) mode to check for file hash equality
   * Can sync to and from network, e.g. two different cloud accounts
   * Optional large file chunking ([Chunker](https://rclone.org/chunker/))
+  * Optional transparent compression ([Compress](https://rclone.org/compress/))
   * Optional encryption ([Crypt](https://rclone.org/crypt/))
   * Optional cache ([Cache](https://rclone.org/cache/))
   * Optional FUSE mount ([rclone mount](https://rclone.org/commands/rclone_mount/))

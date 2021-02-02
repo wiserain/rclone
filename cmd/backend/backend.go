@@ -47,7 +47,7 @@ for more info).
 
     rclone backend features remote:
 
-Pass options to the backend command with -o. This should be key=value or key, eg:
+Pass options to the backend command with -o. This should be key=value or key, e.g.:
 
     rclone backend stats remote:path stats -o format=json -o long
 
@@ -74,7 +74,7 @@ Note to run these commands on a running backend then see
 			if err != nil {
 				return err
 			}
-			f, err := fsInfo.NewFs(configName, fsPath, config)
+			f, err := fsInfo.NewFs(context.Background(), configName, fsPath, config)
 			if err != nil {
 				return err
 			}

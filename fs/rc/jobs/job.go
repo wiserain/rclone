@@ -29,11 +29,68 @@ type Job struct {
 	Duration  float64   `json:"duration"`
 	Output    rc.Params `json:"output"`
 	Stop      func()    `json:"-"`
+	listeners []*func()
 
 	// realErr is the Error before printing it as a string, it's used to return
 	// the real error to the upper application layers while still printing the
 	// string error message.
 	realErr error
+}
+
+// mark the job as finished
+func (job *Job) finish(out rc.Params, err error) {
+	job.mu.Lock()
+	job.EndTime = time.Now()
+	if out == nil {
+		out = make(rc.Params)
+	}
+	job.Output = out
+	job.Duration = job.EndTime.Sub(job.StartTime).Seconds()
+	if err != nil {
+		job.realErr = err
+		job.Error = err.Error()
+		job.Success = false
+	} else {
+		job.realErr = nil
+		job.Error = ""
+		job.Success = true
+	}
+	job.Finished = true
+
+	// Notify listeners that the job is finished
+	for i := range job.listeners {
+		go (*job.listeners[i])()
+	}
+
+	job.mu.Unlock()
+	running.kickExpire() // make sure this job gets expired
+}
+
+func (job *Job) addListener(fn *func()) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.listeners = append(job.listeners, fn)
+}
+
+func (job *Job) removeListener(fn *func()) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	for i, ln := range job.listeners {
+		if ln == fn {
+			job.listeners = append(job.listeners[:i], job.listeners[i+1:]...)
+			return
+		}
+	}
+}
+
+// run the job until completion writing the return status
+func (job *Job) run(ctx context.Context, fn rc.Func, in rc.Params) {
+	defer func() {
+		if r := recover(); r != nil {
+			job.finish(nil, errors.Errorf("panic received: %v \n%s", r, string(debug.Stack())))
+		}
+	}()
+	job.finish(fn(ctx, in))
 }
 
 // Jobs describes a collection of running tasks
@@ -117,39 +174,6 @@ func (jobs *Jobs) Get(ID int64) *Job {
 	return jobs.jobs[ID]
 }
 
-// mark the job as finished
-func (job *Job) finish(out rc.Params, err error) {
-	job.mu.Lock()
-	job.EndTime = time.Now()
-	if out == nil {
-		out = make(rc.Params)
-	}
-	job.Output = out
-	job.Duration = job.EndTime.Sub(job.StartTime).Seconds()
-	if err != nil {
-		job.realErr = err
-		job.Error = err.Error()
-		job.Success = false
-	} else {
-		job.realErr = nil
-		job.Error = ""
-		job.Success = true
-	}
-	job.Finished = true
-	job.mu.Unlock()
-	running.kickExpire() // make sure this job gets expired
-}
-
-// run the job until completion writing the return status
-func (job *Job) run(ctx context.Context, fn rc.Func, in rc.Params) {
-	defer func() {
-		if r := recover(); r != nil {
-			job.finish(nil, errors.Errorf("panic received: %v \n%s", r, string(debug.Stack())))
-		}
-	}()
-	job.finish(fn(ctx, in))
-}
-
 func getGroup(in rc.Params) string {
 	// Check to see if the group is set
 	group, err := in.GetString("_group")
@@ -231,6 +255,21 @@ func ExecuteJob(ctx context.Context, fn rc.Func, in rc.Params) (rc.Params, int64
 	return job.Output, job.ID, job.realErr
 }
 
+// OnFinish adds listener to jobid that will be triggered when job is finished.
+// It returns a function to cancel listening.
+func OnFinish(jobID int64, fn func()) (func(), error) {
+	job := running.Get(jobID)
+	if job == nil {
+		return func() {}, errors.New("job not found")
+	}
+	if job.Finished {
+		fn()
+	} else {
+		job.addListener(&fn)
+	}
+	return func() { job.removeListener(&fn) }, nil
+}
+
 func init() {
 	rc.Add(rc.Call{
 		Path:  "job/status",
@@ -244,11 +283,11 @@ Results
 
 - finished - boolean
 - duration - time in seconds that the job ran for
-- endTime - time the job finished (eg "2018-10-26T18:50:20.528746884+01:00")
+- endTime - time the job finished (e.g. "2018-10-26T18:50:20.528746884+01:00")
 - error - error from the job or empty string for no error
 - finished - boolean whether the job has finished or not
 - id - as passed in above
-- startTime - time the job started (eg "2018-10-26T18:50:20.528336039+01:00")
+- startTime - time the job started (e.g. "2018-10-26T18:50:20.528336039+01:00")
 - success - boolean - true for success false otherwise
 - output - output of the job as would have been returned if called synchronously
 - progress - output of the progress related to the underlying job

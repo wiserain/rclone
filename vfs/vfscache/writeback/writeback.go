@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	maxUploadDelay = 5 * time.Minute // max delay betwen upload attempts
+	maxUploadDelay = 5 * time.Minute // max delay between upload attempts
 )
 
 // PutFn is the interface that item provides to store the data
@@ -32,7 +32,7 @@ type WriteBack struct {
 	lookup  map[Handle]*writeBackItem // for getting a *writeBackItem from a Handle - writeBackItems are in here until cancelled
 	opt     *vfscommon.Options        // VFS options
 	timer   *time.Timer               // next scheduled time for the uploader
-	expiry  time.Time                 // time the next item exires or IsZero
+	expiry  time.Time                 // time the next item expires or IsZero
 	uploads int                       // number of uploads in progress
 
 	// read and written with atomic
@@ -416,7 +416,7 @@ func (wb *WriteBack) processItems(ctx context.Context) {
 	resetTimer := true
 	for wbItem := wb._peekItem(); wbItem != nil && time.Until(wbItem.expiry) <= 0; wbItem = wb._peekItem() {
 		// If reached transfer limit don't restart the timer
-		if wb.uploads >= fs.Config.Transfers {
+		if wb.uploads >= fs.GetConfig(context.TODO()).Transfers {
 			fs.Debugf(wbItem.name, "vfs cache: delaying writeback as --transfers exceeded")
 			resetTimer = false
 			break

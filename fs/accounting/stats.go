@@ -2,6 +2,7 @@ package accounting
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/rc"
+	"github.com/rclone/rclone/lib/terminal"
 )
 
 // MaxCompletedTransfers specifies maximum number of completed transfers in startedTransfers list
@@ -21,6 +23,8 @@ var startTime = time.Now()
 // StatsInfo accounts all transfers
 type StatsInfo struct {
 	mu                sync.RWMutex
+	ctx               context.Context
+	ci                *fs.ConfigInfo
 	bytes             int64
 	errors            int64
 	lastError         error
@@ -39,6 +43,7 @@ type StatsInfo struct {
 	renameQueue       int
 	renameQueueSize   int64
 	deletes           int64
+	deletedDirs       int64
 	inProgress        *inProgress
 	startedTransfers  []*Transfer   // currently active transfers
 	oldTimeRanges     timeRanges    // a merged list of time ranges for the transfers
@@ -47,11 +52,14 @@ type StatsInfo struct {
 }
 
 // NewStats creates an initialised StatsInfo
-func NewStats() *StatsInfo {
+func NewStats(ctx context.Context) *StatsInfo {
+	ci := fs.GetConfig(ctx)
 	return &StatsInfo{
-		checking:     newTransferMap(fs.Config.Checkers, "checking"),
-		transferring: newTransferMap(fs.Config.Transfers, "transferring"),
-		inProgress:   newInProgress(),
+		ctx:          ctx,
+		ci:           ci,
+		checking:     newTransferMap(ci.Checkers, "checking"),
+		transferring: newTransferMap(ci.Transfers, "transferring"),
+		inProgress:   newInProgress(ctx),
 	}
 }
 
@@ -67,6 +75,7 @@ func (s *StatsInfo) RemoteStats() (out rc.Params, err error) {
 	out["checks"] = s.checks
 	out["transfers"] = s.transfers
 	out["deletes"] = s.deletes
+	out["deletedDirs"] = s.deletedDirs
 	out["renames"] = s.renames
 	out["transferTime"] = s.totalDuration().Seconds()
 	out["elapsedTime"] = time.Since(startTime).Seconds()
@@ -237,7 +246,7 @@ func (s *StatsInfo) String() string {
 	}
 
 	displaySpeed := speed
-	if fs.Config.DataRateUnit == "bits" {
+	if s.ci.DataRateUnit == "bits" {
 		displaySpeed *= 8
 	}
 
@@ -253,7 +262,7 @@ func (s *StatsInfo) String() string {
 		dateString   = ""
 	)
 
-	if !fs.Config.StatsOneLine {
+	if !s.ci.StatsOneLine {
 		_, _ = fmt.Fprintf(buf, "\nTransferred:   	")
 	} else {
 		xfrchk := []string{}
@@ -266,9 +275,9 @@ func (s *StatsInfo) String() string {
 		if len(xfrchk) > 0 {
 			xfrchkString = fmt.Sprintf(" (%s)", strings.Join(xfrchk, ", "))
 		}
-		if fs.Config.StatsOneLineDate {
+		if s.ci.StatsOneLineDate {
 			t := time.Now()
-			dateString = t.Format(fs.Config.StatsOneLineDateFormat) // Including the separator so people can customize it
+			dateString = t.Format(s.ci.StatsOneLineDateFormat) // Including the separator so people can customize it
 		}
 	}
 
@@ -277,12 +286,17 @@ func (s *StatsInfo) String() string {
 		fs.SizeSuffix(s.bytes),
 		fs.SizeSuffix(totalSize).Unit("Bytes"),
 		percent(s.bytes, totalSize),
-		fs.SizeSuffix(displaySpeed).Unit(strings.Title(fs.Config.DataRateUnit)+"/s"),
+		fs.SizeSuffix(displaySpeed).Unit(strings.Title(s.ci.DataRateUnit)+"/s"),
 		etaString(currentSize, totalSize, speed),
 		xfrchkString,
 	)
 
-	if !fs.Config.StatsOneLine {
+	if s.ci.ProgressTerminalTitle {
+		// Writes ETA to the terminal title
+		terminal.WriteTerminalTitle("ETA: " + etaString(currentSize, totalSize, speed))
+	}
+
+	if !s.ci.StatsOneLine {
 		_, _ = buf.WriteRune('\n')
 		errorDetails := ""
 		switch {
@@ -304,8 +318,8 @@ func (s *StatsInfo) String() string {
 			_, _ = fmt.Fprintf(buf, "Checks:        %10d / %d, %s\n",
 				s.checks, totalChecks, percent(s.checks, totalChecks))
 		}
-		if s.deletes != 0 {
-			_, _ = fmt.Fprintf(buf, "Deleted:       %10d\n", s.deletes)
+		if s.deletes != 0 || s.deletedDirs != 0 {
+			_, _ = fmt.Fprintf(buf, "Deleted:       %10d (files), %d (dirs)\n", s.deletes, s.deletedDirs)
 		}
 		if s.renames != 0 {
 			_, _ = fmt.Fprintf(buf, "Renamed:       %10d\n", s.renames)
@@ -322,12 +336,12 @@ func (s *StatsInfo) String() string {
 	s.mu.RUnlock()
 
 	// Add per transfer stats if required
-	if !fs.Config.StatsOneLine {
+	if !s.ci.StatsOneLine {
 		if !s.checking.empty() {
-			_, _ = fmt.Fprintf(buf, "Checking:\n%s\n", s.checking.String(s.inProgress, s.transferring))
+			_, _ = fmt.Fprintf(buf, "Checking:\n%s\n", s.checking.String(s.ctx, s.inProgress, s.transferring))
 		}
 		if !s.transferring.empty() {
-			_, _ = fmt.Fprintf(buf, "Transferring:\n%s\n", s.transferring.String(s.inProgress, nil))
+			_, _ = fmt.Fprintf(buf, "Transferring:\n%s\n", s.transferring.String(s.ctx, s.inProgress, nil))
 		}
 	}
 
@@ -352,11 +366,11 @@ func (s *StatsInfo) Transferred() []TransferSnapshot {
 
 // Log outputs the StatsInfo to the log
 func (s *StatsInfo) Log() {
-	if fs.Config.UseJSONLog {
+	if s.ci.UseJSONLog {
 		out, _ := s.RemoteStats()
-		fs.LogLevelPrintf(fs.Config.StatsLogLevel, nil, "%v%v\n", s, fs.LogValue("stats", out))
+		fs.LogLevelPrintf(s.ci.StatsLogLevel, nil, "%v%v\n", s, fs.LogValueHide("stats", out))
 	} else {
-		fs.LogLevelPrintf(fs.Config.StatsLogLevel, nil, "%v\n", s)
+		fs.LogLevelPrintf(s.ci.StatsLogLevel, nil, "%v\n", s)
 	}
 
 }
@@ -455,6 +469,14 @@ func (s *StatsInfo) Deletes(deletes int64) int64 {
 	return s.deletes
 }
 
+// DeletedDirs updates the stats for deletedDirs
+func (s *StatsInfo) DeletedDirs(deletedDirs int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deletedDirs += deletedDirs
+	return s.deletedDirs
+}
+
 // Renames updates the stats for renames
 func (s *StatsInfo) Renames(renames int64) int64 {
 	s.mu.Lock()
@@ -476,6 +498,7 @@ func (s *StatsInfo) ResetCounters() {
 	s.checks = 0
 	s.transfers = 0
 	s.deletes = 0
+	s.deletedDirs = 0
 	s.renames = 0
 	s.startedTransfers = nil
 	s.oldDuration = 0
@@ -663,7 +686,7 @@ func (s *StatsInfo) PruneTransfers() {
 	}
 	s.mu.Lock()
 	// remove a transfer from the start if we are over quota
-	if len(s.startedTransfers) > MaxCompletedTransfers+fs.Config.Transfers {
+	if len(s.startedTransfers) > MaxCompletedTransfers+s.ci.Transfers {
 		for i, tr := range s.startedTransfers {
 			if tr.IsDone() {
 				s.removeTransfer(tr, i)

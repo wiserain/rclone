@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/rclone/rclone/cmd"
+	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/spf13/cobra"
@@ -12,12 +13,14 @@ import (
 
 var (
 	dedupeMode = operations.DeduplicateInteractive
+	byHash     = false
 )
 
 func init() {
 	cmd.Root.AddCommand(commandDefinition)
 	cmdFlag := commandDefinition.Flags()
 	flags.FVarP(cmdFlag, &dedupeMode, "dedupe-mode", "", "Dedupe mode interactive|skip|first|newest|oldest|largest|smallest|rename.")
+	flags.BoolVarP(cmdFlag, &byHash, "by-hash", "", false, "Find indentical hashes rather than names")
 }
 
 var commandDefinition = &cobra.Command{
@@ -27,27 +30,37 @@ var commandDefinition = &cobra.Command{
 
 By default ` + "`dedupe`" + ` interactively finds files with duplicate
 names and offers to delete all but one or rename them to be
-different.
+different. This is known as deduping by name.
 
-This is only useful with backends like Google Drive which can have
-duplicate file names. It can be run on wrapping backends (eg crypt) if
-they wrap a backend which supports duplicate file names.
+Deduping by name is only useful with backends like Google Drive which
+can have duplicate file names. It can be run on wrapping backends
+(e.g. crypt) if they wrap a backend which supports duplicate file
+names.
 
-In the first pass it will merge directories with the same name.  It
-will do this iteratively until all the identically named directories
-have been merged.
+However if --by-hash is passed in then dedupe will find files with
+duplicate hashes instead which will work on any backend which supports
+at least one hash. This can be used to find files with duplicate
+content. This is known as deduping by hash.
 
-In the second pass, for every group of duplicate file names, it will
-delete all but one identical files it finds without confirmation.
-This means that for most duplicated files the ` + "`dedupe`" + `
-command will not be interactive.
+If deduping by name, first rclone will merge directories with the same
+name.  It will do this iteratively until all the identically named
+directories have been merged.
+
+Next, if deduping by name, for every group of duplicate file names /
+hashes, it will delete all but one identical files it finds without
+confirmation.  This means that for most duplicated files the ` +
+		"`dedupe`" + ` command will not be interactive.
 
 ` + "`dedupe`" + ` considers files to be identical if they have the
-same hash. If the backend does not support hashes (eg crypt wrapping
+same file path and the same hash. If the backend does not support hashes (e.g. crypt wrapping
 Google Drive) then they will never be found to be identical. If you
 use the ` + "`--size-only`" + ` flag then files will be considered
 identical if they have the same size (any hash will be ignored). This
 can be useful on crypt backends which do not support hashes.
+
+Next rclone will resolve the remaining duplicates. Exactly which
+action is taken depends on the dedupe mode. By default rclone will
+interactively query the user for each one.
 
 **Important**: Since this can cause data loss, test first with the
 ` + "`--dry-run` or the `--interactive`/`-i`" + ` flag.
@@ -80,7 +93,7 @@ Now the ` + "`dedupe`" + ` session
     s/k/r> k
     Enter the number of the file to keep> 1
     one.txt: Deleted 1 extra copies
-    two.txt: Found 3 files with duplicates names
+    two.txt: Found 3 files with duplicate names
     two.txt: 3 duplicates remain
       1:       564374 bytes, 2016-03-05 16:22:52.118000000, MD5 7594e7dc9fc28f727c42ee3e0749de81
       2:      6048320 bytes, 2016-03-05 16:22:46.185000000, MD5 1eedaa9fe86fd4b8632e2ac549403b36
@@ -111,6 +124,7 @@ Dedupe can be run non interactively using the ` + "`" + `--dedupe-mode` + "`" + 
   * ` + "`" + `--dedupe-mode largest` + "`" + ` - removes identical files then keeps the largest one.
   * ` + "`" + `--dedupe-mode smallest` + "`" + ` - removes identical files then keeps the smallest one.
   * ` + "`" + `--dedupe-mode rename` + "`" + ` - removes identical files then renames the rest to be different.
+  * ` + "`" + `--dedupe-mode list` + "`" + ` - lists duplicate dirs and files only and changes nothing.
 
 For example to rename all the identically named photos in your Google Photos directory, do
 
@@ -130,8 +144,11 @@ Or
 			args = args[1:]
 		}
 		fdst := cmd.NewFsSrc(args)
+		if !byHash && !fdst.Features().DuplicateFiles {
+			fs.Logf(fdst, "Can't have duplicate names here. Perhaps you wanted --by-hash ? Continuing anyway.")
+		}
 		cmd.Run(false, false, command, func() error {
-			return operations.Deduplicate(context.Background(), fdst, dedupeMode)
+			return operations.Deduplicate(context.Background(), fdst, dedupeMode, byHash)
 		})
 	},
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/fs/walk"
+	"github.com/rclone/rclone/lib/atexit"
 	"github.com/rclone/rclone/lib/bucket"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
@@ -51,7 +52,7 @@ default for this is 5GB which is its maximum value.`,
 	Name: "no_chunk",
 	Help: `Don't chunk files during streaming upload.
 
-When doing streaming uploads (eg using rcat or mount) setting this
+When doing streaming uploads (e.g. using rcat or mount) setting this
 flag will cause the swift backend to not upload chunked files.
 
 This will limit the maximum upload size to 5GB. However non chunked
@@ -168,6 +169,11 @@ func init() {
 				Value: "admin",
 			}},
 		}, {
+			Name:     "leave_parts_on_error",
+			Help:     `If true avoid calling abort upload on a failure. It should be set to true for resuming uploads across different sessions.`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name: "storage_policy",
 			Help: `The storage policy to use when creating a new container
 
@@ -208,6 +214,7 @@ type Options struct {
 	ApplicationCredentialID     string               `config:"application_credential_id"`
 	ApplicationCredentialName   string               `config:"application_credential_name"`
 	ApplicationCredentialSecret string               `config:"application_credential_secret"`
+	LeavePartsOnError           bool                 `config:"leave_parts_on_error"`
 	StoragePolicy               string               `config:"storage_policy"`
 	EndpointType                string               `config:"endpoint_type"`
 	ChunkSize                   fs.SizeSuffix        `config:"chunk_size"`
@@ -221,6 +228,7 @@ type Fs struct {
 	root             string            // the path we are working on if any
 	features         *fs.Features      // optional features
 	opt              Options           // options for this backend
+	ci               *fs.ConfigInfo    // global config
 	c                *swift.Connection // the connection to the swift server
 	rootContainer    string            // container part of root (if any)
 	rootDirectory    string            // directory part of root (if any)
@@ -272,7 +280,7 @@ func (f *Fs) Features() *fs.Features {
 
 // retryErrorCodes is a slice of error codes that we will retry
 var retryErrorCodes = []int{
-	401, // Unauthorized (eg "Token has expired")
+	401, // Unauthorized (e.g. "Token has expired")
 	408, // Request Timeout
 	409, // Conflict - various states that could be resolved on a retry
 	429, // Rate exceeded.
@@ -340,7 +348,8 @@ func (o *Object) split() (container, containerPath string) {
 }
 
 // swiftConnection makes a connection to swift
-func swiftConnection(opt *Options, name string) (*swift.Connection, error) {
+func swiftConnection(ctx context.Context, opt *Options, name string) (*swift.Connection, error) {
+	ci := fs.GetConfig(ctx)
 	c := &swift.Connection{
 		// Keep these in the same order as the Config for ease of checking
 		UserName:                    opt.User,
@@ -359,9 +368,9 @@ func swiftConnection(opt *Options, name string) (*swift.Connection, error) {
 		ApplicationCredentialName:   opt.ApplicationCredentialName,
 		ApplicationCredentialSecret: opt.ApplicationCredentialSecret,
 		EndpointType:                swift.EndpointType(opt.EndpointType),
-		ConnectTimeout:              10 * fs.Config.ConnectTimeout, // Use the timeouts in the transport
-		Timeout:                     10 * fs.Config.Timeout,        // Use the timeouts in the transport
-		Transport:                   fshttp.NewTransport(fs.Config),
+		ConnectTimeout:              10 * ci.ConnectTimeout, // Use the timeouts in the transport
+		Timeout:                     10 * ci.Timeout,        // Use the timeouts in the transport
+		Transport:                   fshttp.NewTransport(ctx),
 	}
 	if opt.EnvAuth {
 		err := c.ApplyEnvironment()
@@ -432,13 +441,15 @@ func (f *Fs) setRoot(root string) {
 //
 // if noCheckContainer is set then the Fs won't check the container
 // exists before creating it.
-func NewFsWithConnection(opt *Options, name, root string, c *swift.Connection, noCheckContainer bool) (fs.Fs, error) {
+func NewFsWithConnection(ctx context.Context, opt *Options, name, root string, c *swift.Connection, noCheckContainer bool) (fs.Fs, error) {
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:             name,
 		opt:              *opt,
+		ci:               ci,
 		c:                c,
 		noCheckContainer: noCheckContainer,
-		pacer:            fs.NewPacer(pacer.NewS3(pacer.MinSleep(minSleep))),
+		pacer:            fs.NewPacer(ctx, pacer.NewS3(pacer.MinSleep(minSleep))),
 		cache:            bucket.NewCache(),
 	}
 	f.setRoot(root)
@@ -448,7 +459,7 @@ func NewFsWithConnection(opt *Options, name, root string, c *swift.Connection, n
 		BucketBased:       true,
 		BucketBasedRootOK: true,
 		SlowModTime:       true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	if f.rootContainer != "" && f.rootDirectory != "" {
 		// Check to see if the object exists - ignoring directory markers
 		var info swift.Object
@@ -473,7 +484,7 @@ func NewFsWithConnection(opt *Options, name, root string, c *swift.Connection, n
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -485,11 +496,11 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		return nil, errors.Wrap(err, "swift: chunk size")
 	}
 
-	c, err := swiftConnection(opt, name)
+	c, err := swiftConnection(ctx, opt, name)
 	if err != nil {
 		return nil, err
 	}
-	return NewFsWithConnection(opt, name, root, c, false)
+	return NewFsWithConnection(ctx, opt, name, root, c, false)
 }
 
 // Return an Object from a path
@@ -849,7 +860,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 		return fs.ErrorListBucketRequired
 	}
 	// Delete all the files including the directory markers
-	toBeDeleted := make(chan fs.Object, fs.Config.Transfers)
+	toBeDeleted := make(chan fs.Object, f.ci.Transfers)
 	delErr := make(chan error, 1)
 	go func() {
 		delErr <- operations.DeleteFiles(ctx, toBeDeleted)
@@ -871,7 +882,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 	return f.Rmdir(ctx, dir)
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -972,6 +983,18 @@ func (o *Object) isStaticLargeObject() (bool, error) {
 	return o.hasHeader("X-Static-Large-Object")
 }
 
+func (o *Object) isLargeObject() (result bool, err error) {
+	result, err = o.hasHeader("X-Static-Large-Object")
+	if result {
+		return
+	}
+	result, err = o.hasHeader("X-Object-Manifest")
+	if result {
+		return
+	}
+	return false, nil
+}
+
 func (o *Object) isInContainerVersioning(container string) (bool, error) {
 	_, headers, err := o.fs.c.Container(container)
 	if err != nil {
@@ -1040,7 +1063,7 @@ func (o *Object) readMetaData() (err error) {
 // It attempts to read the objects mtime and if that isn't present the
 // LastModified returned in the http headers
 func (o *Object) ModTime(ctx context.Context) time.Time {
-	if fs.Config.UseServerModTime {
+	if o.fs.ci.UseServerModTime {
 		return o.lastModified
 	}
 	err := o.readMetaData()
@@ -1111,44 +1134,35 @@ func min(x, y int64) int64 {
 	return y
 }
 
-// removeSegments removes any old segments from o
-//
-// if except is passed in then segments with that prefix won't be deleted
-func (o *Object) removeSegments(except string) error {
-	segmentsContainer, _, err := o.getSegmentsDlo()
+func (o *Object) getSegmentsLargeObject() (map[string][]string, error) {
+	container, objectName := o.split()
+	segmentContainer, segmentObjects, err := o.fs.c.LargeObjectGetSegments(container, objectName)
 	if err != nil {
-		return err
+		fs.Debugf(o, "Failed to get list segments of object: %v", err)
+		return nil, err
 	}
-	except = path.Join(o.remote, except)
-	// fs.Debugf(o, "segmentsContainer %q prefix %q", segmentsContainer, prefix)
-	err = o.fs.listContainerRoot(segmentsContainer, o.remote, "", false, true, true, func(remote string, object *swift.Object, isDirectory bool) error {
-		if isDirectory {
-			return nil
+	var containerSegments = make(map[string][]string)
+	for _, segment := range segmentObjects {
+		if _, ok := containerSegments[segmentContainer]; !ok {
+			containerSegments[segmentContainer] = make([]string, 0, len(segmentObjects))
 		}
-		if except != "" && strings.HasPrefix(remote, except) {
-			// fs.Debugf(o, "Ignoring current segment file %q in container %q", remote, segmentsContainer)
-			return nil
-		}
-		fs.Debugf(o, "Removing segment file %q in container %q", remote, segmentsContainer)
-		var err error
-		return o.fs.pacer.Call(func() (bool, error) {
-			err = o.fs.c.ObjectDelete(segmentsContainer, remote)
-			return shouldRetry(err)
-		})
-	})
-	if err != nil {
-		return err
+		segments, _ := containerSegments[segmentContainer]
+		segments = append(segments, segment.Name)
+		containerSegments[segmentContainer] = segments
 	}
-	// remove the segments container if empty, ignore errors
-	err = o.fs.pacer.Call(func() (bool, error) {
-		err = o.fs.c.ContainerDelete(segmentsContainer)
-		if err == swift.ContainerNotFound || err == swift.ContainerNotEmpty {
-			return false, err
+	return containerSegments, nil
+}
+
+func (o *Object) removeSegmentsLargeObject(containerSegments map[string][]string) error {
+	if containerSegments == nil || len(containerSegments) <= 0 {
+		return nil
+	}
+	for container, segments := range containerSegments {
+		_, err := o.fs.c.BulkDelete(container, segments)
+		if err != nil {
+			fs.Debugf(o, "Failed to delete bulk segments %v", err)
+			return err
 		}
-		return shouldRetry(err)
-	})
-	if err == nil {
-		fs.Debugf(o, "Removed empty container %q", segmentsContainer)
 	}
 	return nil
 }
@@ -1178,7 +1192,7 @@ func urlEncode(str string) string {
 	var buf bytes.Buffer
 	for i := 0; i < len(str); i++ {
 		c := str[i]
-		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '/' || c == '.' {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '/' || c == '.' || c == '_' || c == '-' {
 			_ = buf.WriteByte(c)
 		} else {
 			_, _ = buf.WriteString(fmt.Sprintf("%%%02X", c))
@@ -1218,10 +1232,20 @@ func (o *Object) updateChunks(in0 io.Reader, headers swift.Headers, size int64, 
 	uniquePrefix := fmt.Sprintf("%s/%d", swift.TimeToFloatString(time.Now()), size)
 	segmentsPath := path.Join(containerPath, uniquePrefix)
 	in := bufio.NewReader(in0)
-	segmentInfos := make([]string, 0, ((size / int64(o.fs.opt.ChunkSize)) + 1))
+	segmentInfos := make([]string, 0, (size/int64(o.fs.opt.ChunkSize))+1)
+	defer atexit.OnError(&err, func() {
+		if o.fs.opt.LeavePartsOnError {
+			return
+		}
+		fs.Debugf(o, "Delete segments when err raise %v", err)
+		if segmentInfos == nil || len(segmentInfos) == 0 {
+			return
+		}
+		deleteChunks(o, segmentsContainer, segmentInfos)
+	})()
 	for {
 		// can we read at least one byte?
-		if _, err := in.Peek(1); err != nil {
+		if _, err = in.Peek(1); err != nil {
 			if left > 0 {
 				return "", err // read less than expected
 			}
@@ -1246,8 +1270,6 @@ func (o *Object) updateChunks(in0 io.Reader, headers swift.Headers, size int64, 
 			return shouldRetryHeaders(rxHeaders, err)
 		})
 		if err != nil {
-			deleteChunks(o, segmentsContainer, segmentInfos)
-			segmentInfos = nil
 			return "", err
 		}
 		i++
@@ -1261,21 +1283,23 @@ func (o *Object) updateChunks(in0 io.Reader, headers swift.Headers, size int64, 
 		rxHeaders, err = o.fs.c.ObjectPut(container, containerPath, emptyReader, true, "", contentType, headers)
 		return shouldRetryHeaders(rxHeaders, err)
 	})
-	if err != nil {
-		deleteChunks(o, segmentsContainer, segmentInfos)
+
+	if err == nil {
+		//reset data
 		segmentInfos = nil
 	}
 	return uniquePrefix + "/", err
 }
 
 func deleteChunks(o *Object, segmentsContainer string, segmentInfos []string) {
-	if segmentInfos != nil && len(segmentInfos) > 0 {
-		for _, v := range segmentInfos {
-			fs.Debugf(o, "Delete segment file %q on %q", v, segmentsContainer)
-			e := o.fs.c.ObjectDelete(segmentsContainer, v)
-			if e != nil {
-				fs.Errorf(o, "Error occurred in delete segment file %q on %q, error: %q", v, segmentsContainer, e)
-			}
+	if segmentInfos == nil || len(segmentInfos) == 0 {
+		return
+	}
+	for _, v := range segmentInfos {
+		fs.Debugf(o, "Delete segment file %q on %q", v, segmentsContainer)
+		e := o.fs.c.ObjectDelete(segmentsContainer, v)
+		if e != nil {
+			fs.Errorf(o, "Error occurred in delete segment file %q on %q, error: %q", v, segmentsContainer, e)
 		}
 	}
 }
@@ -1296,9 +1320,15 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	modTime := src.ModTime(ctx)
 
 	// Note whether this is a dynamic large object before starting
-	isDynamicLargeObject, err := o.isDynamicLargeObject()
+	isLargeObject, err := o.isLargeObject()
 	if err != nil {
 		return err
+	}
+
+	//capture segments before upload
+	var segmentsContainer map[string][]string
+	if isLargeObject {
+		segmentsContainer, _ = o.getSegmentsLargeObject()
 	}
 
 	// Set the mtime
@@ -1307,9 +1337,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	contentType := fs.MimeType(ctx, src)
 	headers := m.ObjectHeaders()
 	fs.OpenOptionAddHeaders(options, headers)
-	uniquePrefix := ""
+
 	if size > int64(o.fs.opt.ChunkSize) || (size == -1 && !o.fs.opt.NoChunk) {
-		uniquePrefix, err = o.updateChunks(in, headers, size, contentType)
+		_, err = o.updateChunks(in, headers, size, contentType)
 		if err != nil {
 			return err
 		}
@@ -1343,10 +1373,10 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 			o.size = int64(inCount.BytesRead())
 		}
 	}
-
-	// If file was a dynamic large object then remove old/all segments
-	if isDynamicLargeObject {
-		err = o.removeSegments(uniquePrefix)
+	isInContainerVersioning, _ := o.isInContainerVersioning(container)
+	// If file was a large object and the container is not enable versioning then remove old/all segments
+	if isLargeObject && len(segmentsContainer) > 0 && !isInContainerVersioning {
+		err := o.removeSegmentsLargeObject(segmentsContainer)
 		if err != nil {
 			fs.Logf(o, "Failed to remove old segments - carrying on with upload: %v", err)
 		}
@@ -1360,6 +1390,27 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 func (o *Object) Remove(ctx context.Context) (err error) {
 	container, containerPath := o.split()
 
+	//check object is large object
+	isLargeObject, err := o.isLargeObject()
+	if err != nil {
+		return err
+	}
+	//check container has enabled version to reserve segment when delete
+	isInContainerVersioning := false
+	if isLargeObject {
+		isInContainerVersioning, err = o.isInContainerVersioning(container)
+		if err != nil {
+			return err
+		}
+	}
+	//capture segments object if this object is large object
+	var containerSegments map[string][]string
+	if isLargeObject {
+		containerSegments, err = o.getSegmentsLargeObject()
+		if err != nil {
+			return err
+		}
+	}
 	// Remove file/manifest first
 	err = o.fs.pacer.Call(func() (bool, error) {
 		err = o.fs.c.ObjectDelete(container, containerPath)
@@ -1368,22 +1419,13 @@ func (o *Object) Remove(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	isDynamicLargeObject, err := o.isDynamicLargeObject()
-	if err != nil {
-		return err
+
+	if !isLargeObject || isInContainerVersioning {
+		return nil
 	}
-	// ...then segments if required
-	if isDynamicLargeObject {
-		isInContainerVersioning, err := o.isInContainerVersioning(container)
-		if err != nil {
-			return err
-		}
-		if !isInContainerVersioning {
-			err = o.removeSegments("")
-			if err != nil {
-				return err
-			}
-		}
+
+	if isLargeObject {
+		return o.removeSegmentsLargeObject(containerSegments)
 	}
 	return nil
 }

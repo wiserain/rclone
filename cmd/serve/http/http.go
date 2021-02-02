@@ -33,7 +33,7 @@ var Command = &cobra.Command{
 over HTTP.  This can be viewed in a web browser or you can make a
 remote of type http read from it.
 
-You can use the filter flags (eg --include, --exclude) to control what
+You can use the filter flags (e.g. --include, --exclude) to control what
 is served.
 
 The server will log errors.  Use -v to see access logs.
@@ -210,7 +210,7 @@ func (s *server) serveFile(w http.ResponseWriter, r *http.Request, remote string
 
 	// Account the transfer
 	tr := accounting.Stats(r.Context()).NewTransfer(obj)
-	defer tr.Done(nil)
+	defer tr.Done(r.Context(), nil)
 	// FIXME in = fs.NewAccount(in, obj).WithBuffer() // account the transfer
 
 	// Serve the file

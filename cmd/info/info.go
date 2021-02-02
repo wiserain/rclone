@@ -49,7 +49,7 @@ func init() {
 	flags.BoolVarP(cmdFlags, &checkControl, "check-control", "", true, "Check control characters.")
 	flags.DurationVarP(cmdFlags, &uploadWait, "upload-wait", "", 0, "Wait after writing a file.")
 	flags.BoolVarP(cmdFlags, &checkLength, "check-length", "", true, "Check max filename length.")
-	flags.BoolVarP(cmdFlags, &checkStreaming, "check-streaming", "", true, "Check uploadxs with indeterminate file size.")
+	flags.BoolVarP(cmdFlags, &checkStreaming, "check-streaming", "", true, "Check uploads with indeterminate file size.")
 }
 
 var commandDefinition = &cobra.Command{
@@ -249,9 +249,11 @@ func (r *results) checkStringPositions(k, s string) {
 // check we can write a file with the control chars
 func (r *results) checkControls() {
 	fs.Infof(r.f, "Trying to create control character file names")
+	ci := fs.GetConfig(context.Background())
+
 	// Concurrency control
-	tokens := make(chan struct{}, fs.Config.Checkers)
-	for i := 0; i < fs.Config.Checkers; i++ {
+	tokens := make(chan struct{}, ci.Checkers)
+	for i := 0; i < ci.Checkers; i++ {
 		tokens <- struct{}{}
 	}
 	var wg sync.WaitGroup

@@ -60,8 +60,8 @@ func init() {
 		Name:        "yandex",
 		Description: "Yandex Disk",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
-			err := oauthutil.Config("yandex", name, m, oauthConfig, nil)
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+			err := oauthutil.Config(ctx, "yandex", name, m, oauthConfig, nil)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 				return
@@ -88,12 +88,13 @@ type Options struct {
 // Fs represents a remote yandex
 type Fs struct {
 	name     string
-	root     string       // root path
-	opt      Options      // parsed options
-	features *fs.Features // optional features
-	srv      *rest.Client // the connection to the yandex server
-	pacer    *fs.Pacer    // pacer for API calls
-	diskRoot string       // root path with "disk:/" container name
+	root     string         // root path
+	opt      Options        // parsed options
+	ci       *fs.ConfigInfo // global config
+	features *fs.Features   // optional features
+	srv      *rest.Client   // the connection to the yandex server
+	pacer    *fs.Pacer      // pacer for API calls
+	diskRoot string         // root path with "disk:/" container name
 }
 
 // Object describes a swift object
@@ -237,8 +238,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string, options *api.
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.TODO()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -261,23 +261,25 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		}
 		log.Printf("Automatically upgraded OAuth config.")
 	}
-	oAuthClient, _, err := oauthutil.NewClient(name, m, oauthConfig)
+	oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
 	if err != nil {
 		log.Fatalf("Failed to configure Yandex: %v", err)
 	}
 
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:  name,
 		opt:   *opt,
+		ci:    ci,
 		srv:   rest.NewClient(oAuthClient).SetRoot(rootURL),
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.setRoot(root)
 	f.features = (&fs.Features{
 		ReadMimeType:            true,
-		WriteMimeType:           true,
+		WriteMimeType:           false, // Yandex ignores the mime type we send
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	f.srv.SetErrorHandler(errorHandler)
 
 	// Check to see if the object exists and is a file
@@ -535,7 +537,7 @@ func (f *Fs) waitForJob(ctx context.Context, location string) (err error) {
 		RootURL: location,
 		Method:  "GET",
 	}
-	deadline := time.Now().Add(fs.Config.Timeout)
+	deadline := time.Now().Add(f.ci.Timeout)
 	for time.Now().Before(deadline) {
 		var resp *http.Response
 		var body []byte
@@ -566,7 +568,7 @@ func (f *Fs) waitForJob(ctx context.Context, location string) (err error) {
 
 		time.Sleep(1 * time.Second)
 	}
-	return errors.Errorf("async operation didn't complete after %v", fs.Config.Timeout)
+	return errors.Errorf("async operation didn't complete after %v", f.ci.Timeout)
 }
 
 func (f *Fs) delete(ctx context.Context, path string, hardDelete bool) (err error) {
@@ -678,7 +680,7 @@ func (f *Fs) copyOrMove(ctx context.Context, method, src, dst string, overwrite 
 	return nil
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -708,7 +710,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	return f.NewObject(ctx, remote)
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -739,7 +741,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

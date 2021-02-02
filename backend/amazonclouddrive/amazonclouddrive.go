@@ -70,8 +70,8 @@ func init() {
 		Prefix:      "acd",
 		Description: "Amazon Drive",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
-			err := oauthutil.Config("amazon cloud drive", name, m, acdConfig, nil)
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+			err := oauthutil.Config(ctx, "amazon cloud drive", name, m, acdConfig, nil)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
@@ -144,6 +144,7 @@ type Fs struct {
 	name         string             // name of this remote
 	features     *fs.Features       // optional features
 	opt          Options            // options for this Fs
+	ci           *fs.ConfigInfo     // global config
 	c            *acd.Client        // the connection to the acd server
 	noAuthClient *http.Client       // unauthenticated http client
 	root         string             // the path we are working on
@@ -239,8 +240,7 @@ func filterRequest(req *http.Request) {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -248,7 +248,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		return nil, err
 	}
 	root = parsePath(root)
-	baseClient := fshttp.NewClient(fs.Config)
+	baseClient := fshttp.NewClient(ctx)
 	if do, ok := baseClient.Transport.(interface {
 		SetRequestFilter(f func(req *http.Request))
 	}); ok {
@@ -256,25 +256,27 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	} else {
 		fs.Debugf(name+":", "Couldn't add request filter - large file downloads will fail")
 	}
-	oAuthClient, ts, err := oauthutil.NewClientWithBaseClient(name, m, acdConfig, baseClient)
+	oAuthClient, ts, err := oauthutil.NewClientWithBaseClient(ctx, name, m, acdConfig, baseClient)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to configure Amazon Drive")
 	}
 
 	c := acd.NewClient(oAuthClient)
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:         name,
 		root:         root,
 		opt:          *opt,
+		ci:           ci,
 		c:            c,
-		pacer:        fs.NewPacer(pacer.NewAmazonCloudDrive(pacer.MinSleep(minSleep))),
-		noAuthClient: fshttp.NewClient(fs.Config),
+		pacer:        fs.NewPacer(ctx, pacer.NewAmazonCloudDrive(pacer.MinSleep(minSleep))),
+		noAuthClient: fshttp.NewClient(ctx),
 	}
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		ReadMimeType:            true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 
 	// Renew the token in the background
 	f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
@@ -502,7 +504,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 	if err != nil {
 		return nil, err
 	}
-	maxTries := fs.Config.LowLevelRetries
+	maxTries := f.ci.LowLevelRetries
 	var iErr error
 	for tries := 1; tries <= maxTries; tries++ {
 		entries = nil
@@ -523,7 +525,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 				}
 				entries = append(entries, o)
 			default:
-				// ignore ASSET etc
+				// ignore ASSET, etc.
 			}
 			return false
 		})
@@ -680,7 +682,7 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	return err
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -717,7 +719,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		dstObj         fs.Object
 		srcErr, dstErr error
 	)
-	for i := 1; i <= fs.Config.LowLevelRetries; i++ {
+	for i := 1; i <= f.ci.LowLevelRetries; i++ {
 		_, srcErr = srcObj.fs.NewObject(ctx, srcObj.remote) // try reading the object
 		if srcErr != nil && srcErr != fs.ErrorObjectNotFound {
 			// exit if error on source
@@ -732,7 +734,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 			// finished if src not found and dst found
 			break
 		}
-		fs.Debugf(src, "Wait for directory listing to update after move %d/%d", i, fs.Config.LowLevelRetries)
+		fs.Debugf(src, "Wait for directory listing to update after move %d/%d", i, f.ci.LowLevelRetries)
 		time.Sleep(1 * time.Second)
 	}
 	return dstObj, dstErr
@@ -745,7 +747,7 @@ func (f *Fs) DirCacheFlush() {
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -893,7 +895,7 @@ func (f *Fs) Hashes() hash.Set {
 	return hash.Set(hash.MD5)
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //

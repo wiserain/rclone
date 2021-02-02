@@ -17,7 +17,7 @@ import (
 // ReadFileHandle is an open for read file handle on a File
 type ReadFileHandle struct {
 	baseHandle
-	done        func(err error)
+	done        func(ctx context.Context, err error)
 	mu          sync.Mutex
 	cond        *sync.Cond // cond lock for out of sequence reads
 	closed      bool       // set if handle has been closed
@@ -98,7 +98,7 @@ func (fh *ReadFileHandle) String() string {
 	return fh.file.String() + " (r)"
 }
 
-// Node returns the Node assocuated with this - satisfies Noder interface
+// Node returns the Node associated with this - satisfies Noder interface
 func (fh *ReadFileHandle) Node() Node {
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
@@ -276,6 +276,7 @@ func (fh *ReadFileHandle) readAt(p []byte, off int64) (n int, err error) {
 	retries := 0
 	reqSize := len(p)
 	doReopen := false
+	lowLevelRetries := fs.GetConfig(context.TODO()).LowLevelRetries
 	for {
 		if doSeek {
 			// Are we attempting to seek beyond the end of the
@@ -312,11 +313,11 @@ func (fh *ReadFileHandle) readAt(p []byte, off int64) (n int, err error) {
 				break
 			}
 		}
-		if retries >= fs.Config.LowLevelRetries {
+		if retries >= lowLevelRetries {
 			break
 		}
 		retries++
-		fs.Errorf(fh.remote, "ReadFileHandle.Read error: low level retry %d/%d: %v", retries, fs.Config.LowLevelRetries, err)
+		fs.Errorf(fh.remote, "ReadFileHandle.Read error: low level retry %d/%d: %v", retries, lowLevelRetries, err)
 		doSeek = true
 		doReopen = true
 	}
@@ -414,7 +415,7 @@ func (fh *ReadFileHandle) close() error {
 	if fh.opened {
 		var err error
 		defer func() {
-			fh.done(err)
+			fh.done(context.TODO(), err)
 		}()
 		// Close first so that we have hashes
 		err = fh.r.Close()

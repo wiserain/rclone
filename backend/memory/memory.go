@@ -221,8 +221,8 @@ func (f *Fs) setRoot(root string) {
 	f.rootBucket, f.rootDirectory = bucket.Split(f.root)
 }
 
-// NewFs contstructs an Fs from the path, bucket:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
+// NewFs constructs an Fs from the path, bucket:path
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -241,7 +241,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		WriteMimeType:     true,
 		BucketBased:       true,
 		BucketBasedRootOK: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	if f.rootBucket != "" && f.rootDirectory != "" {
 		od := buckets.getObjectData(f.rootBucket, f.rootDirectory)
 		if od != nil {
@@ -462,7 +462,7 @@ func (f *Fs) Precision() time.Duration {
 	return time.Nanosecond
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -592,7 +592,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		data:     data,
 		hash:     "",
 		modTime:  src.ModTime(ctx),
-		mimeType: fs.MimeType(ctx, o),
+		mimeType: fs.MimeType(ctx, src),
 	}
 	buckets.updateObjectData(bucket, bucketPath, o.od)
 	return nil

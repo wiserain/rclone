@@ -44,7 +44,7 @@ Not to
     destpath/sourcepath/two.txt
 
 If you are familiar with `rsync`, rclone always works as if you had
-written a trailing / - meaning "copy the contents of this directory".
+written a trailing `/` - meaning "copy the contents of this directory".
 This applies to all commands and whether you are talking about the
 source or destination.
 

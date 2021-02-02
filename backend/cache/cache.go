@@ -68,7 +68,7 @@ func init() {
 		CommandHelp: commandHelp,
 		Options: []fs.Option{{
 			Name:     "remote",
-			Help:     "Remote to cache.\nNormally should contain a ':' and a path, eg \"myremote:path/to/dir\",\n\"myremote:bucket\" or maybe \"myremote:\" (not recommended).",
+			Help:     "Remote to cache.\nNormally should contain a ':' and a path, e.g. \"myremote:path/to/dir\",\n\"myremote:bucket\" or maybe \"myremote:\" (not recommended).",
 			Required: true,
 		}, {
 			Name: "plex_url",
@@ -109,7 +109,7 @@ will need to be cleared or unexpected EOF errors will occur.`,
 			}},
 		}, {
 			Name: "info_age",
-			Help: `How long to cache file structure information (directory listings, file size, times etc). 
+			Help: `How long to cache file structure information (directory listings, file size, times, etc.). 
 If all write operations are done through the cache then you can safely make
 this value very large as the cache store will also be updated in real time.`,
 			Default: DefCacheInfoAge,
@@ -340,7 +340,7 @@ func parseRootPath(path string) (string, error) {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -362,7 +362,7 @@ func NewFs(name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
 	}
 
 	remotePath := fspath.JoinRootPath(opt.Remote, rootPath)
-	wrappedFs, wrapErr := cache.Get(remotePath)
+	wrappedFs, wrapErr := cache.Get(ctx, remotePath)
 	if wrapErr != nil && wrapErr != fs.ErrorIsFile {
 		return nil, errors.Wrapf(wrapErr, "failed to make remote %q to wrap", remotePath)
 	}
@@ -479,7 +479,7 @@ func NewFs(name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
 			return nil, errors.Wrapf(err, "failed to create cache directory %v", f.opt.TempWritePath)
 		}
 		f.opt.TempWritePath = filepath.ToSlash(f.opt.TempWritePath)
-		f.tempFs, err = cache.Get(f.opt.TempWritePath)
+		f.tempFs, err = cache.Get(ctx, f.opt.TempWritePath)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create temp fs: %v", err)
 		}
@@ -506,13 +506,13 @@ func NewFs(name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
 	if doChangeNotify := wrappedFs.Features().ChangeNotify; doChangeNotify != nil {
 		pollInterval := make(chan time.Duration, 1)
 		pollInterval <- time.Duration(f.opt.ChunkCleanInterval)
-		doChangeNotify(context.Background(), f.receiveChangeNotify, pollInterval)
+		doChangeNotify(ctx, f.receiveChangeNotify, pollInterval)
 	}
 
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
 		DuplicateFiles:          false, // storage doesn't permit this
-	}).Fill(f).Mask(wrappedFs).WrapsFs(f, wrappedFs)
+	}).Fill(ctx, f).Mask(ctx, wrappedFs).WrapsFs(f, wrappedFs)
 	// override only those features that use a temp fs and it doesn't support them
 	//f.features.ChangeNotify = f.ChangeNotify
 	if f.opt.TempWritePath != "" {
@@ -581,7 +581,7 @@ Some valid examples are:
 "0:10" -> the first ten chunks
 
 Any parameter with a key that starts with "file" can be used to
-specify files to fetch, eg
+specify files to fetch, e.g.
 
     rclone rc cache/fetch chunks=0 file=hello file2=home/goodbye
 
@@ -1236,7 +1236,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
 	fs.Debugf(f, "move dir '%s'/'%s' -> '%s'/'%s'", src.Root(), srcRemote, f.Root(), dstRemote)
 
@@ -1517,7 +1517,7 @@ func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, opt
 	return f.put(ctx, in, src, options, do)
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 	fs.Debugf(f, "copy obj '%s' -> '%s'", src, remote)
 
@@ -1594,7 +1594,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	return co, nil
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 	fs.Debugf(f, "moving obj '%s' -> %s", src, remote)
 
@@ -1895,6 +1895,16 @@ func (f *Fs) Disconnect(ctx context.Context) error {
 	return do(ctx)
 }
 
+// Shutdown the backend, closing any background tasks and any
+// cached connections.
+func (f *Fs) Shutdown(ctx context.Context) error {
+	do := f.Fs.Features().Shutdown
+	if do == nil {
+		return nil
+	}
+	return do(ctx)
+}
+
 var commandHelp = []fs.CommandHelp{
 	{
 		Name:  "stats",
@@ -1939,4 +1949,5 @@ var (
 	_ fs.Disconnecter   = (*Fs)(nil)
 	_ fs.Commander      = (*Fs)(nil)
 	_ fs.MergeDirser    = (*Fs)(nil)
+	_ fs.Shutdowner     = (*Fs)(nil)
 )

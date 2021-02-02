@@ -21,7 +21,7 @@ This file describes how to make the various kinds of releases
   * git status - to check for new man pages - git add them
   * git commit -a -v -m "Version v1.XX.0"
   * make retag
-  * git push --tags origin master
+  * git push --follow-tags origin
   * # Wait for the GitHub builds to complete then...
   * make fetch_binaries
   * make tarball
@@ -48,8 +48,8 @@ If rclone needs a point release due to some horrendous bug:
 
 Set vars
 
-  * BASE_TAG=v1.XX          # eg v1.52
-  * NEW_TAG=${BASE_TAG}.Y   # eg v1.52.1
+  * BASE_TAG=v1.XX          # e.g. v1.52
+  * NEW_TAG=${BASE_TAG}.Y   # e.g. v1.52.1
   * echo $BASE_TAG $NEW_TAG # v1.52 v1.52.1
 
 First make the release branch.  If this is a second point release then

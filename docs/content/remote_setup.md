@@ -9,7 +9,7 @@ Some of the configurations (those involving oauth2) require an
 Internet connected web browser.
 
 If you are trying to set rclone up on a remote or headless box with no
-browser available on it (eg a NAS or a server in a datacenter) then
+browser available on it (e.g. a NAS or a server in a datacenter) then
 you will need to use an alternative means of configuration.  There are
 two ways of doing it, described below.
 
@@ -89,6 +89,6 @@ Configuration file is stored at:
 /home/user/.rclone.conf
 ```
 
-Now transfer it to the remote box (scp, cut paste, ftp, sftp etc) and
+Now transfer it to the remote box (scp, cut paste, ftp, sftp, etc.) and
 place it in the correct place (use `rclone config file` on the remote
 box to find out where).

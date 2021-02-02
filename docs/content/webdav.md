@@ -8,7 +8,7 @@ description: "Rclone docs for WebDAV"
 
 Paths are specified as `remote:path`
 
-Paths may be as deep as required, eg `remote:directory/subdirectory`.
+Paths may be as deep as required, e.g. `remote:directory/subdirectory`.
 
 To configure the WebDAV remote you will need to have a URL for it, and
 a username and password.  If you know what kind of system you are
@@ -61,7 +61,7 @@ Enter the password:
 password:
 Confirm the password:
 password:
-Bearer token instead of user/pass (eg a Macaroon)
+Bearer token instead of user/pass (e.g. a Macaroon)
 bearer_token>
 Remote config
 --------------------
@@ -161,7 +161,7 @@ Password.
 
 #### --webdav-bearer-token
 
-Bearer token instead of user/pass (eg a Macaroon)
+Bearer token instead of user/pass (e.g. a Macaroon)
 
 - Config:      bearer_token
 - Env Var:     RCLONE_WEBDAV_BEARER_TOKEN
@@ -198,10 +198,8 @@ Owncloud supports modified times using the `X-OC-Mtime` header.
 ### Nextcloud ###
 
 This is configured in an identical way to Owncloud.  Note that
-Nextcloud does not support streaming of files (`rcat`) whereas
-Owncloud does. This [may be
-fixed](https://github.com/nextcloud/nextcloud-snap/issues/365) in the
-future.
+Nextcloud initially did not support streaming of files (`rcat`) whereas
+Owncloud did, but [this](https://github.com/nextcloud/nextcloud-snap/issues/365) seems to be fixed as of 2020-11-27 (tested with rclone v1.53.1 and Nextcloud Server v19).
 
 ### Sharepoint ###
 

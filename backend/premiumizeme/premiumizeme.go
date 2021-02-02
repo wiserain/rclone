@@ -78,8 +78,8 @@ func init() {
 		Name:        "premiumizeme",
 		Description: "premiumize.me",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
-			err := oauthutil.Config("premiumizeme", name, m, oauthConfig, nil)
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+			err := oauthutil.Config(ctx, "premiumizeme", name, m, oauthConfig, nil)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
@@ -234,8 +234,7 @@ func (f *Fs) baseParams() url.Values {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -248,12 +247,12 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	var client *http.Client
 	var ts *oauthutil.TokenSource
 	if opt.APIKey == "" {
-		client, ts, err = oauthutil.NewClient(name, m, oauthConfig)
+		client, ts, err = oauthutil.NewClient(ctx, name, m, oauthConfig)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to configure premiumize.me")
 		}
 	} else {
-		client = fshttp.NewClient(fs.Config)
+		client = fshttp.NewClient(ctx)
 	}
 
 	f := &Fs{
@@ -261,13 +260,13 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		root:  root,
 		opt:   *opt,
 		srv:   rest.NewClient(client).SetRoot(rootURL),
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		CanHaveEmptyDirectories: true,
 		ReadMimeType:            true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	f.srv.SetErrorHandler(errorHandler)
 
 	// Renew the token in the background
@@ -303,7 +302,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 			}
 			return nil, err
 		}
-		f.features.Fill(&tempF)
+		f.features.Fill(ctx, &tempF)
 		// XXX: update the old f here instead of returning tempF, since
 		// `features` were already filled with functions having *f as a receiver.
 		// See https://github.com/rclone/rclone/issues/2182
@@ -346,7 +345,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, true, false, func(item *api.Item) bool {
-		if item.Name == leaf {
+		if strings.EqualFold(item.Name, leaf) {
 			pathIDOut = item.ID
 			return true
 		}
@@ -682,7 +681,7 @@ func (f *Fs) move(ctx context.Context, isFile bool, id, oldLeaf, newLeaf, oldDir
 	return nil
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -718,7 +717,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

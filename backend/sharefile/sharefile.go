@@ -136,7 +136,7 @@ func init() {
 		Name:        "sharefile",
 		Description: "Citrix Sharefile",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
 			oauthConfig := newOauthConfig("")
 			checkAuth := func(oauthConfig *oauth2.Config, auth *oauthutil.AuthResult) error {
 				if auth == nil || auth.Form == nil {
@@ -155,7 +155,7 @@ func init() {
 			opt := oauthutil.Options{
 				CheckAuth: checkAuth,
 			}
-			err := oauthutil.Config("sharefile", name, m, oauthConfig, &opt)
+			err := oauthutil.Config(ctx, "sharefile", name, m, oauthConfig, &opt)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
@@ -237,6 +237,7 @@ type Fs struct {
 	name         string             // name of this remote
 	root         string             // the path we are working on
 	opt          Options            // parsed options
+	ci           *fs.ConfigInfo     // global config
 	features     *fs.Features       // optional features
 	srv          *rest.Client       // the connection to the server
 	dirCache     *dircache.DirCache // Map of directory path to directory id
@@ -410,8 +411,7 @@ func (f *Fs) setUploadCutoff(cs fs.SizeSuffix) (old fs.SizeSuffix, err error) {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -437,23 +437,25 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	oauthConfig := newOauthConfig(opt.Endpoint + tokenPath)
 	var client *http.Client
 	var ts *oauthutil.TokenSource
-	client, ts, err = oauthutil.NewClient(name, m, oauthConfig)
+	client, ts, err = oauthutil.NewClient(ctx, name, m, oauthConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to configure sharefile")
 	}
 
+	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:  name,
 		root:  root,
 		opt:   *opt,
+		ci:    ci,
 		srv:   rest.NewClient(client).SetRoot(opt.Endpoint + apiPath),
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		CanHaveEmptyDirectories: true,
 		ReadMimeType:            false,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	f.srv.SetErrorHandler(errorHandler)
 	f.fillBufferTokens()
 
@@ -518,7 +520,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 			}
 			return nil, err
 		}
-		f.features.Fill(&tempF)
+		f.features.Fill(ctx, &tempF)
 		// XXX: update the old f here instead of returning tempF, since
 		// `features` were already filled with functions having *f as a receiver.
 		// See https://github.com/rclone/rclone/issues/2182
@@ -532,8 +534,8 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 
 // Fill up (or reset) the buffer tokens
 func (f *Fs) fillBufferTokens() {
-	f.bufferTokens = make(chan []byte, fs.Config.Transfers)
-	for i := 0; i < fs.Config.Transfers; i++ {
+	f.bufferTokens = make(chan []byte, f.ci.Transfers)
+	for i := 0; i < f.ci.Transfers; i++ {
 		f.bufferTokens <- nil
 	}
 }
@@ -964,7 +966,7 @@ func (f *Fs) move(ctx context.Context, isFile bool, id, oldLeaf, newLeaf, oldDir
 	return item, nil
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -1006,7 +1008,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1034,7 +1036,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	return nil
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -1090,7 +1092,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 		} else if err != nil {
 			return nil, errors.Wrap(err, "copy: failed to examine destination dir")
 		} else {
-			// otherwise need to copy via a temporary directlry
+			// otherwise need to copy via a temporary directory
 		}
 	}
 
@@ -1339,7 +1341,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		Overwrite:    true,
 		CreatedDate:  modTime,
 		ModifiedDate: modTime,
-		Tool:         fs.Config.UserAgent,
+		Tool:         o.fs.ci.UserAgent,
 	}
 
 	if isLargeFile {
@@ -1349,7 +1351,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		} else {
 			// otherwise use threaded which is more efficient
 			req.Method = "threaded"
-			req.ThreadCount = &fs.Config.Transfers
+			req.ThreadCount = &o.fs.ci.Transfers
 			req.Filesize = &size
 		}
 	}

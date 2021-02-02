@@ -76,7 +76,7 @@ func init() {
 		Name:        "sugarsync",
 		Description: "Sugarsync",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
 			opt := new(Options)
 			err := configstruct.Set(m, opt)
 			if err != nil {
@@ -85,7 +85,7 @@ func init() {
 
 			if opt.RefreshToken != "" {
 				fmt.Printf("Already have a token - refresh?\n")
-				if !config.ConfirmWithConfig(m, "config_refresh_token", true) {
+				if !config.ConfirmWithConfig(ctx, m, "config_refresh_token", true) {
 					return
 				}
 			}
@@ -106,7 +106,7 @@ func init() {
 				Method: "POST",
 				Path:   "/app-authorization",
 			}
-			srv := rest.NewClient(fshttp.NewClient(fs.Config)).SetRoot(rootURL) //  FIXME
+			srv := rest.NewClient(fshttp.NewClient(ctx)).SetRoot(rootURL) //  FIXME
 
 			// FIXME
 			//err = f.pacer.Call(func() (bool, error) {
@@ -264,7 +264,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Fi
 	}
 
 	found, err := f.listAll(ctx, directoryID, func(item *api.File) bool {
-		if item.Name == leaf {
+		if strings.EqualFold(item.Name, leaf) {
 			info = item
 			return true
 		}
@@ -350,7 +350,7 @@ func (f *Fs) getAuth(req *http.Request) (err error) {
 	// if have auth, check it is in date
 	if f.opt.Authorization == "" || f.opt.User == "" || f.authExpiry.IsZero() || time.Until(f.authExpiry) < expiryLeeway {
 		// Get the auth token
-		f.srv.SetSigner(nil) // temporariliy remove the signer so we don't infinitely recurse
+		f.srv.SetSigner(nil) // temporarily remove the signer so we don't infinitely recurse
 		err = f.getAuthToken(ctx)
 		f.srv.SetSigner(f.getAuth) // replace signer
 		if err != nil {
@@ -395,9 +395,7 @@ func parseExpiry(expiryString string) time.Time {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
-
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
 	if err != nil {
@@ -405,20 +403,20 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	}
 
 	root = parsePath(root)
-	client := fshttp.NewClient(fs.Config)
+	client := fshttp.NewClient(ctx)
 	f := &Fs{
 		name:       name,
 		root:       root,
 		opt:        *opt,
 		srv:        rest.NewClient(client).SetRoot(rootURL),
-		pacer:      fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer:      fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 		m:          m,
 		authExpiry: parseExpiry(opt.AuthorizationExpiry),
 	}
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	f.srv.SetSigner(f.getAuth) // use signing hook to get the auth
 	f.srv.SetErrorHandler(errorHandler)
 
@@ -533,7 +531,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 	//fs.Debugf(f, "FindLeaf(%q, %q)", pathID, leaf)
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, nil, func(item *api.Collection) bool {
-		if item.Name == leaf {
+		if strings.EqualFold(item.Name, leaf) {
 			pathIDOut = item.Ref
 			return true
 		}
@@ -576,7 +574,7 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 	}
 	newID = resp.Header.Get("Location")
 	if newID == "" {
-		// look up ID if not returned (eg for syncFolder)
+		// look up ID if not returned (e.g. for syncFolder)
 		var found bool
 		newID, found, err = f.FindLeaf(ctx, pathID, leaf)
 		if err != nil {
@@ -837,7 +835,7 @@ func (f *Fs) Precision() time.Duration {
 	return fs.ModTimeNotSupported
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -923,7 +921,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 	return f.purgeCheck(ctx, dir, false)
 }
 
-// moveFile moves a file server side
+// moveFile moves a file server-side
 func (f *Fs) moveFile(ctx context.Context, id, leaf, directoryID string) (info *api.File, err error) {
 	opts := rest.Opts{
 		Method:  "PUT",
@@ -951,7 +949,7 @@ func (f *Fs) moveFile(ctx context.Context, id, leaf, directoryID string) (info *
 	return info, nil
 }
 
-// moveDir moves a folder server side
+// moveDir moves a folder server-side
 func (f *Fs) moveDir(ctx context.Context, id, leaf, directoryID string) (err error) {
 	// Move the object
 	opts := rest.Opts{
@@ -970,7 +968,7 @@ func (f *Fs) moveDir(ctx context.Context, id, leaf, directoryID string) (err err
 	})
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -1006,7 +1004,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

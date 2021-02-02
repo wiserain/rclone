@@ -235,7 +235,7 @@ func (ds *dirStream) Next() (de fuse.DirEntry, errno syscall.Errno) {
 	// defer log.Trace(nil, "")("de=%+v, errno=%v", &de, &errno)
 	fi := ds.nodes[ds.i]
 	de = fuse.DirEntry{
-		// Mode is the file's mode. Only the high bits (eg. S_IFDIR)
+		// Mode is the file's mode. Only the high bits (e.g. S_IFDIR)
 		// are considered.
 		Mode: getMode(fi),
 
@@ -258,7 +258,7 @@ var _ fusefs.DirStream = (*dirStream)(nil)
 
 // Readdir opens a stream of directory entries.
 //
-// Readdir essentiallly returns a list of strings, and it is allowed
+// Readdir essentially returns a list of strings, and it is allowed
 // for Readdir to return different results from Lookup. For example,
 // you can return nothing for Readdir ("ls my-fuse-mount" is empty),
 // while still implementing Lookup ("ls my-fuse-mount/a-specific-file"

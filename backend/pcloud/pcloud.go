@@ -72,7 +72,7 @@ func init() {
 		Name:        "pcloud",
 		Description: "Pcloud",
 		NewFs:       NewFs,
-		Config: func(name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper) {
 			optc := new(Options)
 			err := configstruct.Set(m, optc)
 			if err != nil {
@@ -98,7 +98,7 @@ func init() {
 				CheckAuth:    checkAuth,
 				StateBlankOK: true, // pCloud seems to drop the state parameter now - see #4210
 			}
-			err = oauthutil.Config("pcloud", name, m, oauthConfig, &opt)
+			err = oauthutil.Config(ctx, "pcloud", name, m, oauthConfig, &opt)
 			if err != nil {
 				log.Fatalf("Failed to configure token: %v", err)
 			}
@@ -219,7 +219,7 @@ func shouldRetry(resp *http.Response, err error) (bool, error) {
 	// Check if it is an api.Error
 	if apiErr, ok := err.(*api.Error); ok {
 		// See https://docs.pcloud.com/errors/ for error treatment
-		// Errors are classified as 1xxx, 2xxx etc
+		// Errors are classified as 1xxx, 2xxx, etc.
 		switch apiErr.Result / 1000 {
 		case 4: // 4xxx: rate limiting
 			doRetry = true
@@ -280,8 +280,7 @@ func errorHandler(resp *http.Response) error {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
-	ctx := context.Background()
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -289,7 +288,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		return nil, err
 	}
 	root = parsePath(root)
-	oAuthClient, ts, err := oauthutil.NewClient(name, m, oauthConfig)
+	oAuthClient, ts, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to configure Pcloud")
 	}
@@ -300,12 +299,12 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		root:  root,
 		opt:   *opt,
 		srv:   rest.NewClient(oAuthClient).SetRoot("https://" + opt.Hostname),
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.features = (&fs.Features{
 		CaseInsensitive:         false,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 	f.srv.SetErrorHandler(errorHandler)
 
 	// Renew the token in the background
@@ -622,7 +621,7 @@ func (f *Fs) Precision() time.Duration {
 	return time.Second
 }
 
-// Copy src to this remote using server side copy operations.
+// Copy src to this remote using server-side copy operations.
 //
 // This is stored with the remote path given
 //
@@ -705,7 +704,7 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 	})
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -755,7 +754,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1118,7 +1117,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		Method:           "PUT",
 		Path:             "/uploadfile",
 		Body:             in,
-		ContentType:      fs.MimeType(ctx, o),
+		ContentType:      fs.MimeType(ctx, src),
 		ContentLength:    &size,
 		Parameters:       url.Values{},
 		TransferEncoding: []string{"identity"}, // pcloud doesn't like chunked encoding
@@ -1132,7 +1131,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 	// Special treatment for a 0 length upload.  This doesn't work
 	// with PUT even with Content-Length set (by setting
-	// opts.Body=0), so upload it as a multpart form POST with
+	// opts.Body=0), so upload it as a multipart form POST with
 	// Content-Length set.
 	if size == 0 {
 		formReader, contentType, overhead, err := rest.MultipartUpload(in, opts.Parameters, "content", leaf)

@@ -11,7 +11,7 @@ Improvements:
 * Uploads could be done in parallel
 * Downloads would be more efficient done in one go
 * Uploads would be more efficient with bigger chunks
-* Looks like mega can support server side copy, but it isn't implemented in go-mega
+* Looks like mega can support server-side copy, but it isn't implemented in go-mega
 * Upload can set modtime... - set as int64_t - can set ctime and mtime?
 */
 
@@ -180,7 +180,7 @@ func (f *Fs) readMetaDataForPath(remote string) (info *mega.Node, err error) {
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)
@@ -194,6 +194,7 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 			return nil, errors.Wrap(err, "couldn't decrypt password")
 		}
 	}
+	ci := fs.GetConfig(ctx)
 
 	// cache *mega.Mega on username so we can re-use and share
 	// them between remotes.  They are expensive to make as they
@@ -204,8 +205,8 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 	defer megaCacheMu.Unlock()
 	srv := megaCache[opt.User]
 	if srv == nil {
-		srv = mega.New().SetClient(fshttp.NewClient(fs.Config))
-		srv.SetRetries(fs.Config.LowLevelRetries) // let mega do the low level retries
+		srv = mega.New().SetClient(fshttp.NewClient(ctx))
+		srv.SetRetries(ci.LowLevelRetries) // let mega do the low level retries
 		srv.SetLogger(func(format string, v ...interface{}) {
 			fs.Infof("*go-mega*", format, v...)
 		})
@@ -228,12 +229,12 @@ func NewFs(name, root string, m configmap.Mapper) (fs.Fs, error) {
 		root:  root,
 		opt:   *opt,
 		srv:   srv,
-		pacer: fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.features = (&fs.Features{
 		DuplicateFiles:          true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+	}).Fill(ctx, f)
 
 	// Find the root node and check if it is a file or not
 	_, err = f.findRoot(false)
@@ -699,7 +700,7 @@ func (f *Fs) move(dstRemote string, srcFs *Fs, srcRemote string, info *mega.Node
 		dstDirNode, err = dstFs.mkdir(absRoot, dstParent)
 	}
 	if err != nil {
-		return errors.Wrap(err, "server side move failed to make dst parent dir")
+		return errors.Wrap(err, "server-side move failed to make dst parent dir")
 	}
 
 	if srcRemote != "" {
@@ -712,7 +713,7 @@ func (f *Fs) move(dstRemote string, srcFs *Fs, srcRemote string, info *mega.Node
 		srcDirNode, err = f.findDir(absRoot, srcParent)
 	}
 	if err != nil {
-		return errors.Wrap(err, "server side move failed to lookup src parent dir")
+		return errors.Wrap(err, "server-side move failed to lookup src parent dir")
 	}
 
 	// move the object into its new directory if required
@@ -723,7 +724,7 @@ func (f *Fs) move(dstRemote string, srcFs *Fs, srcRemote string, info *mega.Node
 			return shouldRetry(err)
 		})
 		if err != nil {
-			return errors.Wrap(err, "server side move failed")
+			return errors.Wrap(err, "server-side move failed")
 		}
 	}
 
@@ -737,7 +738,7 @@ func (f *Fs) move(dstRemote string, srcFs *Fs, srcRemote string, info *mega.Node
 			return shouldRetry(err)
 		})
 		if err != nil {
-			return errors.Wrap(err, "server side rename failed")
+			return errors.Wrap(err, "server-side rename failed")
 		}
 	}
 
@@ -746,7 +747,7 @@ func (f *Fs) move(dstRemote string, srcFs *Fs, srcRemote string, info *mega.Node
 	return nil
 }
 
-// Move src to this remote using server side move operations.
+// Move src to this remote using server-side move operations.
 //
 // This is stored with the remote path given
 //
@@ -781,7 +782,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
-// using server side move operations.
+// using server-side move operations.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

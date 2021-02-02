@@ -147,7 +147,7 @@ func newCipher(mode NameEncryptionMode, password, salt string, dirNameEncrypt bo
 // If salt is "" we use a fixed salt just to make attackers lives
 // slighty harder than using no salt.
 //
-// Note that empty passsword makes all 0x00 keys which is used in the
+// Note that empty password makes all 0x00 keys which is used in the
 // tests.
 func (c *Cipher) Key(password, salt string) (err error) {
 	const keySize = len(c.dataKey) + len(c.nameKey) + len(c.nameTweak)
@@ -633,11 +633,8 @@ func (fh *encrypter) Read(p []byte) (n int, err error) {
 		}
 		// possibly err != nil here, but we will process the
 		// data and the next call to ReadFull will return 0, err
-		// Write nonce to start of block
-		copy(fh.buf, fh.nonce[:])
 		// Encrypt the block using the nonce
-		block := fh.buf
-		secretbox.Seal(block[:0], readBuf[:n], fh.nonce.pointer(), &fh.c.dataKey)
+		secretbox.Seal(fh.buf[:0], readBuf[:n], fh.nonce.pointer(), &fh.c.dataKey)
 		fh.bufIndex = 0
 		fh.bufSize = blockHeaderSize + n
 		fh.nonce.increment()
@@ -782,8 +779,7 @@ func (fh *decrypter) fillBuffer() (err error) {
 		return ErrorEncryptedFileBadHeader
 	}
 	// Decrypt the block using the nonce
-	block := fh.buf
-	_, ok := secretbox.Open(block[:0], readBuf[:n], fh.nonce.pointer(), &fh.c.dataKey)
+	_, ok := secretbox.Open(fh.buf[:0], readBuf[:n], fh.nonce.pointer(), &fh.c.dataKey)
 	if !ok {
 		if err != nil {
 			return err // return pending error as it is likely more accurate

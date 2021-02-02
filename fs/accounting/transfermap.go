@@ -1,6 +1,7 @@
 package accounting
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -88,10 +89,11 @@ func (tm *transferMap) _sortedSlice() []*Transfer {
 
 // String returns string representation of map items excluding any in
 // exclude (if set).
-func (tm *transferMap) String(progress *inProgress, exclude *transferMap) string {
+func (tm *transferMap) String(ctx context.Context, progress *inProgress, exclude *transferMap) string {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
-	strngs := make([]string, 0, len(tm.items))
+	ci := fs.GetConfig(ctx)
+	stringList := make([]string, 0, len(tm.items))
 	for _, tr := range tm._sortedSlice() {
 		if exclude != nil {
 			exclude.mu.RLock()
@@ -106,14 +108,14 @@ func (tm *transferMap) String(progress *inProgress, exclude *transferMap) string
 			out = acc.String()
 		} else {
 			out = fmt.Sprintf("%*s: %s",
-				fs.Config.StatsFileNameLength,
-				shortenName(tr.remote, fs.Config.StatsFileNameLength),
+				ci.StatsFileNameLength,
+				shortenName(tr.remote, ci.StatsFileNameLength),
 				tm.name,
 			)
 		}
-		strngs = append(strngs, " * "+out)
+		stringList = append(stringList, " * "+out)
 	}
-	return strings.Join(strngs, "\n")
+	return strings.Join(stringList, "\n")
 }
 
 // progress returns total bytes read as well as the size.

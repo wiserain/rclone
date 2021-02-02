@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/okzk/sdnotify"
+	sysdnotify "github.com/iguanesolutions/go-systemd/v5/notify"
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/cmd"
 	"github.com/rclone/rclone/fs"
@@ -43,6 +44,7 @@ type Options struct {
 	NoAppleXattr       bool
 	DaemonTimeout      time.Duration // OSXFUSE only
 	AsyncRead          bool
+	NetworkMode        bool // Windows only
 }
 
 // DefaultOpt is the default values for creating the mount
@@ -82,26 +84,29 @@ var (
 func AddFlags(flagSet *pflag.FlagSet) {
 	rc.AddOption("mount", &Opt)
 	flags.BoolVarP(flagSet, &Opt.DebugFUSE, "debug-fuse", "", Opt.DebugFUSE, "Debug the FUSE internals - needs -v.")
-	flags.BoolVarP(flagSet, &Opt.AllowNonEmpty, "allow-non-empty", "", Opt.AllowNonEmpty, "Allow mounting over a non-empty directory (not Windows).")
-	flags.BoolVarP(flagSet, &Opt.AllowRoot, "allow-root", "", Opt.AllowRoot, "Allow access to root user.")
-	flags.BoolVarP(flagSet, &Opt.AllowOther, "allow-other", "", Opt.AllowOther, "Allow access to other users.")
-	flags.BoolVarP(flagSet, &Opt.DefaultPermissions, "default-permissions", "", Opt.DefaultPermissions, "Makes kernel enforce access control based on the file mode.")
-	flags.BoolVarP(flagSet, &Opt.WritebackCache, "write-back-cache", "", Opt.WritebackCache, "Makes kernel buffer writes before sending them to rclone. Without this, writethrough caching is used.")
-	flags.FVarP(flagSet, &Opt.MaxReadAhead, "max-read-ahead", "", "The number of bytes that can be prefetched for sequential reads.")
 	flags.DurationVarP(flagSet, &Opt.AttrTimeout, "attr-timeout", "", Opt.AttrTimeout, "Time for which file/directory attributes are cached.")
 	flags.StringArrayVarP(flagSet, &Opt.ExtraOptions, "option", "o", []string{}, "Option for libfuse/WinFsp. Repeat if required.")
 	flags.StringArrayVarP(flagSet, &Opt.ExtraFlags, "fuse-flag", "", []string{}, "Flags or arguments to be passed direct to libfuse/WinFsp. Repeat if required.")
-	flags.BoolVarP(flagSet, &Opt.Daemon, "daemon", "", Opt.Daemon, "Run mount as a daemon (background mode).")
-	flags.StringVarP(flagSet, &Opt.VolumeName, "volname", "", Opt.VolumeName, "Set the volume name (not supported by all OSes).")
-	flags.DurationVarP(flagSet, &Opt.DaemonTimeout, "daemon-timeout", "", Opt.DaemonTimeout, "Time limit for rclone to respond to kernel (not supported by all OSes).")
-	flags.BoolVarP(flagSet, &Opt.AsyncRead, "async-read", "", Opt.AsyncRead, "Use asynchronous reads.")
-	if runtime.GOOS == "darwin" {
-		flags.BoolVarP(flagSet, &Opt.NoAppleDouble, "noappledouble", "", Opt.NoAppleDouble, "Sets the OSXFUSE option noappledouble.")
-		flags.BoolVarP(flagSet, &Opt.NoAppleXattr, "noapplexattr", "", Opt.NoAppleXattr, "Sets the OSXFUSE option noapplexattr.")
-	}
+	// Non-Windows only
+	flags.BoolVarP(flagSet, &Opt.Daemon, "daemon", "", Opt.Daemon, "Run mount as a daemon (background mode). Not supported on Windows.")
+	flags.DurationVarP(flagSet, &Opt.DaemonTimeout, "daemon-timeout", "", Opt.DaemonTimeout, "Time limit for rclone to respond to kernel. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.DefaultPermissions, "default-permissions", "", Opt.DefaultPermissions, "Makes kernel enforce access control based on the file mode. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.AllowNonEmpty, "allow-non-empty", "", Opt.AllowNonEmpty, "Allow mounting over a non-empty directory. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.AllowRoot, "allow-root", "", Opt.AllowRoot, "Allow access to root user. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.AllowOther, "allow-other", "", Opt.AllowOther, "Allow access to other users. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.AsyncRead, "async-read", "", Opt.AsyncRead, "Use asynchronous reads. Not supported on Windows.")
+	flags.FVarP(flagSet, &Opt.MaxReadAhead, "max-read-ahead", "", "The number of bytes that can be prefetched for sequential reads. Not supported on Windows.")
+	flags.BoolVarP(flagSet, &Opt.WritebackCache, "write-back-cache", "", Opt.WritebackCache, "Makes kernel buffer writes before sending them to rclone. Without this, writethrough caching is used. Not supported on Windows.")
+	// Windows and OSX
+	flags.StringVarP(flagSet, &Opt.VolumeName, "volname", "", Opt.VolumeName, "Set the volume name. Supported on Windows and OSX only.")
+	// OSX only
+	flags.BoolVarP(flagSet, &Opt.NoAppleDouble, "noappledouble", "", Opt.NoAppleDouble, "Ignore Apple Double (._) and .DS_Store files. Supported on OSX only.")
+	flags.BoolVarP(flagSet, &Opt.NoAppleXattr, "noapplexattr", "", Opt.NoAppleXattr, "Ignore all \"com.apple.*\" extended attributes. Supported on OSX only.")
+	// Windows only
+	flags.BoolVarP(flagSet, &Opt.NetworkMode, "network-mode", "", Opt.NetworkMode, "Mount as remote network drive, instead of fixed disk drive. Supported on Windows only")
 }
 
-// Check is folder is empty
+// Check if folder is empty
 func checkMountEmpty(mountpoint string) error {
 	fp, fpErr := os.Open(mountpoint)
 
@@ -154,59 +159,172 @@ func NewMountCommand(commandName string, hidden bool, mount MountFn) *cobra.Comm
 		Use:    commandName + " remote:path /path/to/mountpoint",
 		Hidden: hidden,
 		Short:  `Mount the remote as file system on a mountpoint.`,
-		Long: `
-rclone ` + commandName + ` allows Linux, FreeBSD, macOS and Windows to
+		// Warning! "|" will be replaced by backticks below
+		//          "@" will be replaced by the command name
+		Long: strings.ReplaceAll(strings.ReplaceAll(`
+rclone @ allows Linux, FreeBSD, macOS and Windows to
 mount any of Rclone's cloud storage systems as a file system with
 FUSE.
 
-First set up your remote using ` + "`rclone config`" + `.  Check it works with ` + "`rclone ls`" + ` etc.
+First set up your remote using |rclone config|.  Check it works with |rclone ls| etc.
 
-You can either run mount in foreground mode or background (daemon) mode. Mount runs in
-foreground mode by default, use the --daemon flag to specify background mode mode.
-Background mode is only supported on Linux and OSX, you can only run mount in
-foreground mode on Windows.
+On Linux and OSX, you can either run mount in foreground mode or background (daemon) mode.
+Mount runs in foreground mode by default, use the |--daemon| flag to specify background mode.
+You can only run mount in foreground mode on Windows.
 
-On Linux/macOS/FreeBSD Start the mount like this where ` + "`/path/to/local/mount`" + `
-is an **empty** **existing** directory.
+On Linux/macOS/FreeBSD start the mount like this, where |/path/to/local/mount|
+is an **empty** **existing** directory:
 
-    rclone ` + commandName + ` remote:path/to/files /path/to/local/mount
+    rclone @ remote:path/to/files /path/to/local/mount
 
-Or on Windows like this where ` + "`X:`" + ` is an unused drive letter
-or use a path to **non-existent** directory.
+On Windows you can start a mount in different ways. See [below](#mounting-modes-on-windows)
+for details. The following examples will mount to an automatically assigned drive,
+to specific drive letter |X:|, to path |C:\path\to\nonexistent\directory|
+(which must be **non-existent** subdirectory of an **existing** parent directory or drive,
+and is not supported when [mounting as a network drive](#mounting-modes-on-windows)), and
+the last example will mount as network share |\\cloud\remote| and map it to an
+automatically assigned drive:
 
-    rclone ` + commandName + ` remote:path/to/files X:
-    rclone ` + commandName + ` remote:path/to/files C:\path\to\nonexistent\directory
-
-When running in background mode the user will have to stop the mount manually (specified below).
+    rclone @ remote:path/to/files *
+    rclone @ remote:path/to/files X:
+    rclone @ remote:path/to/files C:\path\to\nonexistent\directory
+    rclone @ remote:path/to/files \\cloud\remote
 
 When the program ends while in foreground mode, either via Ctrl+C or receiving
-a SIGINT or SIGTERM signal, the mount is automatically stopped.
+a SIGINT or SIGTERM signal, the mount should be automatically stopped.
 
-The umount operation can fail, for example when the mountpoint is busy.
-When that happens, it is the user's responsibility to stop the mount manually.
-
-Stopping the mount manually:
+When running in background mode the user will have to stop the mount manually:
 
     # Linux
     fusermount -u /path/to/local/mount
     # OS X
     umount /path/to/local/mount
 
-**Note**: As of ` + "`rclone` 1.52.2, `rclone mount`" + ` now requires Go version 1.13
+The umount operation can fail, for example when the mountpoint is busy.
+When that happens, it is the user's responsibility to stop the mount manually.
+
+The size of the mounted file system will be set according to information retrieved
+from the remote, the same as returned by the [rclone about](https://rclone.org/commands/rclone_about/)
+command. Remotes with unlimited storage may report the used size only,
+then an additional 1PB of free space is assumed. If the remote does not
+[support](https://rclone.org/overview/#optional-features) the about feature
+at all, then 1PB is set as both the total and the free size.
+
+**Note**: As of |rclone| 1.52.2, |rclone mount| now requires Go version 1.13
 or newer on some platforms depending on the underlying FUSE library in use.
 
 ### Installing on Windows
 
-To run rclone ` + commandName + ` on Windows, you will need to
+To run rclone @ on Windows, you will need to
 download and install [WinFsp](http://www.secfs.net/winfsp/).
 
 [WinFsp](https://github.com/billziss-gh/winfsp) is an open source
 Windows File System Proxy which makes it easy to write user space file
 systems for Windows.  It provides a FUSE emulation layer which rclone
-uses combination with
-[cgofuse](https://github.com/billziss-gh/cgofuse).  Both of these
-packages are by Bill Zissimopoulos who was very helpful during the
-implementation of rclone ` + commandName + ` for Windows.
+uses combination with [cgofuse](https://github.com/billziss-gh/cgofuse).
+Both of these packages are by Bill Zissimopoulos who was very helpful
+during the implementation of rclone @ for Windows.
+
+#### Mounting modes on windows
+
+Unlike other operating systems, Microsoft Windows provides a different filesystem
+type for network and fixed drives. It optimises access on the assumption fixed
+disk drives are fast and reliable, while network drives have relatively high latency
+and less reliability. Some settings can also be differentiated between the two types,
+for example that Windows Explorer should just display icons and not create preview
+thumbnails for image and video files on network drives.
+
+In most cases, rclone will mount the remote as a normal, fixed disk drive by default.
+However, you can also choose to mount it as a remote network drive, often described
+as a network share. If you mount an rclone remote using the default, fixed drive mode
+and experience unexpected program errors, freezes or other issues, consider mounting
+as a network drive instead.
+
+When mounting as a fixed disk drive you can either mount to an unused drive letter,
+or to a path - which must be **non-existent** subdirectory of an **existing** parent
+directory or drive. Using the special value |*| will tell rclone to
+automatically assign the next available drive letter, starting with Z: and moving backward.
+Examples:
+
+    rclone @ remote:path/to/files *
+    rclone @ remote:path/to/files X:
+    rclone @ remote:path/to/files C:\path\to\nonexistent\directory
+    rclone @ remote:path/to/files X:
+
+Option |--volname| can be used to set a custom volume name for the mounted
+file system. The default is to use the remote name and path.
+
+To mount as network drive, you can add option |--network-mode|
+to your @ command. Mounting to a directory path is not supported in
+this mode, it is a limitation Windows imposes on junctions, so the remote must always
+be mounted to a drive letter.
+
+    rclone @ remote:path/to/files X: --network-mode
+
+A volume name specified with |--volname| will be used to create the network share path.
+A complete UNC path, such as |\\cloud\remote|, optionally with path
+|\\cloud\remote\madeup\path|, will be used as is. Any other
+string will be used as the share part, after a default prefix |\\server\|.
+If no volume name is specified then |\\server\share| will be used.
+You must make sure the volume name is unique when you are mounting more than one drive,
+or else the mount command will fail. The share name will treated as the volume label for
+the mapped drive, shown in Windows Explorer etc, while the complete
+|\\server\share| will be reported as the remote UNC path by
+|net use| etc, just like a normal network drive mapping.
+
+If you specify a full network share UNC path with |--volname|, this will implicitely
+set the |--network-mode| option, so the following two examples have same result:
+
+    rclone @ remote:path/to/files X: --network-mode
+    rclone @ remote:path/to/files X: --volname \\server\share
+
+You may also specify the network share UNC path as the mountpoint itself. Then rclone
+will automatically assign a drive letter, same as with |*| and use that as
+mountpoint, and instead use the UNC path specified as the volume name, as if it were
+specified with the |--volname| option. This will also implicitely set
+the |--network-mode| option. This means the following two examples have same result:
+
+    rclone @ remote:path/to/files \\cloud\remote
+    rclone @ remote:path/to/files * --volname \\cloud\remote
+
+There is yet another way to enable network mode, and to set the share path,
+and that is to pass the "native" libfuse/WinFsp option directly:
+|--fuse-flag --VolumePrefix=\server\share|. Note that the path
+must be with just a single backslash prefix in this case.
+
+
+*Note:* In previous versions of rclone this was the only supported method.
+
+[Read more about drive mapping](https://en.wikipedia.org/wiki/Drive_mapping)
+
+See also [Limitations](#limitations) section below.
+
+#### Windows filesystem permissions
+
+The FUSE emulation layer on Windows must convert between the POSIX-based
+permission model used in FUSE, and the permission model used in Windows,
+based on access-control lists (ACL).
+
+The mounted filesystem will normally get three entries in its access-control list (ACL),
+representing permissions for the POSIX permission scopes: Owner, group and others.
+By default, the owner and group will be taken from the current user, and the built-in
+group "Everyone" will be used to represent others. The user/group can be customized
+with FUSE options "UserName" and "GroupName",
+e.g. |-o UserName=user123 -o GroupName="Authenticated Users"|.
+
+The permissions on each entry will be set according to
+[options](#options) |--dir-perms| and |--file-perms|,
+which takes a value in traditional [numeric notation](https://en.wikipedia.org/wiki/File-system_permissions#Numeric_notation),
+where the default corresponds to |--file-perms 0666 --dir-perms 0777|.
+
+Note that the mapping of permissions is not always trivial, and the result
+you see in Windows Explorer may not be exactly like you expected.
+For example, when setting a value that includes write access, this will be
+mapped to individual permissions "write attributes", "write data" and "append data",
+but not "write extended attributes" (WinFsp does not support extended attributes,
+see [this](https://github.com/billziss-gh/winfsp/wiki/NTFS-Compatibility)).
+Windows will then show this as basic permission "Special" instead of "Write",
+because "Write" includes the "write extended attributes" permission.
 
 #### Windows caveats
 
@@ -224,64 +342,36 @@ infrastructure](https://github.com/billziss-gh/winfsp/wiki/WinFsp-Service-Archit
 which creates drives accessible for everyone on the system or
 alternatively using [the nssm service manager](https://nssm.cc/usage).
 
-#### Mount as a network drive
-
-By default, rclone will mount the remote as a normal drive. However,
-you can also mount it as a **Network Drive** (or **Network Share**, as
-mentioned in some places)
-
-Unlike other systems, Windows provides a different filesystem type for
-network drives.  Windows and other programs treat the network drives
-and fixed/removable drives differently: In network drives, many I/O
-operations are optimized, as the high latency and low reliability
-(compared to a normal drive) of a network is expected.
-
-Although many people prefer network shares to be mounted as normal
-system drives, this might cause some issues, such as programs not
-working as expected or freezes and errors while operating with the
-mounted remote in Windows Explorer. If you experience any of those,
-consider mounting rclone remotes as network shares, as Windows expects
-normal drives to be fast and reliable, while cloud storage is far from
-that.  See also [Limitations](#limitations) section below for more
-info
-
-Add "--fuse-flag --VolumePrefix=\server\share" to your "mount"
-command, **replacing "share" with any other name of your choice if you
-are mounting more than one remote**. Otherwise, the mountpoints will
-conflict and your mounted filesystems will overlap.
-
-[Read more about drive mapping](https://en.wikipedia.org/wiki/Drive_mapping)
-
 ### Limitations
 
-Without the use of "--vfs-cache-mode" this can only write files
+Without the use of |--vfs-cache-mode| this can only write files
 sequentially, it can only seek when reading.  This means that many
 applications won't work with their files on an rclone mount without
-"--vfs-cache-mode writes" or "--vfs-cache-mode full".  See the [File
-Caching](#file-caching) section for more info.
+|--vfs-cache-mode writes| or |--vfs-cache-mode full|.
+See the [File Caching](#file-caching) section for more info.
 
-The bucket based remotes (eg Swift, S3, Google Compute Storage, B2,
+The bucket based remotes (e.g. Swift, S3, Google Compute Storage, B2,
 Hubic) do not support the concept of empty directories, so empty
 directories will have a tendency to disappear once they fall out of
 the directory cache.
 
 Only supported on Linux, FreeBSD, OS X and Windows at the moment.
 
-### rclone ` + commandName + ` vs rclone sync/copy
+### rclone @ vs rclone sync/copy
 
 File systems expect things to be 100% reliable, whereas cloud storage
 systems are a long way from 100% reliable. The rclone sync/copy
-commands cope with this with lots of retries.  However rclone ` + commandName + `
+commands cope with this with lots of retries.  However rclone @
 can't use retries in the same way without making local copies of the
 uploads. Look at the [file caching](#file-caching)
-for solutions to make ` + commandName + ` more reliable.
+for solutions to make @ more reliable.
 
 ### Attribute caching
 
-You can use the flag --attr-timeout to set the time the kernel caches
-the attributes (size, modification time etc) for directory entries.
+You can use the flag |--attr-timeout| to set the time the kernel caches
+the attributes (size, modification time, etc.) for directory entries.
 
-The default is "1s" which caches files just long enough to avoid
+The default is |1s| which caches files just long enough to avoid
 too many callbacks to rclone from the kernel.
 
 In theory 0s should be the correct value for filesystems which can
@@ -292,14 +382,14 @@ few problems such as
 and [excessive time listing directories](https://github.com/rclone/rclone/issues/2095#issuecomment-371141147).
 
 The kernel can cache the info about a file for the time given by
-"--attr-timeout". You may see corruption if the remote file changes
+|--attr-timeout|. You may see corruption if the remote file changes
 length during this window.  It will show up as either a truncated file
-or a file with garbage on the end.  With "--attr-timeout 1s" this is
-very unlikely but not impossible.  The higher you set "--attr-timeout"
+or a file with garbage on the end.  With |--attr-timeout 1s| this is
+very unlikely but not impossible.  The higher you set |--attr-timeout|
 the more likely it is.  The default setting of "1s" is the lowest
 setting which mitigates the problems above.
 
-If you set it higher ('10s' or '1m' say) then the kernel will call
+If you set it higher (|10s| or |1m| say) then the kernel will call
 back to rclone less often making it more efficient, however there is
 more chance of the corruption issue above.
 
@@ -315,28 +405,28 @@ files to be visible in the mount.
 
 ### systemd
 
-When running rclone ` + commandName + ` as a systemd service, it is possible
+When running rclone @ as a systemd service, it is possible
 to use Type=notify. In this case the service will enter the started state
 after the mountpoint has been successfully set up.
-Units having the rclone ` + commandName + ` service specified as a requirement
+Units having the rclone @ service specified as a requirement
 will see all files and folders immediately in this mode.
 
-### chunked reading ###
+### chunked reading
 
---vfs-read-chunk-size will enable reading the source objects in parts.
+|--vfs-read-chunk-size| will enable reading the source objects in parts.
 This can reduce the used download quota for some remotes by requesting only chunks
 from the remote that are actually read at the cost of an increased number of requests.
 
-When --vfs-read-chunk-size-limit is also specified and greater than --vfs-read-chunk-size,
-the chunk size for each open file will get doubled for each chunk read, until the
-specified value is reached. A value of -1 will disable the limit and the chunk size will
-grow indefinitely.
+When |--vfs-read-chunk-size-limit| is also specified and greater than
+|--vfs-read-chunk-size|, the chunk size for each open file will get doubled
+for each chunk read, until the specified value is reached. A value of |-1| will disable
+the limit and the chunk size will grow indefinitely.
 
-With --vfs-read-chunk-size 100M and --vfs-read-chunk-size-limit 0 the following
-parts will be downloaded: 0-100M, 100M-200M, 200M-300M, 300M-400M and so on.
-When --vfs-read-chunk-size-limit 500M is specified, the result would be
+With |--vfs-read-chunk-size 100M| and |--vfs-read-chunk-size-limit 0|
+the following parts will be downloaded: 0-100M, 100M-200M, 200M-300M, 300M-400M and so on.
+When |--vfs-read-chunk-size-limit 500M| is specified, the result would be
 0-100M, 100M-300M, 300M-700M, 700M-1200M, 1200M-1700M and so on.
-` + vfs.Help,
+`, "|", "`"), "@", commandName) + vfs.Help,
 		Run: func(command *cobra.Command, args []string) {
 			cmd.CheckArgs(2, 2, command, args)
 			opt := Opt // make a copy of the options
@@ -359,15 +449,24 @@ When --vfs-read-chunk-size-limit 500M is specified, the result would be
 				defer cmd.StartStats()()
 			}
 
-			// Skip checkMountEmpty if --allow-non-empty flag is used or if
-			// the Operating System is Windows
-			if !opt.AllowNonEmpty && runtime.GOOS != "windows" {
+			// Inform about ignored flags on Windows,
+			// and if not on Windows and not --allow-non-empty flag is used
+			// verify that mountpoint is empty.
+			if runtime.GOOS == "windows" {
+				if opt.AllowNonEmpty {
+					fs.Logf(nil, "--allow-non-empty flag does nothing on Windows")
+				}
+				if opt.AllowRoot {
+					fs.Logf(nil, "--allow-root flag does nothing on Windows")
+				}
+				if opt.AllowOther {
+					fs.Logf(nil, "--allow-other flag does nothing on Windows")
+				}
+			} else if !opt.AllowNonEmpty {
 				err := checkMountEmpty(mountpoint)
 				if err != nil {
 					log.Fatalf("Fatal error: %v", err)
 				}
-			} else if opt.AllowNonEmpty && runtime.GOOS == "windows" {
-				fs.Logf(nil, "--allow-non-empty flag does nothing on Windows")
 			}
 
 			// Work out the volume name, removing special
@@ -447,14 +546,18 @@ func Mount(VFS *vfs.VFS, mountpoint string, mount MountFn, opt *Options) error {
 	}
 
 	// Unmount on exit
-	fnHandle := atexit.Register(func() {
-		_ = unmount()
-		_ = sdnotify.Stopping()
-	})
+	var finaliseOnce sync.Once
+	finalise := func() {
+		finaliseOnce.Do(func() {
+			_ = sysdnotify.Stopping()
+			_ = unmount()
+		})
+	}
+	fnHandle := atexit.Register(finalise)
 	defer atexit.Unregister(fnHandle)
 
 	// Notify systemd
-	if err := sdnotify.Ready(); err != nil && err != sdnotify.ErrSdNotifyNoSocket {
+	if err := sysdnotify.Ready(); err != nil {
 		return errors.Wrap(err, "failed to notify systemd")
 	}
 
@@ -479,8 +582,7 @@ waitloop:
 		}
 	}
 
-	_ = unmount()
-	_ = sdnotify.Stopping()
+	finalise()
 
 	if err != nil {
 		return errors.Wrap(err, "failed to umount FUSE fs")

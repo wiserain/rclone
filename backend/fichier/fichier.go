@@ -35,7 +35,7 @@ func init() {
 	fs.Register(&fs.RegInfo{
 		Name:        "fichier",
 		Description: "1Fichier",
-		Config: func(name string, config configmap.Mapper) {
+		Config: func(ctx context.Context, name string, config configmap.Mapper) {
 		},
 		NewFs: NewFs,
 		Options: []fs.Option{{
@@ -167,7 +167,7 @@ func (f *Fs) Features() *fs.Features {
 //
 // On Windows avoid single character remote names as they can be mixed
 // up with drive letters.
-func NewFs(name string, root string, config configmap.Mapper) (fs.Fs, error) {
+func NewFs(ctx context.Context, name string, root string, config configmap.Mapper) (fs.Fs, error) {
 	opt := new(Options)
 	err := configstruct.Set(config, opt)
 	if err != nil {
@@ -186,24 +186,23 @@ func NewFs(name string, root string, config configmap.Mapper) (fs.Fs, error) {
 		name:       name,
 		root:       root,
 		opt:        *opt,
-		pacer:      fs.NewPacer(pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant), pacer.AttackConstant(attackConstant))),
+		pacer:      fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant), pacer.AttackConstant(attackConstant))),
 		baseClient: &http.Client{},
 	}
 
 	f.features = (&fs.Features{
 		DuplicateFiles:          true,
 		CanHaveEmptyDirectories: true,
-	}).Fill(f)
+		ReadMimeType:            true,
+	}).Fill(ctx, f)
 
-	client := fshttp.NewClient(fs.Config)
+	client := fshttp.NewClient(ctx)
 
 	f.rest = rest.NewClient(client).SetRoot(apiBaseURL)
 
 	f.rest.SetHeader("Authorization", "Bearer "+f.opt.APIKey)
 
 	f.dirCache = dircache.New(root, rootID, f)
-
-	ctx := context.Background()
 
 	// Find the current root
 	err = f.dirCache.FindRoot(ctx, false)
@@ -227,7 +226,7 @@ func NewFs(name string, root string, config configmap.Mapper) (fs.Fs, error) {
 			}
 			return nil, err
 		}
-		f.features.Fill(&tempF)
+		f.features.Fill(ctx, &tempF)
 		// XXX: update the old f here instead of returning tempF, since
 		// `features` were already filled with functions having *f as a receiver.
 		// See https://github.com/rclone/rclone/issues/2182
@@ -306,10 +305,10 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	exisitingObj, err := f.NewObject(ctx, src.Remote())
+	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
-		return exisitingObj, exisitingObj.Update(ctx, in, src, options...)
+		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
 		// Not found so create it
 		return f.PutUnchecked(ctx, in, src, options...)

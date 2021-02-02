@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	sysdnotify "github.com/iguanesolutions/go-systemd/v5/notify"
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 	fscache "github.com/rclone/rclone/fs/cache"
@@ -55,7 +56,7 @@ type Cache struct {
 	used          int64            // total size of files in the cache
 	outOfSpace    bool             // out of space
 	cleanerKicked bool             // some thread kicked the cleaner upon out of space
-	kickerMu      sync.Mutex       // mutex for clearnerKicked
+	kickerMu      sync.Mutex       // mutex for cleanerKicked
 	kick          chan struct{}    // channel for kicking clear to start
 
 }
@@ -68,38 +69,43 @@ type Cache struct {
 // go into the directory tree.
 type AddVirtualFn func(remote string, size int64, isDir bool) error
 
-// New creates a new cache heirachy for fremote
+// New creates a new cache hierarchy for fremote
 //
 // This starts background goroutines which can be cancelled with the
 // context passed in.
 func New(ctx context.Context, fremote fs.Fs, opt *vfscommon.Options, avFn AddVirtualFn) (*Cache, error) {
+	fName := fremote.Name()
 	fRoot := filepath.FromSlash(fremote.Root())
 	if runtime.GOOS == "windows" {
 		if strings.HasPrefix(fRoot, `\\?`) {
 			fRoot = fRoot[3:]
 		}
 		fRoot = strings.Replace(fRoot, ":", "", -1)
+		// Replace leading ':' if remote was created on the fly as ":backend:/path" as it is illegal in Windows
+		if fName[0] == ':' {
+			fName = "^" + fName[1:]
+		}
 	}
 	cacheDir := config.CacheDir
 	cacheDir, err := filepath.Abs(cacheDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to make --cache-dir absolute")
 	}
-	root := file.UNCPath(filepath.Join(cacheDir, "vfs", fremote.Name(), fRoot))
+	root := file.UNCPath(filepath.Join(cacheDir, "vfs", fName, fRoot))
 	fs.Debugf(nil, "vfs cache: root is %q", root)
-	metaRoot := file.UNCPath(filepath.Join(cacheDir, "vfsMeta", fremote.Name(), fRoot))
+	metaRoot := file.UNCPath(filepath.Join(cacheDir, "vfsMeta", fName, fRoot))
 	fs.Debugf(nil, "vfs cache: metadata root is %q", root)
 
-	fcache, err := fscache.Get(root)
+	fcache, err := fscache.Get(ctx, root)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create cache remote")
 	}
-	fcacheMeta, err := fscache.Get(root)
+	fcacheMeta, err := fscache.Get(ctx, root)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create cache meta remote")
 	}
 
-	hashType, hashOption := operations.CommonHash(fcache, fremote)
+	hashType, hashOption := operations.CommonHash(ctx, fcache, fremote)
 
 	c := &Cache{
 		fremote:    fremote,
@@ -340,7 +346,7 @@ func (c *Cache) Rename(name string, newName string, newObj fs.Object) (err error
 // Remove should be called if name is deleted
 //
 // This returns true if the file was in the transfer queue so may not
-// have completedly uploaded yet.
+// have completely uploaded yet.
 func (c *Cache) Remove(name string) (wasWriting bool) {
 	name = clean(name)
 	c.mu.Lock()
@@ -465,7 +471,7 @@ func (c *Cache) removeNotInUse(item *Item, maxAge time.Duration, emptyOnly bool)
 
 // Retry failed resets during purgeClean()
 func (c *Cache) retryFailedResets() {
-	// Some items may have failed to reset becasue there was not enough space
+	// Some items may have failed to reset because there was not enough space
 	// for saving the cache item's metadata.  Redo the Reset()'s here now that
 	// we may have some available space.
 	if len(c.errItems) != 0 {
@@ -629,7 +635,7 @@ func (c *Cache) clean(removeCleanFiles bool) {
 		c.purgeOverQuota(int64(c.opt.CacheMaxSize))
 
 		// removeCleanFiles indicates that we got ENOSPC error
-		// We remove cache files that are not dirty if we are still avove the max cache size
+		// We remove cache files that are not dirty if we are still above the max cache size
 		if removeCleanFiles {
 			c.purgeClean(int64(c.opt.CacheMaxSize))
 			c.retryFailedResets()
@@ -663,7 +669,12 @@ func (c *Cache) clean(removeCleanFiles bool) {
 	c.mu.Unlock()
 	uploadsInProgress, uploadsQueued := c.writeback.Stats()
 
-	fs.Infof(nil, "vfs cache: cleaned: objects %d (was %d) in use %d, to upload %d, uploading %d, total size %v (was %v)", newItems, oldItems, totalInUse, uploadsQueued, uploadsInProgress, newUsed, oldUsed)
+	stats := fmt.Sprintf("objects %d (was %d) in use %d, to upload %d, uploading %d, total size %v (was %v)",
+		newItems, oldItems, totalInUse, uploadsQueued, uploadsInProgress, newUsed, oldUsed)
+	fs.Infof(nil, "vfs cache: cleaned: %s", stats)
+	if err = sysdnotify.Status(fmt.Sprintf("[%s] vfs cache: %s", time.Now().Format("15:04"), stats)); err != nil {
+		fs.Errorf(nil, "vfs cache: updating systemd status with current stats failed: %s", err)
+	}
 }
 
 // cleaner calls clean at regular intervals and upon being kicked for out-of-space condition
