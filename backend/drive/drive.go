@@ -690,7 +690,7 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 				if f.useSArotate {
 					f.changeSAmu.Lock()
 					defer f.changeSAmu.Unlock()
-					if saerr := f.changeSAfile(); saerr == nil {
+					if saerr := f.changeSAfile(context.Background()); saerr == nil {
 						return true, err
 					}
 				}
@@ -712,7 +712,7 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 }
 
 // mod - Changing SA file
-func (f *Fs) changeSAfile() (err error) {
+func (f *Fs) changeSAfile(ctx context.Context) (err error) {
 	// check min sleep
 	if fs.Duration(time.Now().Sub(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
 		fs.Debugf("sarot", "retrying with the same service account")
@@ -732,10 +732,10 @@ func (f *Fs) changeSAfile() (err error) {
 	// draw one
 	newSAFile := f.saFiles[len(f.saFiles)-1]
 	f.saFiles = f.saFiles[:len(f.saFiles)-1]
-	err = f.changeServiceAccountFile(newSAFile)
+	err = f.changeServiceAccountFile(ctx, newSAFile)
 	if err == nil {
 		f.changeSAtime = time.Now()
-		f.pacer = fs.NewPacer(pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
+		f.pacer = fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
 	}
 	return err
 }
@@ -2262,7 +2262,7 @@ func (f *Fs) createFileInfo(ctx context.Context, remote string, modTime time.Tim
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
 	// mod
 	if f.useSArotate && f.opt.ServiceAccountPerFile {
-		f.changeSAfile()
+		f.changeSAfile(ctx)
 	}
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
@@ -2557,7 +2557,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	err = f.pacer.Call(func() (bool, error) {
 		// mod
 		if f.useSArotate && f.opt.ServiceAccountPerFile {
-			f.changeSAfile()
+			f.changeSAfile(ctx)
 		}
 		info, err = f.svc.Files.Copy(id, createInfo).
 			Fields(partialFields).
