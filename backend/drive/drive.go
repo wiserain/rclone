@@ -3287,6 +3287,77 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 	return nil
 }
 
+// mod
+// TODO: actualID or shortcutID?
+// TODO: annoying DEBUG : fs cache: renaming cache item "" to be canonical ""
+// TODO: whatif more than one srcParentID obtained?
+// TODO: implement optional bool create
+// Move (f, srcPath) under (dstFs) by changing its parent
+func (f *Fs) changeParent(ctx context.Context, srcPath string, dstFs *Fs) (o fs.Object, err error) {
+	srcPath = strings.Trim(srcPath, "/")
+
+	// Find source
+	var srcID string
+	if srcPath == "" {
+		// source is root directory
+		srcID, err = f.dirCache.RootID(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+	} else if srcObj, err := f.NewObject(ctx, srcPath); err != nil {
+		if err != fs.ErrorNotAFile {
+			return nil, errors.Wrap(err, "can't find source")
+		}
+		// source was a directory
+		srcID, err = f.dirCache.FindDir(ctx, srcPath, false)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to find source dir")
+		}
+	} else {
+		// source was a file
+		srcID = srcObj.(*Object).id
+	}
+	srcID = actualID(srcID)
+
+	_, srcParentID, err := f.dirCache.FindPath(ctx, srcPath, false)
+	if err != nil {
+		// if f is root, there are no parents to reference
+		info, err := f.getFile(srcID, f.fileFields)
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't find id")
+		}
+		srcParentID = strings.Join(info.Parents, ",")
+	}
+	srcParentID = actualID(srcParentID)
+	
+	// Find destination
+	dstID, err := dstFs.dirCache.FindDir(ctx, "", false)
+	if err != nil {
+		return nil, err
+	}
+	dstID = actualID(dstID)
+
+	dstInfo := &drive.File{
+		Parents:      nil,
+		ModifiedTime: time.Now().Format(timeFormatOut),
+	}
+
+	// Do the change
+	err = f.pacer.Call(func() (bool, error) {
+		_, err = f.svc.Files.Update(srcID, dstInfo).
+			RemoveParents(srcParentID).
+			AddParents(dstID).
+			Fields(partialFields).
+			SupportsAllDrives(true).
+			Do()
+		return f.shouldRetry(err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 var commandHelp = []fs.CommandHelp{{
 	Name:  "get",
 	Short: "Get command for fetching the drive config parameters",
@@ -3400,6 +3471,19 @@ Usage:
 The directory should be a directory. Use an optional filename to get
 an ID of a file located in drive:directory.
 `,
+}, { // mod
+	Name:  "chpar",
+	Short: "Change parents of files or directories",
+	Long: `This command is to move files or directories by changing their parents.
+
+Usage:
+
+    rclone backend chpar src:directory dst:directory
+    rclone backend chpar src:directory filename dst:directory
+
+The directory should point to a directory not a file. Also, an ID format 
+can be used for the directory only when it is together with a remote name. 
+`,
 }, {
 	Name:  "copyid",
 	Short: "Copy files by ID",
@@ -3511,6 +3595,27 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			}
 			return shortcutID(o.(fs.IDer).ID()), nil
 		}
+	case "chpar":
+		// mod
+		var srcPath, target string
+		if len(arg) == 1 {
+			srcPath = ""
+			target = arg[0]
+		} else if len(arg) == 2 {
+			srcPath = arg[0]
+			target = arg[1]
+		} else {
+			return nil, errors.New("expect 1 or 2 arguments")
+		}
+		targetFs, err := cache.Get(ctx, target)
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't find target")
+		}
+		dstFs, ok := targetFs.(*Fs)
+		if !ok {
+			return nil, errors.New("target is not a drive backend")
+		}
+		return f.changeParent(ctx, srcPath, dstFs)
 	case "copyid":
 		if len(arg)%2 != 0 {
 			return nil, errors.New("need an even number of arguments")
