@@ -3288,72 +3288,87 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 }
 
 // mod
-// TODO: actualID or shortcutID?
+// get an id of file or directory
+func (f *Fs) getID(ctx context.Context, path string, real bool) (id string, err error) {
+	path = strings.Trim(path, "/")
+	id, err = f.dirCache.FindDir(ctx, path, false)
+	if err != nil {
+		o, err := f.NewObject(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		id = o.(fs.IDer).ID()
+	}
+	if real {
+		return actualID(id), nil
+	}
+	return shortcutID(id), nil
+}
+
+// mod
 // TODO: annoying DEBUG : fs cache: renaming cache item "" to be canonical ""
-// TODO: whatif more than one srcParentID obtained?
-// TODO: implement optional bool create
-// Move (f, srcPath) under (dstFs) by changing its parent
-func (f *Fs) changeParent(ctx context.Context, srcPath string, dstFs *Fs) (o fs.Object, err error) {
-	srcPath = strings.Trim(srcPath, "/")
-
+// Change parents of objects in (f) by an ID of (dstFs)
+func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDepth string, srcDelete bool) (o fs.Object, err error) {
 	// Find source
-	var srcID string
-	if srcPath == "" {
-		// source is root directory
-		srcID, err = f.dirCache.RootID(ctx, false)
-		if err != nil {
-			return nil, err
-		}
-	} else if srcObj, err := f.NewObject(ctx, srcPath); err != nil {
-		if err != fs.ErrorNotAFile {
-			return nil, errors.Wrap(err, "can't find source")
-		}
-		// source was a directory
-		srcID, err = f.dirCache.FindDir(ctx, srcPath, false)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to find source dir")
-		}
-	} else {
-		// source was a file
-		srcID = srcObj.(*Object).id
-	}
-	srcID = actualID(srcID)
-
-	_, srcParentID, err := f.dirCache.FindPath(ctx, srcPath, false)
+	srcID, err := f.getID(ctx, "", true)
 	if err != nil {
-		// if f is root, there are no parents to reference
-		info, err := f.getFile(srcID, f.fileFields)
-		if err != nil {
-			return nil, errors.Wrap(err, "couldn't find id")
-		}
-		srcParentID = strings.Join(info.Parents, ",")
+		return nil, errors.Wrap(err, "couldn't find source")
 	}
-	srcParentID = actualID(srcParentID)
-	
 	// Find destination
-	dstID, err := dstFs.dirCache.FindDir(ctx, "", false)
+	dstID, err := dstFs.dirCache.FindDir(ctx, "", dstCreate)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "couldn't find destination")
 	}
 	dstID = actualID(dstID)
 
+	// list the objects
+	infos := []*drive.File{}
+	if srcDepth == "0" {
+		info, err := f.getFile(srcID, "id,name,parents")
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't get source info")
+		}
+		infos = append(infos, info)
+	} else if srcDepth == "1" {
+		_, err = f.list(ctx, []string{srcID}, "", false, false, f.opt.TrashedOnly, true, func(info *drive.File) bool {
+			infos = append(infos, info)
+			return false
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't list source info")
+		}
+	}
+
+	// move them into place
 	dstInfo := &drive.File{
 		Parents:      nil,
 		ModifiedTime: time.Now().Format(timeFormatOut),
 	}
-
-	// Do the change
-	err = f.pacer.Call(func() (bool, error) {
-		_, err = f.svc.Files.Update(srcID, dstInfo).
-			RemoveParents(srcParentID).
-			AddParents(dstID).
-			Fields(partialFields).
-			SupportsAllDrives(true).
-			Do()
-		return f.shouldRetry(err)
-	})
-	if err != nil {
-		return nil, err
+	for _, info := range infos {
+		parentID := strings.Join(info.Parents, ",")
+		parentID = actualID(parentID)
+		fs.Infof(f, "changing parent of %q from %q to %q", info.Name, parentID, dstID)
+		// Do the change
+		err = f.pacer.Call(func() (bool, error) {
+			_, err = f.svc.Files.Update(info.Id, dstInfo).
+				RemoveParents(parentID).
+				AddParents(dstID).
+				Fields("").
+				SupportsAllDrives(true).
+				Do()
+			return f.shouldRetry(err)
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed changing parents")
+		}
+	}
+	if srcDepth == "1" && srcDelete && len(infos) != 0 {
+		// rmdir (into trash) the now empty source directory
+		fs.Infof(f, "removing empty directory")
+		err = f.delete(ctx, srcID, f.opt.UseTrash)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed removing empty directory")
+		}
 	}
 	return nil, nil
 }
@@ -3465,24 +3480,27 @@ Result:
 
 Usage:
 
-    rclone backend getid drive:directory
-    rclone backend getid drive:directory filename
+    rclone backend getid drive:path {subpath} -o real
 
-The directory should be a directory. Use an optional filename to get
-an ID of a file located in drive:directory.
+The "path" should point to a directory not a file. Use an extra argument
+"subpath" to get an ID of a file located in "drive:path". By default,
+it will return an ID of shortcut unless otherwise the flag "-o real" set.
 `,
 }, { // mod
 	Name:  "chpar",
 	Short: "Change parents of files or directories",
-	Long: `This command is to move files or directories by changing their parents.
+	Long: `This command changes parents of files or directories to a new one,
+results in a move of the source under the destination.
 
 Usage:
 
-    rclone backend chpar src:directory dst:directory
-    rclone backend chpar src:directory filename dst:directory
+    rclone backend chpar src:path dst:path
+    rclone backend chpar src:path dst:path -o depth=1
+    rclone backend chpar src:path dst:path -o delete-empty-src-dir
 
-The directory should point to a directory not a file. Also, an ID format 
-can be used for the directory only when it is together with a remote name. 
+The "path" should point to a directory not a file. To apply for children of
+given "src:path", pass "-o depth=1". Also, use "-o delete-empty-src-dir" to
+remove "src:path."
 `,
 }, {
 	Name:  "copyid",
@@ -3580,42 +3598,34 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		return f.unTrashDir(ctx, dir, true)
 	case "getid":
 		// mod
-		if len(arg) == 0 {
-			// assuming it is a dir
-			id, err := f.dirCache.FindDir(ctx, "", false)
-			if err != nil {
-				return nil, err
-			}
-			return shortcutID(id), nil
-		} else {
-			// it should be a file
-			o, err := f.NewObject(ctx, arg[0])
-			if err != nil {
-				return nil, err
-			}
-			return shortcutID(o.(fs.IDer).ID()), nil
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
 		}
+		_, ok := opt["real"]
+		return f.getID(ctx, path, ok)
 	case "chpar":
 		// mod
-		var srcPath, target string
-		if len(arg) == 1 {
-			srcPath = ""
-			target = arg[0]
-		} else if len(arg) == 2 {
-			srcPath = arg[0]
-			target = arg[1]
-		} else {
-			return nil, errors.New("expect 1 or 2 arguments")
+		if len(arg) != 1 {
+			return nil, errors.New("need an argument for dst:path")
 		}
-		targetFs, err := cache.Get(ctx, target)
+		srcDepth := "0"
+		if depth, ok := opt["depth"]; ok {
+			if !(depth == "0" || depth == "1") {
+				return nil, errors.Errorf("invalid depth: %q", depth)
+			}
+			srcDepth = depth
+		}
+		_, srcDelete := opt["delete-empty-src-dir"]
+		dst, err := cache.Get(ctx, arg[0])
 		if err != nil {
-			return nil, errors.Wrap(err, "couldn't find target")
+			return nil, errors.Wrap(err, "couldn't find destination")
 		}
-		dstFs, ok := targetFs.(*Fs)
+		dstFs, ok := dst.(*Fs)
 		if !ok {
-			return nil, errors.New("target is not a drive backend")
+			return nil, errors.New("destination is not a drive backend")
 		}
-		return f.changeParent(ctx, srcPath, dstFs)
+		return f.changeParents(ctx, dstFs, true, srcDepth, srcDelete)
 	case "copyid":
 		if len(arg)%2 != 0 {
 			return nil, errors.New("need an even number of arguments")
