@@ -290,12 +290,13 @@ jobs:
       - create-release
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone' && github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
           repository: 'wiserain/termux-packages'
+          ref: 'mod'
       - name: build
         shell: bash
         run: |
@@ -310,6 +311,6 @@ jobs:
         name: Upload Assets to Release with a wildcard
         uses: csexton/release-asset-action@v2
         with:
-          pattern: "debs/*.deb"
+          pattern: "debs/*"
           github-token: ${{ secrets.GITHUB_TOKEN }}
           release-url: ${{needs.create-release.outputs.upload_url}}
