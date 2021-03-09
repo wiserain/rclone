@@ -1288,6 +1288,7 @@ This takes the following parameters
 
 - srcFs - a remote name string e.g. "drive:src" for the source
 - dstFs - a remote name string e.g. "drive:dst" for the destination
+- createEmptySrcDirs - create empty src directories on destination if set
 
 
 See the [copy command](/commands/rclone_copy/) command for more information on the above.
@@ -1300,6 +1301,7 @@ This takes the following parameters
 
 - srcFs - a remote name string e.g. "drive:src" for the source
 - dstFs - a remote name string e.g. "drive:dst" for the destination
+- createEmptySrcDirs - create empty src directories on destination if set
 - deleteEmptySrcDirs - delete empty src directories if set
 
 
@@ -1313,6 +1315,7 @@ This takes the following parameters
 
 - srcFs - a remote name string e.g. "drive:src" for the source
 - dstFs - a remote name string e.g. "drive:dst" for the destination
+- createEmptySrcDirs - create empty src directories on destination if set
 
 
 See the [sync command](/commands/rclone_sync/) command for more information on the above.

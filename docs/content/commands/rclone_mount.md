@@ -198,7 +198,7 @@ Without the use of `--vfs-cache-mode` this can only write files
 sequentially, it can only seek when reading.  This means that many
 applications won't work with their files on an rclone mount without
 `--vfs-cache-mode writes` or `--vfs-cache-mode full`.
-See the [File Caching](#file-caching) section for more info.
+See the [VFS File Caching](#vfs-file-caching) section for more info.
 
 The bucket based remotes (e.g. Swift, S3, Google Compute Storage, B2,
 Hubic) do not support the concept of empty directories, so empty
@@ -213,7 +213,7 @@ File systems expect things to be 100% reliable, whereas cloud storage
 systems are a long way from 100% reliable. The rclone sync/copy
 commands cope with this with lots of retries.  However rclone mount
 can't use retries in the same way without making local copies of the
-uploads. Look at the [file caching](#file-caching)
+uploads. Look at the [VFS File Caching](#vfs-file-caching)
 for solutions to make mount more reliable.
 
 ## Attribute caching
@@ -377,6 +377,13 @@ If using `--vfs-cache-max-size` note that the cache may exceed this size
 for two reasons.  Firstly because it is only checked every
 `--vfs-cache-poll-interval`.  Secondly because open files cannot be
 evicted from the cache.
+
+You **should not** run two copies of rclone using the same VFS cache
+with the same or overlapping remotes if using `--vfs-cache-mode > off`.
+This can potentially cause data corruption if you do. You can work
+around this by giving each rclone its own cache hierarchy with
+`--cache-dir`. You don't need to worry about this if the remotes in
+use don't overlap.
 
 ### --vfs-cache-mode off
 

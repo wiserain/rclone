@@ -1462,7 +1462,7 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 }
 
 // s3Connection makes a connection to s3
-func s3Connection(ctx context.Context, opt *Options) (*s3.S3, *session.Session, error) {
+func s3Connection(ctx context.Context, opt *Options, client *http.Client) (*s3.S3, *session.Session, error) {
 	// Make the auth
 	v := credentials.Value{
 		AccessKeyID:     opt.AccessKeyID,
@@ -1540,7 +1540,7 @@ func s3Connection(ctx context.Context, opt *Options) (*s3.S3, *session.Session, 
 	awsConfig := aws.NewConfig().
 		WithMaxRetries(0). // Rely on rclone's retry logic
 		WithCredentials(cred).
-		WithHTTPClient(getClient(ctx, opt)).
+		WithHTTPClient(client).
 		WithS3ForcePathStyle(opt.ForcePathStyle).
 		WithS3UseAccelerate(opt.UseAccelerateEndpoint).
 		WithS3UsEast1RegionalEndpoint(endpoints.RegionalS3UsEast1Endpoint)
@@ -1559,9 +1559,6 @@ func s3Connection(ctx context.Context, opt *Options) (*s3.S3, *session.Session, 
 	if opt.EnvAuth && opt.AccessKeyID == "" && opt.SecretAccessKey == "" {
 		// Enable loading config options from ~/.aws/config (selected by AWS_PROFILE env)
 		awsSessionOpts.SharedConfigState = session.SharedConfigEnable
-		// The session constructor (aws/session/mergeConfigSrcs) will only use the user's preferred credential source
-		// (from the shared config file) if the passed-in Options.Config.Credentials is nil.
-		awsSessionOpts.Config.Credentials = nil
 	}
 	ses, err := session.NewSessionWithOptions(awsSessionOpts)
 	if err != nil {
@@ -1647,7 +1644,8 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		md5sumBinary := md5.Sum([]byte(opt.SSECustomerKey))
 		opt.SSECustomerKeyMD5 = base64.StdEncoding.EncodeToString(md5sumBinary[:])
 	}
-	c, ses, err := s3Connection(ctx, opt)
+	srv := getClient(ctx, opt)
+	c, ses, err := s3Connection(ctx, opt, srv)
 	if err != nil {
 		return nil, err
 	}
@@ -1662,7 +1660,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		ses:   ses,
 		pacer: fs.NewPacer(ctx, pacer.NewS3(pacer.MinSleep(minSleep))),
 		cache: bucket.NewCache(),
-		srv:   getClient(ctx, opt),
+		srv:   srv,
 		pool: pool.New(
 			time.Duration(opt.MemoryPoolFlushTime),
 			int(opt.ChunkSize),
@@ -1697,12 +1695,9 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		f.setRoot(newRoot)
 		_, err := f.NewObject(ctx, leaf)
 		if err != nil {
-			if err == fs.ErrorObjectNotFound || err == fs.ErrorNotAFile {
-				// File doesn't exist or is a directory so return old f
-				f.setRoot(oldRoot)
-				return f, nil
-			}
-			return nil, err
+			// File doesn't exist or is a directory so return old f
+			f.setRoot(oldRoot)
+			return f, nil
 		}
 		// return an error with an fs which points to the parent
 		return f, fs.ErrorIsFile
@@ -1779,7 +1774,7 @@ func (f *Fs) updateRegionForBucket(bucket string) error {
 	// Make a new session with the new region
 	oldRegion := f.opt.Region
 	f.opt.Region = region
-	c, ses, err := s3Connection(f.ctx, &f.opt)
+	c, ses, err := s3Connection(f.ctx, &f.opt, f.srv)
 	if err != nil {
 		return errors.Wrap(err, "creating new session failed")
 	}

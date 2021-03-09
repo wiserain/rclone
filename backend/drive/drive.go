@@ -211,7 +211,7 @@ func init() {
 			}
 			err = configTeamDrive(ctx, opt, m, name)
 			if err != nil {
-				log.Fatalf("Failed to configure team drive: %v", err)
+				log.Fatalf("Failed to configure Shared Drive: %v", err)
 			}
 		},
 		Options: append(driveOAuthOptions(), []fs.Option{{
@@ -265,7 +265,7 @@ a non root folder as its starting point.
 			Advanced: true,
 		}, {
 			Name:     "team_drive",
-			Help:     "ID of the Team Drive",
+			Help:     "ID of the Shared Drive (Team Drive)",
 			Hide:     fs.OptionHideConfigurator,
 			Advanced: true,
 		}, {
@@ -703,7 +703,7 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 				fs.Errorf(f, "Received download limit error: %v", err)
 				return false, fserrors.FatalError(err)
 			} else if f.opt.StopOnUploadLimit && reason == "teamDriveFileLimitExceeded" {
-				fs.Errorf(f, "Received team drive file limit error: %v", err)
+				fs.Errorf(f, "Received Shared Drive file limit error: %v", err)
 				return false, fserrors.FatalError(err)
 			}
 		}
@@ -1021,24 +1021,24 @@ func configTeamDrive(ctx context.Context, opt *Options, m configmap.Mapper, name
 		return nil
 	}
 	if opt.TeamDriveID == "" {
-		fmt.Printf("Configure this as a team drive?\n")
+		fmt.Printf("Configure this as a Shared Drive (Team Drive)?\n")
 	} else {
-		fmt.Printf("Change current team drive ID %q?\n", opt.TeamDriveID)
+		fmt.Printf("Change current Shared Drive (Team Drive) ID %q?\n", opt.TeamDriveID)
 	}
 	if !config.Confirm(false) {
 		return nil
 	}
 	f, err := newFs(ctx, name, "", m)
 	if err != nil {
-		return errors.Wrap(err, "failed to make Fs to list teamdrives")
+		return errors.Wrap(err, "failed to make Fs to list Shared Drives")
 	}
-	fmt.Printf("Fetching team drive list...\n")
+	fmt.Printf("Fetching Shared Drive list...\n")
 	teamDrives, err := f.listTeamDrives(ctx)
 	if err != nil {
 		return err
 	}
 	if len(teamDrives) == 0 {
-		fmt.Printf("No team drives found in your account")
+		fmt.Printf("No Shared Drives found in your account")
 		return nil
 	}
 	var driveIDs, driveNames []string
@@ -1046,7 +1046,7 @@ func configTeamDrive(ctx context.Context, opt *Options, m configmap.Mapper, name
 		driveIDs = append(driveIDs, teamDrive.Id)
 		driveNames = append(driveNames, teamDrive.Name)
 	}
-	driveID := config.Choose("Enter a Team Drive ID", driveIDs, driveNames, true)
+	driveID := config.Choose("Enter a Shared Drive ID", driveIDs, driveNames, true)
 	m.Set("team_drive", driveID)
 	m.Set("root_folder_id", "")
 	opt.TeamDriveID = driveID
@@ -2684,9 +2684,9 @@ func (f *Fs) teamDriveOK(ctx context.Context) (err error) {
 		return f.shouldRetry(err)
 	})
 	if err != nil {
-		return errors.Wrap(err, "failed to get Team/Shared Drive info")
+		return errors.Wrap(err, "failed to get Shared Drive info")
 	}
-	fs.Debugf(f, "read info from team drive %q", td.Name)
+	fs.Debugf(f, "read info from Shared Drive %q", td.Name)
 	return err
 }
 
@@ -3172,7 +3172,7 @@ func (f *Fs) listTeamDrives(ctx context.Context) (drives []*drive.TeamDrive, err
 			return defaultFs.shouldRetry(err)
 		})
 		if err != nil {
-			return drives, errors.Wrap(err, "listing team drives failed")
+			return drives, errors.Wrap(err, "listing Team Drives failed")
 		}
 		drives = append(drives, teamDrives.TeamDrives...)
 		if teamDrives.NextPageToken == "" {
@@ -3426,8 +3426,8 @@ authenticated with "drive2:" can't read files from "drive:".
 	},
 }, {
 	Name:  "drives",
-	Short: "List the shared drives available to this account",
-	Long: `This command lists the shared drives (teamdrives) available to this
+	Short: "List the Shared Drives available to this account",
+	Long: `This command lists the Shared Drives (Team Drives) available to this
 account.
 
 Usage:
