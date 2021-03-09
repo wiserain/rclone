@@ -292,7 +292,7 @@ jobs:
       - create-release
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone' && github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     steps:
       - name: Checkout
         uses: actions/checkout@v2
