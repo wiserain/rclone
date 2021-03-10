@@ -14,12 +14,6 @@ unzip_tools_list=('unzip' '7z' 'busybox')
 
 usage() { echo "Usage: curl https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash" 1>&2; exit 1; }
 
-
-if [[ $(id -u) -ne 0 ]]; then
-    echo "Try again with root privilege"
-    exit 1
-fi
-
 if [ -n "$1" ]; then
     tag_name="$1"
 else
@@ -66,6 +60,8 @@ OS="`uname`"
 case $OS in
   Linux)
     OS='linux'
+    echo $PREFIX | grep -qo "com.termux" && \
+      { OS="termux"; unzip_tool="deb"; }
     ;;
   FreeBSD)
     OS='freebsd'
@@ -113,6 +109,7 @@ esac
 
 #download and unzip
 rclone_zip="rclone-${tag_name}-$OS-$OS_type.zip"
+[ $OS = "termux" ] && rclone_zip="rclone-${tag_name}-$OS-$(dpkg --print-architecture).deb"
 download_link="https://github.com/wiserain/rclone/releases/download/${tag_name}/${rclone_zip}"
 
 curl -LJO $download_link
@@ -128,6 +125,9 @@ case $unzip_tool in
   'busybox')
     mkdir -p $unzip_dir
     busybox unzip $rclone_zip -d $unzip_dir
+    ;;
+  'deb')
+    mkdir -p $unzip_dir/empty
     ;;
 esac
     
@@ -170,6 +170,10 @@ case $OS in
     #manual
     mkdir -p /usr/local/share/man/man1
     cp rclone.1 /usr/local/share/man/man1/    
+    ;;
+  'termux')
+    cd ../..
+    dpkg -i $rclone_zip
     ;;
   *)
     echo 'OS not supported'
