@@ -17,18 +17,19 @@ usage() { echo "Usage: curl https://raw.githubusercontent.com/wiserain/rclone/mo
 if [ -n "$1" ]; then
     tag_name="$1"
 else
-    tag_name=$(curl --silent https://api.github.com/repos/wiserain/rclone/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    tag_name=$(curl -fs https://api.github.com/repos/wiserain/rclone/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 fi
 
 
 #create tmp directory and move to it with macOS compatibility fallback
-tmp_dir=`mktemp -d 2>/dev/null || mktemp -d -t 'rclone-install.XXXXXXXXXX'`; cd $tmp_dir
+tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'rclone-install.XXXXXXXXXX')
+cd "$tmp_dir"
 
 
 #make sure unzip tool is available and choose one to work with
 set +e
 for tool in ${unzip_tools_list[*]}; do
-    trash=`hash $tool 2>>errors`
+    trash=$(hash "$tool" 2>>errors)
     if [ "$?" -eq 0 ]; then
         unzip_tool="$tool"
         break
@@ -37,7 +38,7 @@ done
 set -e
 
 # exit if no unzip tools available
-if [ -z "${unzip_tool}" ]; then
+if [ -z "$unzip_tool" ]; then
     printf "\nNone of the supported tools for extracting zip archives (${unzip_tools_list[*]}) were found. "
     printf "Please install one of them and try again.\n\n"
     exit 4
@@ -47,7 +48,7 @@ fi
 export XDG_CONFIG_HOME=config
 
 #check installed version of rclone to determine if update is necessary
-version=`rclone --version 2>>errors | head -n 1 | cut -d ' ' -f 2`
+version=$(rclone --version 2>>errors | head -n 1 | cut -d ' ' -f 2)
 if [ "$version" = "$tag_name" ]; then
     printf "\nThe latest version of rclone mod ${version} is already installed.\n\n"
     exit 3
@@ -56,7 +57,7 @@ fi
 
 
 #detect the platform
-OS="`uname`"
+OS="$(uname)"
 case $OS in
   Linux)
     OS='linux'
@@ -86,8 +87,8 @@ case $OS in
     ;;
 esac
 
-OS_type="`uname -m`"
-case $OS_type in
+OS_type="$(uname -m)"
+case "$OS_type" in
   x86_64|amd64)
     OS_type='amd64'
     ;;
@@ -108,26 +109,26 @@ esac
 
 
 #download and unzip
-rclone_zip="rclone-${tag_name}-$OS-$OS_type.zip"
-[ $OS = "termux" ] && rclone_zip="rclone-${tag_name}-$OS-$(dpkg --print-architecture).deb"
+rclone_zip="rclone-${tag_name}-${OS}-${OS_type}.zip"
+[ $OS = "termux" ] && rclone_zip="rclone-${tag_name}-${OS}-$(dpkg --print-architecture).deb"
 download_link="https://github.com/wiserain/rclone/releases/download/${tag_name}/${rclone_zip}"
 
-curl -LJO $download_link
+curl -fLJO "$download_link"
 unzip_dir="tmp_unzip_dir_for_rclone"
 # there should be an entry in this switch for each element of unzip_tools_list
-case $unzip_tool in
+case "$unzip_tool" in
   'unzip')
-    unzip -a $rclone_zip -d $unzip_dir
+    unzip -a "$rclone_zip" -d "$unzip_dir"
     ;;
   '7z')
-    7z x $rclone_zip -o$unzip_dir
+    7z x "$rclone_zip" "-o$unzip_dir"
     ;;
   'busybox')
-    mkdir -p $unzip_dir
-    busybox unzip $rclone_zip -d $unzip_dir
+    mkdir -p "$unzip_dir"
+    busybox unzip "$rclone_zip" -d "$unzip_dir"
     ;;
   'deb')
-    mkdir -p $unzip_dir/empty
+    mkdir -p "$unzip_dir/empty"
     ;;
 esac
     
@@ -136,14 +137,14 @@ cd $unzip_dir/*
 
 #mounting rclone to environment
 
-case $OS in
+case "$OS" in
   'linux')
     #binary
     cp rclone /usr/bin/rclone.new
     chmod 755 /usr/bin/rclone.new
     chown root:root /usr/bin/rclone.new
     mv /usr/bin/rclone.new /usr/bin/rclone
-    #manuals
+    #manual
     if ! [ -x "$(command -v mandb)" ]; then
         echo 'mandb not found. The rclone man docs will not be installed.'
     else 
@@ -153,11 +154,11 @@ case $OS in
     fi
     ;;
   'freebsd'|'openbsd'|'netbsd')
-    #bin
+    #binary
     cp rclone /usr/bin/rclone.new
     chown root:wheel /usr/bin/rclone.new
     mv /usr/bin/rclone.new /usr/bin/rclone
-    #man
+    #manual
     mkdir -p /usr/local/man/man1
     cp rclone.1 /usr/local/man/man1/
     makewhatis
@@ -182,7 +183,7 @@ esac
 
 
 #update version variable post install
-version=`rclone --version 2>>errors | head -n 1`
+version=$(rclone --version 2>>errors | head -n 1)
 
 printf "\n${version} has successfully installed."
 printf '\nNow run "rclone config" for setup. Check https://rclone.org/docs/ for more details.\n\n'
