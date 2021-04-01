@@ -819,7 +819,7 @@ func (f *Fs) shouldRetry(ctx context.Context, err error) (bool, error) {
 				if f.changeSAenabled {
 					f.changeSAmu.Lock()
 					defer f.changeSAmu.Unlock()
-					if saerr := f.changeServiceAccount(context.Background()); saerr == nil {
+					if saerr := f.changeServiceAccount(ctx); saerr == nil {
 						return true, err
 					}
 				}
@@ -1433,8 +1433,8 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 			srcFile, err = f.svc.Files.Get(rootID).
 				Fields("name", "id", "size", "mimeType", "driveId").
 				SupportsAllDrives(true).
-				Do()
-			return f.shouldRetry(err)
+				Context(ctx).Do()
+			return f.shouldRetry(ctx, err)
 		})
 		if err == nil {
 			if srcFile.MimeType != "" && srcFile.MimeType != "application/vnd.google-apps.folder" {
@@ -1507,8 +1507,8 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		f.dirCache = tempF.dirCache
 		f.root = tempF.root
 
-		extension, exportName, exportMimeType, isDocument := f.findExportFormat(srcFile)
-		obj, _ := f.newObjectWithExportInfo(srcFile.Name, srcFile, extension, exportName, exportMimeType, isDocument)
+		extension, exportName, exportMimeType, isDocument := f.findExportFormat(ctx, srcFile)
+		obj, _ := f.newObjectWithExportInfo(ctx, srcFile.Name, srcFile, extension, exportName, exportMimeType, isDocument)
 		f.root = "isFile:" + srcFile.Name
 		f.FileObj = &obj
 		return f, fs.ErrorIsFile
@@ -3461,7 +3461,7 @@ func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDe
 	// list the objects
 	infos := []*drive.File{}
 	if srcDepth == "0" {
-		info, err := f.getFile(srcID, "id,name,parents")
+		info, err := f.getFile(ctx, srcID, "id,name,parents")
 		if err != nil {
 			return nil, errors.Wrap(err, "couldn't get source info")
 		}
@@ -3492,8 +3492,8 @@ func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDe
 				AddParents(dstID).
 				Fields("").
 				SupportsAllDrives(true).
-				Do()
-			return f.shouldRetry(err)
+				Context(ctx).Do()
+			return f.shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "failed changing parents")
