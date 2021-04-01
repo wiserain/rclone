@@ -4,6 +4,7 @@ package file
 
 import (
 	"os"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -15,6 +16,7 @@ var (
 	ntdll                        = windows.NewLazySystemDLL("ntdll.dll")
 	ntQueryVolumeInformationFile = ntdll.NewProc("NtQueryVolumeInformationFile")
 	ntSetInformationFile         = ntdll.NewProc("NtSetInformationFile")
+	preAllocateMu                sync.Mutex
 )
 
 type fileAllocationInformation struct {
@@ -41,6 +43,9 @@ func PreAllocate(size int64, out *os.File) error {
 	if size <= 0 {
 		return nil
 	}
+
+	preAllocateMu.Lock()
+	defer preAllocateMu.Unlock()
 
 	var (
 		iosb       ioStatusBlock
@@ -76,6 +81,9 @@ func PreAllocate(size int64, out *os.File) error {
 		uintptr(19), // FileAllocationInformation
 	)
 	if e1 != nil && e1 != syscall.Errno(0) {
+		if e1 == syscall.Errno(windows.ERROR_DISK_FULL) || e1 == syscall.Errno(windows.ERROR_HANDLE_DISK_FULL) {
+			return ErrDiskFull
+		}
 		return errors.Wrap(e1, "preAllocate NtSetInformationFile failed")
 	}
 

@@ -77,11 +77,10 @@ func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, 
 			return false, err
 		}
 		var req *http.Request
-		req, err = http.NewRequest(method, urls, body)
+		req, err = http.NewRequestWithContext(ctx, method, urls, body)
 		if err != nil {
 			return false, err
 		}
-		req = req.WithContext(ctx) // go1.13 can use NewRequestWithContext
 		googleapi.Expand(req.URL, map[string]string{
 			"fileId": fileID,
 		})
@@ -95,7 +94,7 @@ func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, 
 			defer googleapi.CloseBody(res)
 			err = googleapi.CheckResponse(res)
 		}
-		return f.shouldRetry(err)
+		return f.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, err
@@ -114,8 +113,7 @@ func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, 
 
 // Make an http.Request for the range passed in
 func (rx *resumableUpload) makeRequest(ctx context.Context, start int64, body io.ReadSeeker, reqSize int64) *http.Request {
-	req, _ := http.NewRequest("POST", rx.URI, body)
-	req = req.WithContext(ctx) // go1.13 can use NewRequestWithContext
+	req, _ := http.NewRequestWithContext(ctx, "POST", rx.URI, body)
 	req.ContentLength = reqSize
 	totalSize := "*"
 	if rx.ContentLength >= 0 {
@@ -204,7 +202,7 @@ func (rx *resumableUpload) Upload(ctx context.Context) (*drive.File, error) {
 		err = rx.f.pacer.Call(func() (bool, error) {
 			fs.Debugf(rx.remote, "Sending chunk %d length %d", start, reqSize)
 			StatusCode, err = rx.transferChunk(ctx, start, chunk, reqSize)
-			again, err := rx.f.shouldRetry(err)
+			again, err := rx.f.shouldRetry(ctx, err)
 			if StatusCode == statusResumeIncomplete || StatusCode == http.StatusCreated || StatusCode == http.StatusOK {
 				again = false
 				err = nil

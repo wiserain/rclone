@@ -289,6 +289,15 @@ func (f *File) activeWriters() int {
 	return int(atomic.LoadInt32(&f.nwriters))
 }
 
+// _roundModTime rounds the time passed in to the Precision of the
+// underlying Fs
+//
+// It should be called with the lock held
+func (f *File) _roundModTime(modTime time.Time) time.Time {
+	precision := f.d.f.Precision()
+	return modTime.Truncate(precision)
+}
+
 // ModTime returns the modified time of the file
 //
 // if NoModTime is set then it returns the mod time of the directory
@@ -300,8 +309,19 @@ func (f *File) ModTime() (modTime time.Time) {
 	if d.vfs.Opt.NoModTime {
 		return d.ModTime()
 	}
+	// Read the modtime from a dirty item if it exists
+	if f.d.vfs.Opt.CacheMode >= vfscommon.CacheModeMinimal {
+		if item := f.d.vfs.cache.DirtyItem(f._path()); item != nil {
+			modTime, err := item.GetModTime()
+			if err != nil {
+				fs.Errorf(f._path(), "ModTime: Item GetModTime failed: %v", err)
+			} else {
+				return f._roundModTime(modTime)
+			}
+		}
+	}
 	if !pendingModTime.IsZero() {
-		return pendingModTime
+		return f._roundModTime(pendingModTime)
 	}
 	if o == nil {
 		return time.Now()
@@ -382,6 +402,13 @@ func (f *File) _applyPendingModTime() error {
 		return errors.New("Cannot apply ModTime, file object is not available")
 	}
 
+	dt := f.pendingModTime.Sub(f.o.ModTime(context.Background()))
+	modifyWindow := f.o.Fs().Precision()
+	if dt < modifyWindow && dt > -modifyWindow {
+		fs.Debugf(f.o, "Not setting pending mod time %v as it is already set", f.pendingModTime)
+		return nil
+	}
+
 	// set the time of the object
 	err := f.o.SetModTime(context.TODO(), f.pendingModTime)
 	switch err {
@@ -395,6 +422,13 @@ func (f *File) _applyPendingModTime() error {
 	}
 
 	return nil
+}
+
+// Apply a pending mod time
+func (f *File) applyPendingModTime() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f._applyPendingModTime()
 }
 
 // _writingInProgress returns true of there are any open writers

@@ -76,8 +76,8 @@ type ConfigInfo struct {
 	NoUnicodeNormalization bool
 	NoUpdateModTime        bool
 	DataRateUnit           string
-	CompareDest            string
-	CopyDest               string
+	CompareDest            []string
+	CopyDest               []string
 	BackupDir              string
 	Suffix                 string
 	SuffixKeepExtension    bool
@@ -122,6 +122,9 @@ type ConfigInfo struct {
 	Headers                []*HTTPOption
 	RefreshTimes           bool
 	NoConsole              bool
+	TrafficClass           uint8
+	FsCacheExpireDuration  time.Duration
+	FsCacheExpireInterval  time.Duration
 }
 
 // NewConfig creates a new config with everything set to the default
@@ -159,8 +162,18 @@ func NewConfig() *ConfigInfo {
 	c.MultiThreadStreams = 4
 
 	c.TrackRenamesStrategy = "hash"
+	c.FsCacheExpireDuration = 300 * time.Second
+	c.FsCacheExpireInterval = 60 * time.Second
 
 	return c
+}
+
+// TimeoutOrInfinite returns ci.Timeout if > 0 or infinite otherwise
+func (c *ConfigInfo) TimeoutOrInfinite() time.Duration {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	return ModTimeNotSupported
 }
 
 type configContextKeyType struct{}
@@ -178,6 +191,19 @@ func GetConfig(ctx context.Context) *ConfigInfo {
 		return globalConfig
 	}
 	return c.(*ConfigInfo)
+}
+
+// CopyConfig copies the global config (if any) from srcCtx into
+// dstCtx returning the new context.
+func CopyConfig(dstCtx, srcCtx context.Context) context.Context {
+	if srcCtx == nil {
+		return dstCtx
+	}
+	c := srcCtx.Value(configContextKey)
+	if c == nil {
+		return dstCtx
+	}
+	return context.WithValue(dstCtx, configContextKey, c)
 }
 
 // AddConfig returns a mutable config structure based on a shallow

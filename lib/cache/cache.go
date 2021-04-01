@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,6 +26,30 @@ func New() *Cache {
 		expireDuration: 300 * time.Second,
 		expireInterval: 60 * time.Second,
 	}
+}
+
+// SetExpireDuration sets the interval at which things expire
+//
+// If it is less than or equal to 0 then things are never cached
+func (c *Cache) SetExpireDuration(d time.Duration) *Cache {
+	c.expireDuration = d
+	return c
+}
+
+// returns true if we aren't to cache anything
+func (c *Cache) noCache() bool {
+	return c.expireDuration <= 0
+}
+
+// SetExpireInterval sets the interval at which the cache expiry runs
+//
+// Set to 0 or a -ve number to disable
+func (c *Cache) SetExpireInterval(d time.Duration) *Cache {
+	if d <= 0 {
+		d = 100 * 365 * 24 * time.Hour
+	}
+	c.expireInterval = d
+	return c
 }
 
 // cacheEntry is stored in the cache
@@ -68,7 +93,9 @@ func (c *Cache) Get(key string, create CreateFunc) (value interface{}, err error
 			err:   err,
 		}
 		c.mu.Lock()
-		c.cache[key] = entry
+		if !c.noCache() {
+			c.cache[key] = entry
+		}
 	}
 	defer c.mu.Unlock()
 	c.used(entry)
@@ -99,6 +126,9 @@ func (c *Cache) Unpin(key string) {
 func (c *Cache) Put(key string, value interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.noCache() {
+		return
+	}
 	entry := &cacheEntry{
 		value: value,
 		key:   key,
@@ -117,6 +147,32 @@ func (c *Cache) GetMaybe(key string) (value interface{}, found bool) {
 	}
 	c.used(entry)
 	return entry.value, found
+}
+
+// Delete the entry passed in
+//
+// Returns true if the entry was found
+func (c *Cache) Delete(key string) bool {
+	c.mu.Lock()
+	_, found := c.cache[key]
+	delete(c.cache, key)
+	c.mu.Unlock()
+	return found
+}
+
+// DeletePrefix deletes all entries with the given prefix
+//
+// Returns number of entries deleted
+func (c *Cache) DeletePrefix(prefix string) (deleted int) {
+	c.mu.Lock()
+	for k := range c.cache {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.cache, k)
+			deleted++
+		}
+	}
+	c.mu.Unlock()
+	return deleted
 }
 
 // Rename renames the item at oldKey to newKey.

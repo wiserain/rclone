@@ -169,21 +169,9 @@ func (s *Server) Serve() error {
 // writeError writes a formatted error to the output
 func writeError(path string, in rc.Params, w http.ResponseWriter, err error, status int) {
 	fs.Errorf(nil, "rc: %q: error: %v", path, err)
-	// Adjust the error return for some well known errors
-	errOrig := errors.Cause(err)
-	switch {
-	case errOrig == fs.ErrorDirNotFound || errOrig == fs.ErrorObjectNotFound:
-		status = http.StatusNotFound
-	case rc.IsErrParamInvalid(err) || rc.IsErrParamNotFound(err):
-		status = http.StatusBadRequest
-	}
+	params, status := rc.Error(path, in, err, status)
 	w.WriteHeader(status)
-	err = rc.WriteJSON(w, rc.Params{
-		"status": status,
-		"error":  err.Error(),
-		"input":  in,
-		"path":   path,
-	})
+	err = rc.WriteJSON(w, params)
 	if err != nil {
 		// can't return the error at this point
 		fs.Errorf(nil, "rc: writeError: failed to write JSON output from %#v: %v", in, err)
@@ -229,6 +217,7 @@ func (s *Server) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request, path string) {
+	ctx := r.Context()
 	contentType := r.Header.Get("Content-Type")
 
 	values := r.URL.Query()
@@ -282,22 +271,10 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request, path string)
 		in["_response"] = w
 	}
 
-	// Check to see if it is async or not
-	isAsync, err := in.GetBool("_async")
-	if rc.NotErrParamNotFound(err) {
-		writeError(path, inOrig, w, err, http.StatusBadRequest)
-		return
-	}
-	delete(in, "_async") // remove the async parameter after parsing so vfs operations don't get confused
-
 	fs.Debugf(nil, "rc: %q: with parameters %+v", path, in)
-	var out rc.Params
-	if isAsync {
-		out, err = jobs.StartAsyncJob(call.Fn, in)
-	} else {
-		var jobID int64
-		out, jobID, err = jobs.ExecuteJob(r.Context(), call.Fn, in)
-		w.Header().Add("x-rclone-jobid", fmt.Sprintf("%d", jobID))
+	job, out, err := jobs.NewJob(ctx, call.Fn, in)
+	if job != nil {
+		w.Header().Add("x-rclone-jobid", fmt.Sprintf("%d", job.ID))
 	}
 	if err != nil {
 		writeError(path, inOrig, w, err, http.StatusInternalServerError)

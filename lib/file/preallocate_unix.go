@@ -4,7 +4,9 @@ package file
 
 import (
 	"os"
+	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/rclone/rclone/fs"
 	"golang.org/x/sys/unix"
@@ -16,6 +18,7 @@ var (
 		unix.FALLOC_FL_KEEP_SIZE | unix.FALLOC_FL_PUNCH_HOLE, // for ZFS #3066
 	}
 	fallocFlagsIndex int32
+	preAllocateMu    sync.Mutex
 )
 
 // PreallocateImplemented is a constant indicating whether the
@@ -23,29 +26,39 @@ var (
 const PreallocateImplemented = true
 
 // PreAllocate the file for performance reasons
-func PreAllocate(size int64, out *os.File) error {
+func PreAllocate(size int64, out *os.File) (err error) {
 	if size <= 0 {
 		return nil
 	}
-	index := atomic.LoadInt32(&fallocFlagsIndex)
-again:
-	if index >= int32(len(fallocFlags)) {
-		return nil // Fallocate is disabled
-	}
-	flags := fallocFlags[index]
-	err := unix.Fallocate(int(out.Fd()), flags, 0, size)
-	if err == unix.ENOTSUP {
-		// Try the next flags combination
-		index++
-		atomic.StoreInt32(&fallocFlagsIndex, index)
-		fs.Debugf(nil, "preAllocate: got error on fallocate, trying combination %d/%d: %v", index, len(fallocFlags), err)
-		goto again
 
+	preAllocateMu.Lock()
+	defer preAllocateMu.Unlock()
+
+	for {
+
+		index := atomic.LoadInt32(&fallocFlagsIndex)
+	again:
+		if index >= int32(len(fallocFlags)) {
+			return nil // Fallocate is disabled
+		}
+		flags := fallocFlags[index]
+		err = unix.Fallocate(int(out.Fd()), flags, 0, size)
+		if err == unix.ENOTSUP {
+			// Try the next flags combination
+			index++
+			atomic.StoreInt32(&fallocFlagsIndex, index)
+			fs.Debugf(nil, "preAllocate: got error on fallocate, trying combination %d/%d: %v", index, len(fallocFlags), err)
+			goto again
+
+		}
+		// Wrap important errors
+		if err == unix.ENOSPC {
+			return ErrDiskFull
+		}
+		if err != syscall.EINTR {
+			break
+		}
 	}
-	// FIXME could be doing something here
-	// if err == unix.ENOSPC {
-	// 	log.Printf("No space")
-	// }
 	return err
 }
 

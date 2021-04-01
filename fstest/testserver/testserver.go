@@ -91,7 +91,7 @@ func start(name string) error {
 				continue
 			}
 
-			// fs.Debugf(name, "key = %q, envKey = %q, value = %q", key, envKey, value)
+			// fs.Debugf(name, "key = %q, envKey = %q, value = %q", key, envKey(name, string(key)), value)
 			err = os.Setenv(envKey(name, string(key)), string(value))
 			if err != nil {
 				return err
@@ -122,11 +122,11 @@ func Start(remoteName string) (fn func(), err error) {
 		// don't start the local backend
 		return func() {}, nil
 	}
-	var name string
-	name, _, err = fspath.Parse(remoteName)
+	parsed, err := fspath.Parse(remoteName)
 	if err != nil {
 		return nil, err
 	}
+	name := parsed.ConfigString
 	if name == "" {
 		// don't start the local backend
 		return func() {}, nil

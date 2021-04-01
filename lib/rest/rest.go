@@ -213,11 +213,10 @@ func (api *Client) Call(ctx context.Context, opts *Opts) (resp *http.Response, e
 	if opts.ContentLength != nil && *opts.ContentLength == 0 {
 		body = nil
 	}
-	req, err := http.NewRequest(opts.Method, url, body)
+	req, err := http.NewRequestWithContext(ctx, opts.Method, url, body)
 	if err != nil {
 		return
 	}
-	req = req.WithContext(ctx) // go1.13 can use NewRequestWithContext
 	headers := make(map[string]string)
 	// Set default headers
 	for k, v := range api.headers {
@@ -309,7 +308,7 @@ func (api *Client) Call(ctx context.Context, opts *Opts) (resp *http.Response, e
 // the int64 returned is the overhead in addition to the file contents, in case Content-Length is required
 //
 // NB This doesn't allow setting the content type of the attachment
-func MultipartUpload(in io.Reader, params url.Values, contentName, fileName string) (io.ReadCloser, string, int64, error) {
+func MultipartUpload(ctx context.Context, in io.Reader, params url.Values, contentName, fileName string) (io.ReadCloser, string, int64, error) {
 	bodyReader, bodyWriter := io.Pipe()
 	writer := multipart.NewWriter(bodyWriter)
 	contentType := writer.FormDataContentType()
@@ -344,8 +343,21 @@ func MultipartUpload(in io.Reader, params url.Values, contentName, fileName stri
 
 	multipartLength := int64(buf.Len())
 
+	// Make sure we close the pipe writer to release the reader on context cancel
+	quit := make(chan struct{})
+	go func() {
+		select {
+		case <-quit:
+			break
+		case <-ctx.Done():
+			_ = bodyWriter.CloseWithError(ctx.Err())
+		}
+	}()
+
 	// Pump the data in the background
 	go func() {
+		defer close(quit)
+
 		var err error
 
 		for key, vals := range params {
@@ -453,7 +465,7 @@ func (api *Client) callCodec(ctx context.Context, opts *Opts, request interface{
 		opts = opts.Copy()
 
 		var overhead int64
-		opts.Body, opts.ContentType, overhead, err = MultipartUpload(opts.Body, params, opts.MultipartContentName, opts.MultipartFileName)
+		opts.Body, opts.ContentType, overhead, err = MultipartUpload(ctx, opts.Body, params, opts.MultipartContentName, opts.MultipartFileName)
 		if err != nil {
 			return nil, err
 		}

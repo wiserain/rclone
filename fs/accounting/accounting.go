@@ -29,6 +29,18 @@ var ErrorMaxTransferLimitReachedFatal = fserrors.FatalError(ErrorMaxTransferLimi
 // transfer limit is reached and a graceful stop is required.
 var ErrorMaxTransferLimitReachedGraceful = fserrors.NoRetryError(ErrorMaxTransferLimitReached)
 
+// Start sets up the accounting, in particular the bandwidth limiting
+func Start(ctx context.Context) {
+	// Start the token bucket limiter
+	TokenBucket.StartTokenBucket(ctx)
+
+	// Start the bandwidth update ticker
+	TokenBucket.StartTokenTicker(ctx)
+
+	// Start the transactions per second limiter
+	StartLimitTPS(ctx)
+}
+
 // Account limits and accounts for one transfer
 type Account struct {
 	stats *StatsInfo
@@ -202,7 +214,10 @@ func (acc *Account) averageLoop() {
 			acc.values.mu.Lock()
 			// Add average of last second.
 			elapsed := now.Sub(acc.values.lpTime).Seconds()
-			avg := float64(acc.values.lpBytes) / elapsed
+			avg := 0.0
+			if elapsed > 0 {
+				avg = float64(acc.values.lpBytes) / elapsed
+			}
 			// Soft start the moving average
 			if period < averagePeriod {
 				period++
@@ -430,7 +445,11 @@ func (acc *Account) speed() (bps, current float64) {
 	}
 	// Calculate speed from first read.
 	total := float64(time.Now().Sub(acc.values.start)) / float64(time.Second)
-	bps = float64(acc.values.bytes) / total
+	if total > 0 {
+		bps = float64(acc.values.bytes) / total
+	} else {
+		bps = 0.0
+	}
 	current = acc.values.avg
 	return
 }
@@ -508,14 +527,11 @@ func (acc *Account) rcStats() (out rc.Params) {
 	out["speed"] = spd
 	out["speedAvg"] = cur
 
-	eta, etaok := acc.eta()
-	out["eta"] = nil
-	if etaok {
-		if eta > 0 {
-			out["eta"] = eta.Seconds()
-		} else {
-			out["eta"] = 0
-		}
+	eta, etaOK := acc.eta()
+	if etaOK {
+		out["eta"] = eta.Seconds()
+	} else {
+		out["eta"] = nil
 	}
 	out["name"] = acc.name
 

@@ -72,6 +72,10 @@ func (o *Object) SetModTime(context.Context, time.Time) error {
 	//return errors.New("setting modtime is not supported for 1fichier remotes")
 }
 
+func (o *Object) setMetaData(file File) {
+	o.file = file
+}
+
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
 	fs.FixRangeOption(options, o.file.Size)
@@ -90,7 +94,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadClo
 
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.rest.Call(ctx, &opts)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 
 	if err != nil {

@@ -20,6 +20,7 @@ var (
 	exitOnce     sync.Once
 	registerOnce sync.Once
 	signalled    int32
+	runCalled    int32
 )
 
 // FnHandle is the type of the handle returned by function `Register`
@@ -29,6 +30,9 @@ type FnHandle *func()
 // Register a function to be called on exit.
 // Returns a handle which can be used to unregister the function with `Unregister`.
 func Register(fn func()) FnHandle {
+	if running() {
+		return nil
+	}
 	fnsMutex.Lock()
 	fns[&fn] = true
 	fnsMutex.Unlock()
@@ -42,6 +46,7 @@ func Register(fn func()) FnHandle {
 			if sig == nil {
 				return
 			}
+			signal.Stop(exitChan)
 			atomic.StoreInt32(&signalled, 1)
 			fs.Infof(nil, "Signal received: %s", sig)
 			Run()
@@ -58,8 +63,16 @@ func Signalled() bool {
 	return atomic.LoadInt32(&signalled) != 0
 }
 
+// running returns true if run has been called
+func running() bool {
+	return atomic.LoadInt32(&runCalled) != 0
+}
+
 // Unregister a function using the handle returned by `Register`
 func Unregister(handle FnHandle) {
+	if running() {
+		return
+	}
 	fnsMutex.Lock()
 	defer fnsMutex.Unlock()
 	delete(fns, handle)
@@ -67,6 +80,9 @@ func Unregister(handle FnHandle) {
 
 // IgnoreSignals disables the signal handler and prevents Run from being executed automatically
 func IgnoreSignals() {
+	if running() {
+		return
+	}
 	registerOnce.Do(func() {})
 	if exitChan != nil {
 		signal.Stop(exitChan)
@@ -77,9 +93,13 @@ func IgnoreSignals() {
 
 // Run all the at exit functions if they haven't been run already
 func Run() {
+	atomic.StoreInt32(&runCalled, 1)
+	// Take the lock here (not inside the exitOnce) so we wait
+	// until the exit handlers have run before any calls to Run()
+	// return.
+	fnsMutex.Lock()
+	defer fnsMutex.Unlock()
 	exitOnce.Do(func() {
-		fnsMutex.Lock()
-		defer fnsMutex.Unlock()
 		for fnHandle := range fns {
 			(*fnHandle)()
 		}

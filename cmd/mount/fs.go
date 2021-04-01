@@ -1,6 +1,6 @@
 // FUSE main Fs
 
-// +build linux,go1.13 freebsd,go1.13
+// +build linux freebsd
 
 package mount
 
@@ -20,8 +20,9 @@ import (
 // FS represents the top level filing system
 type FS struct {
 	*vfs.VFS
-	f   fs.Fs
-	opt *mountlib.Options
+	f      fs.Fs
+	opt    *mountlib.Options
+	server *fusefs.Server
 }
 
 // Check interface satisfied

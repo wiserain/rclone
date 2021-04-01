@@ -217,6 +217,23 @@ This option controls how often unused buffers will be removed from the pool.`,
 				encoder.EncodeDel |
 				encoder.EncodeBackSlash |
 				encoder.EncodeRightPeriod),
+		}, {
+			Name:    "public_access",
+			Help:    "Public access level of a container: blob, container.",
+			Default: string(azblob.PublicAccessNone),
+			Examples: []fs.OptionExample{
+				{
+					Value: string(azblob.PublicAccessNone),
+					Help:  "The container and its blobs can be accessed only with an authorized request. It's a default value",
+				}, {
+					Value: string(azblob.PublicAccessBlob),
+					Help:  "Blob data within this container can be read via anonymous request.",
+				}, {
+					Value: string(azblob.PublicAccessContainer),
+					Help:  "Allow full public read access for container and blob data.",
+				},
+			},
+			Advanced: true,
 		}},
 	})
 }
@@ -241,6 +258,7 @@ type Options struct {
 	MemoryPoolFlushTime  fs.Duration          `config:"memory_pool_flush_time"`
 	MemoryPoolUseMmap    bool                 `config:"memory_pool_use_mmap"`
 	Enc                  encoder.MultiEncoder `config:"encoding"`
+	PublicAccess         string               `config:"public_access"`
 }
 
 // Fs represents a remote azure server
@@ -262,6 +280,7 @@ type Fs struct {
 	imdsPacer     *fs.Pacer                       // Same but for IMDS
 	uploadToken   *pacer.TokenDispenser           // control concurrency
 	pool          *pool.Pool                      // memory pool
+	publicAccess  azblob.PublicAccessType         // Container Public Access Level
 }
 
 // Object describes an azure object
@@ -335,6 +354,19 @@ func validateAccessTier(tier string) bool {
 	}
 }
 
+// validatePublicAccess checks if azureblob supports use supplied public access level
+func validatePublicAccess(publicAccess string) bool {
+	switch publicAccess {
+	case string(azblob.PublicAccessNone),
+		string(azblob.PublicAccessBlob),
+		string(azblob.PublicAccessContainer):
+		// valid cases
+		return true
+	default:
+		return false
+	}
+}
+
 // retryErrorCodes is a slice of error codes that we will retry
 var retryErrorCodes = []int{
 	401, // Unauthorized (e.g. "Token has expired")
@@ -347,7 +379,10 @@ var retryErrorCodes = []int{
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func (f *Fs) shouldRetry(err error) (bool, error) {
+func (f *Fs) shouldRetry(ctx context.Context, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
 	// FIXME interpret special errors - more to do here
 	if storageErr, ok := err.(azblob.StorageError); ok {
 		switch storageErr.ServiceCode() {
@@ -499,6 +534,11 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			string(azblob.AccessTierHot), string(azblob.AccessTierCool), string(azblob.AccessTierArchive))
 	}
 
+	if !validatePublicAccess((opt.PublicAccess)) {
+		return nil, errors.Errorf("Azure Blob: Supported public access level are %s and %s",
+			string(azblob.PublicAccessBlob), string(azblob.PublicAccessContainer))
+	}
+
 	ci := fs.GetConfig(ctx)
 	f := &Fs{
 		name:        name,
@@ -517,6 +557,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			opt.MemoryPoolUseMmap,
 		),
 	}
+	f.publicAccess = azblob.PublicAccessType(opt.PublicAccess)
 	f.imdsPacer.SetRetries(5) // per IMDS documentation
 	f.setRoot(root)
 	f.features = (&fs.Features{
@@ -578,7 +619,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			// Retry as specified by the documentation:
 			// https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/how-to-use-vm-token#retry-guidance
 			token, err = GetMSIToken(ctx, userMSI)
-			return f.shouldRetry(err)
+			return f.shouldRetry(ctx, err)
 		})
 
 		if err != nil {
@@ -594,7 +635,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			var refreshedToken adal.Token
 			err := f.imdsPacer.Call(func() (bool, error) {
 				refreshedToken, err = GetMSIToken(ctx, userMSI)
-				return f.shouldRetry(err)
+				return f.shouldRetry(ctx, err)
 			})
 			if err != nil {
 				// Failed to refresh.
@@ -803,7 +844,7 @@ func (f *Fs) list(ctx context.Context, container, directory, prefix string, addC
 		err := f.pacer.Call(func() (bool, error) {
 			var err error
 			response, err = f.cntURL(container).ListBlobsHierarchySegment(ctx, marker, delimiter, options)
-			return f.shouldRetry(err)
+			return f.shouldRetry(ctx, err)
 		})
 
 		if err != nil {
@@ -1029,7 +1070,7 @@ func (f *Fs) listContainersToFn(fn listContainerFn) error {
 		err := f.pacer.Call(func() (bool, error) {
 			var err error
 			response, err = f.svcURL.ListContainersSegment(ctx, marker, params)
-			return f.shouldRetry(err)
+			return f.shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return err
@@ -1081,7 +1122,7 @@ func (f *Fs) makeContainer(ctx context.Context, container string) error {
 		}
 		// now try to create the container
 		return f.pacer.Call(func() (bool, error) {
-			_, err := f.cntURL(container).Create(ctx, azblob.Metadata{}, azblob.PublicAccessNone)
+			_, err := f.cntURL(container).Create(ctx, azblob.Metadata{}, f.publicAccess)
 			if err != nil {
 				if storageErr, ok := err.(azblob.StorageError); ok {
 					switch storageErr.ServiceCode() {
@@ -1098,7 +1139,7 @@ func (f *Fs) makeContainer(ctx context.Context, container string) error {
 					}
 				}
 			}
-			return f.shouldRetry(err)
+			return f.shouldRetry(ctx, err)
 		})
 	}, nil)
 }
@@ -1136,10 +1177,10 @@ func (f *Fs) deleteContainer(ctx context.Context, container string) error {
 					return false, fs.ErrorDirNotFound
 				}
 
-				return f.shouldRetry(err)
+				return f.shouldRetry(ctx, err)
 			}
 
-			return f.shouldRetry(err)
+			return f.shouldRetry(ctx, err)
 		})
 	})
 }
@@ -1212,7 +1253,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	err = f.pacer.Call(func() (bool, error) {
 		startCopy, err = dstBlobURL.StartCopyFromURL(ctx, *source, nil, azblob.ModifiedAccessConditions{}, options, azblob.AccessTierType(f.opt.AccessTier), nil)
-		return f.shouldRetry(err)
+		return f.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1373,7 +1414,7 @@ func (o *Object) readMetaData() (err error) {
 	var blobProperties *azblob.BlobGetPropertiesResponse
 	err = o.fs.pacer.Call(func() (bool, error) {
 		blobProperties, err = blob.GetProperties(ctx, options, azblob.ClientProvidedKeyOptions{})
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		// On directories - GetProperties does not work and current SDK does not populate service code correctly hence check regular http response as well
@@ -1408,7 +1449,7 @@ func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 	blob := o.getBlobReference()
 	err := o.fs.pacer.Call(func() (bool, error) {
 		_, err := blob.SetMetadata(ctx, o.meta, azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return err
@@ -1451,7 +1492,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	var downloadResponse *azblob.DownloadResponse
 	err = o.fs.pacer.Call(func() (bool, error) {
 		downloadResponse, err = blob.Download(ctx, offset, count, ac, false, azblob.ClientProvidedKeyOptions{})
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open for download")
@@ -1592,7 +1633,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		// Stream contents of the reader object to the given blob URL
 		blockBlobURL := blob.ToBlockBlobURL()
 		_, err = azblob.UploadStreamToBlockBlob(ctx, in, blockBlobURL, putBlobOptions)
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return err
@@ -1620,7 +1661,7 @@ func (o *Object) Remove(ctx context.Context) error {
 	ac := azblob.BlobAccessConditions{}
 	return o.fs.pacer.Call(func() (bool, error) {
 		_, err := blob.Delete(ctx, snapShotOptions, ac)
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 }
 
@@ -1649,7 +1690,7 @@ func (o *Object) SetTier(tier string) error {
 	ctx := context.Background()
 	err := o.fs.pacer.Call(func() (bool, error) {
 		_, err := blob.SetTier(ctx, desiredAccessTier, azblob.LeaseAccessConditions{})
-		return o.fs.shouldRetry(err)
+		return o.fs.shouldRetry(ctx, err)
 	})
 
 	if err != nil {

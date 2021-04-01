@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/rc"
 )
 
@@ -174,32 +175,101 @@ func (jobs *Jobs) Get(ID int64) *Job {
 	return jobs.jobs[ID]
 }
 
-func getGroup(in rc.Params) string {
-	// Check to see if the group is set
+// Check to see if the group is set
+func getGroup(ctx context.Context, in rc.Params, id int64) (context.Context, string, error) {
 	group, err := in.GetString("_group")
 	if rc.NotErrParamNotFound(err) {
-		fs.Errorf(nil, "Can't get _group param %+v", err)
+		return ctx, "", err
 	}
 	delete(in, "_group")
-	return group
-}
-
-// NewAsyncJob start a new asynchronous Job off
-func (jobs *Jobs) NewAsyncJob(fn rc.Func, in rc.Params) *Job {
-	id := atomic.AddInt64(&jobID, 1)
-
-	group := getGroup(in)
 	if group == "" {
 		group = fmt.Sprintf("job/%d", id)
 	}
-	ctx := accounting.WithStatsGroup(context.Background(), group)
+	ctx = accounting.WithStatsGroup(ctx, group)
+	return ctx, group, nil
+}
+
+// See if _async is set returning a boolean and a possible new context
+func getAsync(ctx context.Context, in rc.Params) (context.Context, bool, error) {
+	isAsync, err := in.GetBool("_async")
+	if rc.NotErrParamNotFound(err) {
+		return ctx, false, err
+	}
+	delete(in, "_async") // remove the async parameter after parsing
+	if isAsync {
+		// unlink this job from the current context
+		ctx = context.Background()
+	}
+	return ctx, isAsync, nil
+}
+
+// See if _config is set and if so adjust ctx to include it
+func getConfig(ctx context.Context, in rc.Params) (context.Context, error) {
+	if _, ok := in["_config"]; !ok {
+		return ctx, nil
+	}
+	ctx, ci := fs.AddConfig(ctx)
+	err := in.GetStruct("_config", ci)
+	if err != nil {
+		return ctx, err
+	}
+	delete(in, "_config") // remove the parameter
+	return ctx, nil
+}
+
+// See if _filter is set and if so adjust ctx to include it
+func getFilter(ctx context.Context, in rc.Params) (context.Context, error) {
+	if _, ok := in["_filter"]; !ok {
+		return ctx, nil
+	}
+	// Copy of the current filter options
+	opt := filter.GetConfig(ctx).Opt
+	// Update the options from the parameter
+	err := in.GetStruct("_filter", &opt)
+	if err != nil {
+		return ctx, err
+	}
+	fi, err := filter.NewFilter(&opt)
+	if err != nil {
+		return ctx, err
+	}
+	ctx = filter.ReplaceConfig(ctx, fi)
+	delete(in, "_filter") // remove the parameter
+	return ctx, nil
+}
+
+// NewJob creates a Job and executes it, possibly in the background if _async is set
+func (jobs *Jobs) NewJob(ctx context.Context, fn rc.Func, in rc.Params) (job *Job, out rc.Params, err error) {
+	id := atomic.AddInt64(&jobID, 1)
+	in = in.Copy() // copy input so we can change it
+
+	ctx, isAsync, err := getAsync(ctx, in)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx, err = getConfig(ctx, in)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx, err = getFilter(ctx, in)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx, group, err := getGroup(ctx, in, id)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	stop := func() {
 		cancel()
 		// Wait for cancel to propagate before returning.
 		<-ctx.Done()
 	}
-	job := &Job{
+	job = &Job{
 		ID:        id,
 		Group:     group,
 		StartTime: time.Now(),
@@ -208,51 +278,23 @@ func (jobs *Jobs) NewAsyncJob(fn rc.Func, in rc.Params) *Job {
 	jobs.mu.Lock()
 	jobs.jobs[job.ID] = job
 	jobs.mu.Unlock()
-	go job.run(ctx, fn, in)
-	return job
+	if isAsync {
+		go job.run(ctx, fn, in)
+		out = make(rc.Params)
+		out["jobid"] = job.ID
+		err = nil
+	} else {
+		job.run(ctx, fn, in)
+		out = job.Output
+		err = job.realErr
+	}
+	return job, out, err
 }
 
-// NewSyncJob start a new synchronous Job off
-func (jobs *Jobs) NewSyncJob(ctx context.Context, in rc.Params) (*Job, context.Context) {
-	id := atomic.AddInt64(&jobID, 1)
-	group := getGroup(in)
-	if group == "" {
-		group = fmt.Sprintf("job/%d", id)
-	}
-	ctxG := accounting.WithStatsGroup(ctx, fmt.Sprintf("job/%d", id))
-	ctx, cancel := context.WithCancel(ctxG)
-	stop := func() {
-		cancel()
-		// Wait for cancel to propagate before returning.
-		<-ctx.Done()
-	}
-	job := &Job{
-		ID:        id,
-		Group:     group,
-		StartTime: time.Now(),
-		Stop:      stop,
-	}
-	jobs.mu.Lock()
-	jobs.jobs[job.ID] = job
-	jobs.mu.Unlock()
-	return job, ctx
-}
-
-// StartAsyncJob starts a new job asynchronously and returns a Param suitable
-// for output.
-func StartAsyncJob(fn rc.Func, in rc.Params) (rc.Params, error) {
-	job := running.NewAsyncJob(fn, in)
-	out := make(rc.Params)
-	out["jobid"] = job.ID
-	return out, nil
-}
-
-// ExecuteJob executes new job synchronously and returns a Param suitable for
-// output.
-func ExecuteJob(ctx context.Context, fn rc.Func, in rc.Params) (rc.Params, int64, error) {
-	job, ctx := running.NewSyncJob(ctx, in)
-	job.run(ctx, fn, in)
-	return job.Output, job.ID, job.realErr
+// NewJob creates a Job and executes it on the global job queue,
+// possibly in the background if _async is set
+func NewJob(ctx context.Context, fn rc.Func, in rc.Params) (job *Job, out rc.Params, err error) {
+	return running.NewJob(ctx, fn, in)
 }
 
 // OnFinish adds listener to jobid that will be triggered when job is finished.

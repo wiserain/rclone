@@ -203,8 +203,6 @@ Rather than
 rclone rc operations/list --json '{"fs": "/tmp", "remote": "test", "opt": {"showHash": true}}'
 ```
 
-
-
 ## Special parameters
 
 The rc interface supports some special parameters which apply to
@@ -275,6 +273,69 @@ $ rclone rc job/list
 }
 ```
 
+### Setting config flags with _config
+
+If you wish to set config (the equivalent of the global flags) for the
+duration of an rc call only then pass in the `_config` parameter.
+
+This should be in the same format as the `config` key returned by
+[options/get](#options-get).
+
+For example, if you wished to run a sync with the `--checksum`
+parameter, you would pass this parameter in your JSON blob.
+
+    "_config":{"CheckSum": true}
+
+If using `rclone rc` this could be passed as
+
+    rclone rc operations/sync ... _config='{"CheckSum": true}'
+
+Any config parameters you don't set will inherit the global defaults
+which were set with command line flags or environment variables.
+
+Note that it is possible to set some values as strings or integers -
+see [data types](/#data-types) for more info. Here is an example
+setting the equivalent of `--buffer-size` in string or integer format.
+
+    "_config":{"BufferSize": "42M"}
+    "_config":{"BufferSize": 44040192}
+
+If you wish to check the `_config` assignment has worked properly then
+calling `options/local` will show what the value got set to.
+
+### Setting filter flags with _filter
+
+If you wish to set filters for the duration of an rc call only then
+pass in the `_filter` parameter.
+
+This should be in the same format as the `filter` key returned by
+[options/get](#options-get).
+
+For example, if you wished to run a sync with these flags
+
+    --max-size 1M --max-age 42s --include "a" --include "b"
+
+you would pass this parameter in your JSON blob.
+
+    "_filter":{"MaxSize":"1M", "IncludeRule":["a","b"], "MaxAge":"42s"}
+
+If using `rclone rc` this could be passed as
+
+    rclone rc ... _filter='{"MaxSize":"1M", "IncludeRule":["a","b"], "MaxAge":"42s"}'
+
+Any filter parameters you don't set will inherit the global defaults
+which were set with command line flags or environment variables.
+
+Note that it is possible to set some values as strings or integers -
+see [data types](/#data-types) for more info. Here is an example
+setting the equivalent of `--buffer-size` in string or integer format.
+
+    "_filter":{"MinSize": "42M"}
+    "_filter":{"MinSize": 44040192}
+
+If you wish to check the `_filter` assignment has worked properly then
+calling `options/local` will show what the value got set to.
+
 ### Assigning operations to groups with _group = value
 
 Each rc call has its own stats group for tracking its metrics. By default
@@ -291,6 +352,78 @@ $ rclone rc --json '{ "group": "job/1" }' core/stats
 {
 	"speed": 12345
 	...
+}
+```
+
+## Data types {#data-types}
+
+When the API returns types, these will mostly be straight forward
+integer, string or boolean types.
+
+However some of the types returned by the [options/get](#options-get)
+call and taken by the [options/set](#options-set) calls as well as the
+`vfsOpt`, `mountOpt` and the `_config` parameters.
+
+- `Duration` - these are returned as an integer duration in
+  nanoseconds. They may be set as an integer, or they may be set with
+  time string, eg "5s". See the [options section](/docs/#options) for
+  more info.
+- `Size` - these are returned as an integer number of bytes. They may
+  be set as an integer or they may be set with a size suffix string,
+  eg "10M". See the [options section](/docs/#options) for more info.
+- Enumerated type (such as `CutoffMode`, `DumpFlags`, `LogLevel`,
+  `VfsCacheMode` - these will be returned as an integer and may be set
+  as an integer but more conveniently they can be set as a string, eg
+  "HARD" for `CutoffMode` or `DEBUG` for `LogLevel`.
+- `BandwidthSpec` - this will be set and returned as a string, eg
+  "1M".
+
+## Specifying remotes to work on
+
+Remotes are specified with the `fs=`, `srcFs=`, `dstFs=`
+parameters depending on the command being used.
+
+The parameters can be a string as per the rest of rclone, eg
+`s3:bucket/path` or `:sftp:/my/dir`. They can also be specified as
+JSON blobs.
+
+If specifyng a JSON blob it should be a object mapping strings to
+strings. These values will be used to configure the remote. There are
+3 special values which may be set:
+
+- `type` -  set to `type` to specify a remote called `:type:`
+- `_name` - set to `name` to specify a remote called `name:`
+- `_root` - sets the root of the remote - may be empty
+
+One of `_name` or `type` should normally be set. If the `local`
+backend is desired then `type` should be set to `local`. If `_root`
+isn't specified then it defaults to the root of the remote.
+
+For example this JSON is equivalent to `remote:/tmp`
+
+```
+{
+    "_name": "remote",
+    "_path": "/tmp"
+}
+```
+
+And this is equivalent to `:sftp,host='example.com':/tmp`
+
+```
+{
+    "type": "sftp",
+    "host": "example.com",
+    "_path": "/tmp"
+}
+```
+
+And this is equivalent to `/tmp/dir`
+
+```
+{
+    type = "local",
+    _ path = "/tmp/dir"
 }
 ```
 
@@ -632,18 +765,22 @@ Returns the following values:
 
 ```
 {
-	"speed": average speed in bytes/sec since start of the process,
-	"bytes": total transferred bytes since the start of the process,
+	"bytes": total transferred bytes since the start of the group,
+	"checks": number of files checked,
+	"deletes" : number of files deleted,
+	"elapsedTime": time in floating point seconds since rclone was started,
 	"errors": number of errors,
-	"fatalError": whether there has been at least one FatalError,
-	"retryError": whether there has been at least one non-NoRetryError,
-	"checks": number of checked files,
-	"transfers": number of transferred files,
-	"deletes" : number of deleted files,
-	"renames" : number of renamed files,
+	"eta": estimated time in seconds until the group completes,
+	"fatalError": boolean whether there has been at least one fatal error,
+	"lastError": last error string,
+	"renames" : number of files renamed,
+	"retryError": boolean showing whether there has been at least one non-NoRetryError,
+	"speed": average speed in bytes/sec since start of the group,
+	"totalBytes": total number of bytes in the group,
+	"totalChecks": total number of checks in the group,
+	"totalTransfers": total number of transfers in the group,
 	"transferTime" : total time spent on running jobs,
-	"elapsedTime": time in seconds since the start of the process,
-	"lastError": last occurred error,
+	"transfers": number of transferred files,
 	"transferring": an array of currently active file transfers:
 		[
 			{
@@ -724,6 +861,8 @@ This shows the current version of go and the go runtime
 - os - OS in use as according to Go
 - arch - cpu architecture in use according to Go
 - goVersion - version of Go runtime in use
+- linking - type of rclone executable (static or dynamic)
+- goTags - space separated build tags or "none"
 
 ### debug/set-block-profile-rate: Set runtime.SetBlockProfileRate for blocking profiling. {#debug-set-block-profile-rate}
 
@@ -762,6 +901,26 @@ Parameters
 Results
 
 - previousRate - int
+
+### fscache/clear: Clear the Fs cache. {#fscache-clear}
+
+This clears the fs cache. This is where remotes created from backends
+are cached for a short while to make repeated rc calls more efficient.
+
+If you change the parameters of a backend then you may want to call
+this to clear an existing remote out of the cache before re-creating
+it.
+
+**Authentication is required for this call.**
+
+### fscache/entries: Returns the number of entries in the fs cache. {#fscache-entries}
+
+This returns the number of entries in the fs cache.
+
+Returns
+- entries - number of items in the cache
+
+**Authentication is required for this call.**
 
 ### job/list: Lists the IDs of the running jobs {#job-list}
 
@@ -1132,10 +1291,30 @@ See the [uploadfile command](/commands/rclone_uploadfile/) command for more info
 Returns
 - options - a list of the options block names
 
-### options/get: Get all the options {#options-get}
+### options/get: Get all the global options {#options-get}
 
 Returns an object where keys are option block names and values are an
 object with the current option values in.
+
+Note that these are the global options which are unaffected by use of
+the _config and _filter parameters. If you wish to read the parameters
+set in _config then use options/config and for _filter use options/filter.
+
+This shows the internal names of the option within rclone which should
+map to the external options very easily with a few exceptions.
+
+### options/local: Get the currently active config for this call {#options-local}
+
+Returns an object with the keys "config" and "filter".
+The "config" key contains the local config and the "filter" key contains
+the local filters.
+
+Note that these are the local options specific to this rc call. If
+_config was not supplied then they will be the global options.
+Likewise with "_filter".
+
+This call is mostly useful for seeing if _config and _filter passing
+is working.
 
 This shows the internal names of the option within rclone which should
 map to the external options very easily with a few exceptions.
@@ -1155,17 +1334,18 @@ changed like this.
 
 For example:
 
-This sets DEBUG level logs (-vv)
+This sets DEBUG level logs (-vv) (these can be set by number or string)
 
+    rclone rc options/set --json '{"main": {"LogLevel": "DEBUG"}}'
     rclone rc options/set --json '{"main": {"LogLevel": 8}}'
 
 And this sets INFO level logs (-v)
 
-    rclone rc options/set --json '{"main": {"LogLevel": 7}}'
+    rclone rc options/set --json '{"main": {"LogLevel": "INFO"}}'
 
 And this sets NOTICE level logs (normal without -v)
 
-    rclone rc options/set --json '{"main": {"LogLevel": 6}}'
+    rclone rc options/set --json '{"main": {"LogLevel": "NOTICE"}}'
 
 ### pluginsctl/addPlugin: Add a plugin using url {#pluginsctl-addPlugin}
 

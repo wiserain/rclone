@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rclone/rclone/fs"
@@ -29,6 +30,7 @@ var (
 	deleteAfter     bool
 	bindAddr        string
 	disableFeatures string
+	dscp            string
 	uploadHeaders   []string
 	downloadHeaders []string
 	headers         []string
@@ -79,8 +81,8 @@ func AddFlags(ci *fs.ConfigInfo, flagSet *pflag.FlagSet) {
 	flags.BoolVarP(flagSet, &ci.NoCheckDest, "no-check-dest", "", ci.NoCheckDest, "Don't check the destination, copy regardless.")
 	flags.BoolVarP(flagSet, &ci.NoUnicodeNormalization, "no-unicode-normalization", "", ci.NoUnicodeNormalization, "Don't normalize unicode characters in filenames.")
 	flags.BoolVarP(flagSet, &ci.NoUpdateModTime, "no-update-modtime", "", ci.NoUpdateModTime, "Don't update destination mod-time if files identical.")
-	flags.StringVarP(flagSet, &ci.CompareDest, "compare-dest", "", ci.CompareDest, "Include additional server-side path during comparison.")
-	flags.StringVarP(flagSet, &ci.CopyDest, "copy-dest", "", ci.CopyDest, "Implies --compare-dest but also copies files from path into destination.")
+	flags.StringArrayVarP(flagSet, &ci.CompareDest, "compare-dest", "", nil, "Include additional comma separated server-side paths during comparison.")
+	flags.StringArrayVarP(flagSet, &ci.CopyDest, "copy-dest", "", nil, "Implies --compare-dest but also copies files from paths into destination.")
 	flags.StringVarP(flagSet, &ci.BackupDir, "backup-dir", "", ci.BackupDir, "Make backups into hierarchy based in DIR.")
 	flags.StringVarP(flagSet, &ci.Suffix, "suffix", "", ci.Suffix, "Suffix to add to changed files.")
 	flags.BoolVarP(flagSet, &ci.SuffixKeepExtension, "suffix-keep-extension", "", ci.SuffixKeepExtension, "Preserve the extension when using --suffix.")
@@ -125,6 +127,9 @@ func AddFlags(ci *fs.ConfigInfo, flagSet *pflag.FlagSet) {
 	flags.StringArrayVarP(flagSet, &headers, "header", "", nil, "Set HTTP header for all transactions")
 	flags.BoolVarP(flagSet, &ci.RefreshTimes, "refresh-times", "", ci.RefreshTimes, "Refresh the modtime of remote files.")
 	flags.BoolVarP(flagSet, &ci.NoConsole, "no-console", "", ci.NoConsole, "Hide console window. Supported on Windows only.")
+	flags.StringVarP(flagSet, &dscp, "dscp", "", "", "Set DSCP value to connections. Can be value or names, eg. CS1, LE, DF, AF21.")
+	flags.DurationVarP(flagSet, &ci.FsCacheExpireDuration, "fs-cache-expire-duration", "", ci.FsCacheExpireDuration, "cache remotes for this long (0 to disable caching)")
+	flags.DurationVarP(flagSet, &ci.FsCacheExpireInterval, "fs-cache-expire-interval", "", ci.FsCacheExpireInterval, "interval to check for expired remotes")
 }
 
 // ParseHeaders converts the strings passed in via the header flags into HTTPOptions
@@ -214,7 +219,7 @@ func SetFlags(ci *fs.ConfigInfo) {
 		ci.DeleteMode = fs.DeleteModeDefault
 	}
 
-	if ci.CompareDest != "" && ci.CopyDest != "" {
+	if len(ci.CompareDest) > 0 && len(ci.CopyDest) > 0 {
 		log.Fatalf(`Can't use --compare-dest with --copy-dest.`)
 	}
 
@@ -254,6 +259,13 @@ func SetFlags(ci *fs.ConfigInfo) {
 	if len(headers) != 0 {
 		ci.Headers = ParseHeaders(headers)
 	}
+	if len(dscp) != 0 {
+		if value, ok := parseDSCP(dscp); ok {
+			ci.TrafficClass = value << 2
+		} else {
+			log.Fatalf("--dscp: Invalid DSCP name: %v", dscp)
+		}
+	}
 
 	// Make the config file absolute
 	configPath, err := filepath.Abs(config.ConfigPath)
@@ -265,4 +277,71 @@ func SetFlags(ci *fs.ConfigInfo) {
 	multiThreadStreamsFlag := pflag.Lookup("multi-thread-streams")
 	ci.MultiThreadSet = multiThreadStreamsFlag != nil && multiThreadStreamsFlag.Changed
 
+	// Make sure some values are > 0
+	nonZero := func(pi *int) {
+		if *pi <= 0 {
+			*pi = 1
+		}
+	}
+	nonZero(&ci.LowLevelRetries)
+	nonZero(&ci.Transfers)
+	nonZero(&ci.Checkers)
+}
+
+// parseHeaders converts DSCP names to value
+func parseDSCP(dscp string) (uint8, bool) {
+	if s, err := strconv.ParseUint(dscp, 10, 6); err == nil {
+		return uint8(s), true
+	}
+	dscp = strings.ToUpper(dscp)
+	switch dscp {
+	case "BE":
+		fallthrough
+	case "DF":
+		fallthrough
+	case "CS0":
+		return 0x00, true
+	case "CS1":
+		return 0x08, true
+	case "AF11":
+		return 0x0A, true
+	case "AF12":
+		return 0x0C, true
+	case "AF13":
+		return 0x0E, true
+	case "CS2":
+		return 0x10, true
+	case "AF21":
+		return 0x12, true
+	case "AF22":
+		return 0x14, true
+	case "AF23":
+		return 0x16, true
+	case "CS3":
+		return 0x18, true
+	case "AF31":
+		return 0x1A, true
+	case "AF32":
+		return 0x1C, true
+	case "AF33":
+		return 0x1E, true
+	case "CS4":
+		return 0x20, true
+	case "AF41":
+		return 0x22, true
+	case "AF42":
+		return 0x24, true
+	case "AF43":
+		return 0x26, true
+	case "CS5":
+		return 0x28, true
+	case "EF":
+		return 0x2E, true
+	case "CS6":
+		return 0x30, true
+	case "LE":
+		return 0x01, true
+	default:
+		return 0, false
+	}
 }

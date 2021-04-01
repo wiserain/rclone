@@ -25,6 +25,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/cache"
+	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/config/configflags"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/filter"
@@ -35,6 +36,7 @@ import (
 	"github.com/rclone/rclone/fs/rc/rcflags"
 	"github.com/rclone/rclone/fs/rc/rcserver"
 	"github.com/rclone/rclone/lib/atexit"
+	"github.com/rclone/rclone/lib/buildinfo"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/terminal"
 	"github.com/spf13/cobra"
@@ -73,9 +75,13 @@ const (
 
 // ShowVersion prints the version to stdout
 func ShowVersion() {
+	linking, tagString := buildinfo.GetLinkingAndTags()
 	fmt.Printf("rclone %s\n", fs.Version)
-	fmt.Printf("- os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("- go version: %s\n", runtime.Version())
+	fmt.Printf("- os/type: %s\n", runtime.GOOS)
+	fmt.Printf("- os/arch: %s\n", runtime.GOARCH)
+	fmt.Printf("- go/version: %s\n", runtime.Version())
+	fmt.Printf("- go/linking: %s\n", linking)
+	fmt.Printf("- go/tags: %s\n", tagString)
 }
 
 // NewFsFile creates an Fs from a name but may point to a file.
@@ -83,7 +89,7 @@ func ShowVersion() {
 // It returns a string with the file name if points to a file
 // otherwise "".
 func NewFsFile(remote string) (fs.Fs, string) {
-	_, _, fsPath, err := fs.ParseRemote(remote)
+	_, fsPath, err := fspath.SplitFs(remote)
 	if err != nil {
 		err = fs.CountError(err)
 		log.Fatalf("Failed to create file system for %q: %v", remote, err)
@@ -382,6 +388,12 @@ func initConfig() {
 	// Finish parsing any command line flags
 	configflags.SetFlags(ci)
 
+	// Load the config
+	configfile.LoadConfig(ctx)
+
+	// Start accounting
+	accounting.Start(ctx)
+
 	// Hide console window
 	if ci.NoConsole {
 		terminal.HideConsole()
@@ -541,6 +553,9 @@ func Main() {
 	setupRootCommand(Root)
 	AddBackendFlags()
 	if err := Root.Execute(); err != nil {
+		if strings.HasPrefix(err.Error(), "unknown command") {
+			Root.PrintErrf("You could use '%s selfupdate' to get latest features.\n\n", Root.CommandPath())
+		}
 		log.Fatalf("Fatal error: %v", err)
 	}
 }

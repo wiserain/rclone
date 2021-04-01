@@ -219,11 +219,11 @@ shared folder.`,
 			// as invalid characters.
 			// Testing revealed names with trailing spaces and the DEL character don't work.
 			// Also encode invalid UTF-8 bytes as json doesn't handle them properly.
-			Default: (encoder.Base |
+			Default: encoder.Base |
 				encoder.EncodeBackSlash |
 				encoder.EncodeDel |
 				encoder.EncodeRightSpace |
-				encoder.EncodeInvalidUtf8),
+				encoder.EncodeInvalidUtf8,
 		}}...),
 	})
 }
@@ -242,8 +242,10 @@ type Fs struct {
 	name           string         // name of this remote
 	root           string         // the path we are working on
 	opt            Options        // parsed options
+	ci             *fs.ConfigInfo // global config
 	features       *fs.Features   // optional features
 	srv            files.Client   // the connection to the dropbox server
+	svc            files.Client   // the connection to the dropbox server (unauthorized)
 	sharing        sharing.Client // as above, but for generating sharing links
 	users          users.Client   // as above, but for accessing user information
 	team           team.Client    // for the Teams API
@@ -290,7 +292,10 @@ func (f *Fs) Features() *fs.Features {
 
 // shouldRetry returns a boolean as to whether this err deserves to be
 // retried.  It returns the err as a convenience
-func shouldRetry(err error) (bool, error) {
+func shouldRetry(ctx context.Context, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
 	if err == nil {
 		return false, err
 	}
@@ -305,7 +310,7 @@ func shouldRetry(err error) (bool, error) {
 	switch e := err.(type) {
 	case auth.RateLimitAPIError:
 		if e.RateLimitError.RetryAfter > 0 {
-			fs.Debugf(baseErrString, "Too many requests or write operations. Trying again in %d seconds.", e.RateLimitError.RetryAfter)
+			fs.Logf(baseErrString, "Too many requests or write operations. Trying again in %d seconds.", e.RateLimitError.RetryAfter)
 			err = pacer.RetryAfterError(err, time.Duration(e.RateLimitError.RetryAfter)*time.Second)
 		}
 		return true, err
@@ -367,22 +372,29 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return nil, errors.Wrap(err, "failed to configure dropbox")
 	}
 
+	ci := fs.GetConfig(ctx)
+
 	f := &Fs{
 		name:  name,
 		opt:   *opt,
+		ci:    ci,
 		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
-	config := dropbox.Config{
+	cfg := dropbox.Config{
 		LogLevel:        dropbox.LogOff, // logging in the SDK: LogOff, LogDebug, LogInfo
 		Client:          oAuthClient,    // maybe???
 		HeaderGenerator: f.headerGenerator,
 	}
 
+	// unauthorized config for endpoints that fail with auth
+	ucfg := dropbox.Config{
+		LogLevel: dropbox.LogOff, // logging in the SDK: LogOff, LogDebug, LogInfo
+	}
+
 	// NOTE: needs to be created pre-impersonation so we can look up the impersonated user
-	f.team = team.New(config)
+	f.team = team.New(cfg)
 
 	if opt.Impersonate != "" {
-
 		user := team.UserSelectorArg{
 			Email: opt.Impersonate,
 		}
@@ -397,12 +409,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			return nil, errors.Wrapf(err, "invalid dropbox team member: %q", opt.Impersonate)
 		}
 
-		config.AsMemberID = memberIds[0].MemberInfo.Profile.MemberProfile.TeamMemberId
+		cfg.AsMemberID = memberIds[0].MemberInfo.Profile.MemberProfile.TeamMemberId
 	}
 
-	f.srv = files.New(config)
-	f.sharing = sharing.New(config)
-	f.users = users.New(config)
+	f.srv = files.New(cfg)
+	f.svc = files.New(ucfg)
+	f.sharing = sharing.New(cfg)
+	f.users = users.New(cfg)
 	f.features = (&fs.Features{
 		CaseInsensitive:         true,
 		ReadMimeType:            false,
@@ -415,7 +428,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		if f.root == "" {
 			return f, nil
 		}
-		_, err := f.findSharedFile(f.root)
+		_, err := f.findSharedFile(ctx, f.root)
 		f.root = ""
 		if err == nil {
 			return f, fs.ErrorIsFile
@@ -435,7 +448,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		}
 
 		// root is not empty so we have find the right shared folder if it exists
-		id, err := f.findSharedFolder(dir)
+		id, err := f.findSharedFolder(ctx, dir)
 		if err != nil {
 			// if we didn't find the specified shared folder we have to bail out here
 			return nil, err
@@ -443,7 +456,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		// we found the specified shared folder so let's mount it
 		// this will add it to the users normal root namespace and allows us
 		// to actually perform operations on it using the normal api endpoints.
-		err = f.mountSharedFolder(id)
+		err = f.mountSharedFolder(ctx, id)
 		if err != nil {
 			switch e := err.(type) {
 			case sharing.MountFolderAPIError:
@@ -467,7 +480,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		var acc *users.FullAccount
 		err = f.pacer.Call(func() (bool, error) {
 			acc, err = f.users.GetCurrentAccount()
-			return shouldRetry(err)
+			return shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "get current account failed")
@@ -485,7 +498,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	f.setRoot(root)
 
 	// See if the root is actually an object
-	_, err = f.getFileMetadata(f.slashRoot)
+	_, err = f.getFileMetadata(ctx, f.slashRoot)
 	if err == nil {
 		newRoot := path.Dir(f.root)
 		if newRoot == "." {
@@ -519,12 +532,12 @@ func (f *Fs) setRoot(root string) {
 }
 
 // getMetadata gets the metadata for a file or directory
-func (f *Fs) getMetadata(objPath string) (entry files.IsMetadata, notFound bool, err error) {
+func (f *Fs) getMetadata(ctx context.Context, objPath string) (entry files.IsMetadata, notFound bool, err error) {
 	err = f.pacer.Call(func() (bool, error) {
 		entry, err = f.srv.GetMetadata(&files.GetMetadataArg{
 			Path: f.opt.Enc.FromStandardPath(objPath),
 		})
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		switch e := err.(type) {
@@ -539,8 +552,8 @@ func (f *Fs) getMetadata(objPath string) (entry files.IsMetadata, notFound bool,
 }
 
 // getFileMetadata gets the metadata for a file
-func (f *Fs) getFileMetadata(filePath string) (fileInfo *files.FileMetadata, err error) {
-	entry, notFound, err := f.getMetadata(filePath)
+func (f *Fs) getFileMetadata(ctx context.Context, filePath string) (fileInfo *files.FileMetadata, err error) {
+	entry, notFound, err := f.getMetadata(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -555,8 +568,8 @@ func (f *Fs) getFileMetadata(filePath string) (fileInfo *files.FileMetadata, err
 }
 
 // getDirMetadata gets the metadata for a directory
-func (f *Fs) getDirMetadata(dirPath string) (dirInfo *files.FolderMetadata, err error) {
-	entry, notFound, err := f.getMetadata(dirPath)
+func (f *Fs) getDirMetadata(ctx context.Context, dirPath string) (dirInfo *files.FolderMetadata, err error) {
+	entry, notFound, err := f.getMetadata(ctx, dirPath)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +586,7 @@ func (f *Fs) getDirMetadata(dirPath string) (dirInfo *files.FolderMetadata, err 
 // Return an Object from a path
 //
 // If it can't be found it returns the error fs.ErrorObjectNotFound.
-func (f *Fs) newObjectWithInfo(remote string, info *files.FileMetadata) (fs.Object, error) {
+func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *files.FileMetadata) (fs.Object, error) {
 	o := &Object{
 		fs:     f,
 		remote: remote,
@@ -582,7 +595,7 @@ func (f *Fs) newObjectWithInfo(remote string, info *files.FileMetadata) (fs.Obje
 	if info != nil {
 		err = o.setMetadataFromEntry(info)
 	} else {
-		err = o.readEntryAndSetMetadata()
+		err = o.readEntryAndSetMetadata(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -594,14 +607,14 @@ func (f *Fs) newObjectWithInfo(remote string, info *files.FileMetadata) (fs.Obje
 // it returns the error fs.ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	if f.opt.SharedFiles {
-		return f.findSharedFile(remote)
+		return f.findSharedFile(ctx, remote)
 	}
-	return f.newObjectWithInfo(remote, nil)
+	return f.newObjectWithInfo(ctx, remote, nil)
 }
 
 // listSharedFoldersApi lists all available shared folders mounted and not mounted
 // we'll need the id later so we have to return them in original format
-func (f *Fs) listSharedFolders() (entries fs.DirEntries, err error) {
+func (f *Fs) listSharedFolders(ctx context.Context) (entries fs.DirEntries, err error) {
 	started := false
 	var res *sharing.ListFoldersResult
 	for {
@@ -611,7 +624,7 @@ func (f *Fs) listSharedFolders() (entries fs.DirEntries, err error) {
 			}
 			err := f.pacer.Call(func() (bool, error) {
 				res, err = f.sharing.ListFolders(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				return nil, err
@@ -623,7 +636,7 @@ func (f *Fs) listSharedFolders() (entries fs.DirEntries, err error) {
 			}
 			err := f.pacer.Call(func() (bool, error) {
 				res, err = f.sharing.ListFoldersContinue(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				return nil, errors.Wrap(err, "list continue")
@@ -648,8 +661,8 @@ func (f *Fs) listSharedFolders() (entries fs.DirEntries, err error) {
 // findSharedFolder find the id for a given shared folder name
 // somewhat annoyingly there is no endpoint to query a shared folder by it's name
 // so our only option is to iterate over all shared folders
-func (f *Fs) findSharedFolder(name string) (id string, err error) {
-	entries, err := f.listSharedFolders()
+func (f *Fs) findSharedFolder(ctx context.Context, name string) (id string, err error) {
+	entries, err := f.listSharedFolders(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -661,21 +674,21 @@ func (f *Fs) findSharedFolder(name string) (id string, err error) {
 	return "", fs.ErrorDirNotFound
 }
 
-// mountSharedFolders mount a shared folder to the root namespace
-func (f *Fs) mountSharedFolder(id string) error {
+// mountSharedFolder mount a shared folder to the root namespace
+func (f *Fs) mountSharedFolder(ctx context.Context, id string) error {
 	arg := sharing.MountFolderArg{
 		SharedFolderId: id,
 	}
 	err := f.pacer.Call(func() (bool, error) {
 		_, err := f.sharing.MountFolder(&arg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	return err
 }
 
-// listSharedFolders lists shared the user as access to (note this means individual
+// listReceivedFiles lists shared the user as access to (note this means individual
 // files not files contained in shared folders)
-func (f *Fs) listReceivedFiles() (entries fs.DirEntries, err error) {
+func (f *Fs) listReceivedFiles(ctx context.Context) (entries fs.DirEntries, err error) {
 	started := false
 	var res *sharing.ListFilesResult
 	for {
@@ -685,7 +698,7 @@ func (f *Fs) listReceivedFiles() (entries fs.DirEntries, err error) {
 			}
 			err := f.pacer.Call(func() (bool, error) {
 				res, err = f.sharing.ListReceivedFiles(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				return nil, err
@@ -697,7 +710,7 @@ func (f *Fs) listReceivedFiles() (entries fs.DirEntries, err error) {
 			}
 			err := f.pacer.Call(func() (bool, error) {
 				res, err = f.sharing.ListReceivedFilesContinue(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				return nil, errors.Wrap(err, "list continue")
@@ -724,8 +737,8 @@ func (f *Fs) listReceivedFiles() (entries fs.DirEntries, err error) {
 	return entries, nil
 }
 
-func (f *Fs) findSharedFile(name string) (o *Object, err error) {
-	files, err := f.listReceivedFiles()
+func (f *Fs) findSharedFile(ctx context.Context, name string) (o *Object, err error) {
+	files, err := f.listReceivedFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -748,10 +761,10 @@ func (f *Fs) findSharedFile(name string) (o *Object, err error) {
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
 	if f.opt.SharedFiles {
-		return f.listReceivedFiles()
+		return f.listReceivedFiles(ctx)
 	}
 	if f.opt.SharedFolders {
-		return f.listSharedFolders()
+		return f.listSharedFolders(ctx)
 	}
 
 	root := f.slashRoot
@@ -772,7 +785,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			}
 			err = f.pacer.Call(func() (bool, error) {
 				res, err = f.srv.ListFolder(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				switch e := err.(type) {
@@ -790,7 +803,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			}
 			err = f.pacer.Call(func() (bool, error) {
 				res, err = f.srv.ListFolderContinue(&arg)
-				return shouldRetry(err)
+				return shouldRetry(ctx, err)
 			})
 			if err != nil {
 				return nil, errors.Wrap(err, "list continue")
@@ -820,7 +833,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 				d := fs.NewDir(remote, time.Now()).SetID(folderInfo.Id)
 				entries = append(entries, d)
 			} else if fileInfo != nil {
-				o, err := f.newObjectWithInfo(remote, fileInfo)
+				o, err := f.newObjectWithInfo(ctx, remote, fileInfo)
 				if err != nil {
 					return nil, err
 				}
@@ -869,7 +882,7 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	}
 
 	// check directory doesn't exist
-	_, err := f.getDirMetadata(root)
+	_, err := f.getDirMetadata(ctx, root)
 	if err == nil {
 		return nil // directory exists already
 	} else if err != fs.ErrorDirNotFound {
@@ -886,7 +899,7 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	}
 	err = f.pacer.Call(func() (bool, error) {
 		_, err = f.srv.CreateFolderV2(&arg2)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	return err
 }
@@ -903,7 +916,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) (err error)
 
 	if check {
 		// check directory exists
-		_, err = f.getDirMetadata(root)
+		_, err = f.getDirMetadata(ctx, root)
 		if err != nil {
 			return errors.Wrap(err, "Rmdir")
 		}
@@ -920,7 +933,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) (err error)
 		var res *files.ListFolderResult
 		err = f.pacer.Call(func() (bool, error) {
 			res, err = f.srv.ListFolder(&arg)
-			return shouldRetry(err)
+			return shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return errors.Wrap(err, "Rmdir")
@@ -933,7 +946,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) (err error)
 	// remove it
 	err = f.pacer.Call(func() (bool, error) {
 		_, err = f.srv.DeleteV2(&files.DeleteArg{Path: root})
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	return err
 }
@@ -986,7 +999,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	var result *files.RelocationResult
 	err = f.pacer.Call(func() (bool, error) {
 		result, err = f.srv.CopyV2(&arg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "copy failed")
@@ -1047,7 +1060,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	var result *files.RelocationResult
 	err = f.pacer.Call(func() (bool, error) {
 		result, err = f.srv.MoveV2(&arg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "move failed")
@@ -1081,7 +1094,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 	var linkRes sharing.IsSharedLinkMetadata
 	err = f.pacer.Call(func() (bool, error) {
 		linkRes, err = f.sharing.CreateSharedLinkWithSettings(&createArg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 
 	if err != nil && strings.Contains(err.Error(),
@@ -1094,7 +1107,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 		var listRes *sharing.ListSharedLinksResult
 		err = f.pacer.Call(func() (bool, error) {
 			listRes, err = f.sharing.ListSharedLinks(&listArg)
-			return shouldRetry(err)
+			return shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return
@@ -1136,7 +1149,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	dstPath := path.Join(f.slashRoot, dstRemote)
 
 	// Check if destination exists
-	_, err := f.getDirMetadata(dstPath)
+	_, err := f.getDirMetadata(ctx, dstPath)
 	if err == nil {
 		return fs.ErrorDirExists
 	} else if err != fs.ErrorDirNotFound {
@@ -1155,7 +1168,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	}
 	err = f.pacer.Call(func() (bool, error) {
 		_, err = f.srv.MoveV2(&arg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return errors.Wrap(err, "MoveDir failed")
@@ -1169,7 +1182,7 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 	var q *users.SpaceUsage
 	err = f.pacer.Call(func() (bool, error) {
 		q, err = f.users.GetSpaceUsage()
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "about failed")
@@ -1189,6 +1202,159 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 		Free:  fs.NewUsageValue(int64(total - q.Used)), // bytes which can be uploaded before reaching the quota
 	}
 	return usage, nil
+}
+
+// ChangeNotify calls the passed function with a path that has had changes.
+// If the implementation uses polling, it should adhere to the given interval.
+//
+// Automatically restarts itself in case of unexpected behavior of the remote.
+//
+// Close the returned channel to stop being notified.
+func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryType), pollIntervalChan <-chan time.Duration) {
+	go func() {
+		// get the StartCursor early so all changes from now on get processed
+		startCursor, err := f.changeNotifyCursor(ctx)
+		if err != nil {
+			fs.Infof(f, "Failed to get StartCursor: %s", err)
+		}
+		var ticker *time.Ticker
+		var tickerC <-chan time.Time
+		for {
+			select {
+			case pollInterval, ok := <-pollIntervalChan:
+				if !ok {
+					if ticker != nil {
+						ticker.Stop()
+					}
+					return
+				}
+				if ticker != nil {
+					ticker.Stop()
+					ticker, tickerC = nil, nil
+				}
+				if pollInterval != 0 {
+					ticker = time.NewTicker(pollInterval)
+					tickerC = ticker.C
+				}
+			case <-tickerC:
+				if startCursor == "" {
+					startCursor, err = f.changeNotifyCursor(ctx)
+					if err != nil {
+						fs.Infof(f, "Failed to get StartCursor: %s", err)
+						continue
+					}
+				}
+				fs.Debugf(f, "Checking for changes on remote")
+				startCursor, err = f.changeNotifyRunner(ctx, notifyFunc, startCursor)
+				if err != nil {
+					fs.Infof(f, "Change notify listener failure: %s", err)
+				}
+			}
+		}
+	}()
+}
+
+func (f *Fs) changeNotifyCursor(ctx context.Context) (cursor string, err error) {
+	var startCursor *files.ListFolderGetLatestCursorResult
+
+	err = f.pacer.Call(func() (bool, error) {
+		arg := files.ListFolderArg{
+			Path:      f.opt.Enc.FromStandardPath(f.slashRoot),
+			Recursive: true,
+		}
+
+		if arg.Path == "/" {
+			arg.Path = ""
+		}
+
+		startCursor, err = f.srv.ListFolderGetLatestCursor(&arg)
+
+		return shouldRetry(ctx, err)
+	})
+	if err != nil {
+		return
+	}
+	return startCursor.Cursor, nil
+}
+
+func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.EntryType), startCursor string) (newCursor string, err error) {
+	cursor := startCursor
+	var res *files.ListFolderLongpollResult
+
+	// Dropbox sets a timeout range of 30 - 480
+	timeout := uint64(f.ci.TimeoutOrInfinite() / time.Second)
+
+	if timeout < 30 {
+		timeout = 30
+	}
+
+	if timeout > 480 {
+		timeout = 480
+	}
+
+	err = f.pacer.Call(func() (bool, error) {
+		args := files.ListFolderLongpollArg{
+			Cursor:  cursor,
+			Timeout: timeout,
+		}
+
+		res, err = f.svc.ListFolderLongpoll(&args)
+		return shouldRetry(ctx, err)
+	})
+	if err != nil {
+		return
+	}
+
+	if !res.Changes {
+		return cursor, nil
+	}
+
+	if res.Backoff != 0 {
+		fs.Debugf(f, "Waiting to poll for %d seconds", res.Backoff)
+		time.Sleep(time.Duration(res.Backoff) * time.Second)
+	}
+
+	for {
+		var changeList *files.ListFolderResult
+
+		arg := files.ListFolderContinueArg{
+			Cursor: cursor,
+		}
+		err = f.pacer.Call(func() (bool, error) {
+			changeList, err = f.srv.ListFolderContinue(&arg)
+			return shouldRetry(ctx, err)
+		})
+		if err != nil {
+			return "", errors.Wrap(err, "list continue")
+		}
+		cursor = changeList.Cursor
+		var entryType fs.EntryType
+		for _, entry := range changeList.Entries {
+			entryPath := ""
+			switch info := entry.(type) {
+			case *files.FolderMetadata:
+				entryType = fs.EntryDirectory
+				entryPath = strings.TrimLeft(info.PathDisplay, f.slashRootSlash)
+			case *files.FileMetadata:
+				entryType = fs.EntryObject
+				entryPath = strings.TrimLeft(info.PathDisplay, f.slashRootSlash)
+			case *files.DeletedMetadata:
+				entryType = fs.EntryObject
+				entryPath = strings.TrimLeft(info.PathDisplay, f.slashRootSlash)
+			default:
+				fs.Errorf(entry, "dropbox ChangeNotify: ignoring unknown EntryType %T", entry)
+				continue
+			}
+
+			if entryPath != "" {
+				notifyFunc(entryPath, entryType)
+			}
+		}
+		if !changeList.HasMore {
+			break
+		}
+	}
+	return cursor, nil
 }
 
 // Hashes returns the supported hash sets.
@@ -1229,7 +1395,7 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 	if t != DbHashType {
 		return "", hash.ErrUnsupported
 	}
-	err := o.readMetaData()
+	err := o.readMetaData(ctx)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to read hash from metadata")
 	}
@@ -1253,17 +1419,17 @@ func (o *Object) setMetadataFromEntry(info *files.FileMetadata) error {
 }
 
 // Reads the entry for a file from dropbox
-func (o *Object) readEntry() (*files.FileMetadata, error) {
-	return o.fs.getFileMetadata(o.remotePath())
+func (o *Object) readEntry(ctx context.Context) (*files.FileMetadata, error) {
+	return o.fs.getFileMetadata(ctx, o.remotePath())
 }
 
 // Read entry if not set and set metadata from it
-func (o *Object) readEntryAndSetMetadata() error {
+func (o *Object) readEntryAndSetMetadata(ctx context.Context) error {
 	// Last resort set time from client
 	if !o.modTime.IsZero() {
 		return nil
 	}
-	entry, err := o.readEntry()
+	entry, err := o.readEntry(ctx)
 	if err != nil {
 		return err
 	}
@@ -1276,12 +1442,12 @@ func (o *Object) remotePath() string {
 }
 
 // readMetaData gets the info if it hasn't already been fetched
-func (o *Object) readMetaData() (err error) {
+func (o *Object) readMetaData(ctx context.Context) (err error) {
 	if !o.modTime.IsZero() {
 		return nil
 	}
 	// Last resort
-	return o.readEntryAndSetMetadata()
+	return o.readEntryAndSetMetadata(ctx)
 }
 
 // ModTime returns the modification time of the object
@@ -1289,7 +1455,7 @@ func (o *Object) readMetaData() (err error) {
 // It attempts to read the objects mtime and if that isn't present the
 // LastModified returned in the http headers
 func (o *Object) ModTime(ctx context.Context) time.Time {
-	err := o.readMetaData()
+	err := o.readMetaData(ctx)
 	if err != nil {
 		fs.Debugf(o, "Failed to read metadata: %v", err)
 		return time.Now()
@@ -1323,7 +1489,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		}
 		err = o.fs.pacer.Call(func() (bool, error) {
 			_, in, err = o.fs.sharing.GetSharedLinkFile(&arg)
-			return shouldRetry(err)
+			return shouldRetry(ctx, err)
 		})
 		if err != nil {
 			return nil, err
@@ -1339,7 +1505,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	}
 	err = o.fs.pacer.Call(func() (bool, error) {
 		_, in, err = o.fs.srv.Download(&arg)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 
 	switch e := err.(type) {
@@ -1358,7 +1524,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 // Will work optimally if size is >= uploadChunkSize. If the size is either
 // unknown (i.e. -1) or smaller than uploadChunkSize, the method incurs an
 // avoidable request to the Dropbox API that does not carry payload.
-func (o *Object) uploadChunked(in0 io.Reader, commitInfo *files.CommitInfo, size int64) (entry *files.FileMetadata, err error) {
+func (o *Object) uploadChunked(ctx context.Context, in0 io.Reader, commitInfo *files.CommitInfo, size int64) (entry *files.FileMetadata, err error) {
 	chunkSize := int64(o.fs.opt.ChunkSize)
 	chunks := 0
 	if size != -1 {
@@ -1387,7 +1553,7 @@ func (o *Object) uploadChunked(in0 io.Reader, commitInfo *files.CommitInfo, size
 			return false, nil
 		}
 		res, err = o.fs.srv.UploadSessionStart(&files.UploadSessionStartArg{}, chunk)
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1513,11 +1679,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	var err error
 	var entry *files.FileMetadata
 	if size > int64(o.fs.opt.ChunkSize) || size == -1 {
-		entry, err = o.uploadChunked(in, commitInfo, size)
+		entry, err = o.uploadChunked(ctx, in, commitInfo, size)
 	} else {
 		err = o.fs.pacer.CallNoRetry(func() (bool, error) {
 			entry, err = o.fs.srv.Upload(commitInfo, in)
-			return shouldRetry(err)
+			return shouldRetry(ctx, err)
 		})
 	}
 	if err != nil {
@@ -1535,7 +1701,7 @@ func (o *Object) Remove(ctx context.Context) (err error) {
 		_, err = o.fs.srv.DeleteV2(&files.DeleteArg{
 			Path: o.fs.opt.Enc.FromStandardPath(o.remotePath()),
 		})
-		return shouldRetry(err)
+		return shouldRetry(ctx, err)
 	})
 	return err
 }

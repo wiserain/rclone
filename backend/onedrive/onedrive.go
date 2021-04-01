@@ -302,7 +302,6 @@ func init() {
 
 			m.Set(configDriveID, finalDriveID)
 			m.Set(configDriveType, rootItem.ParentReference.DriveType)
-			config.SaveConfig()
 		},
 		Options: append(oauthutil.SharedOptions, []fs.Option{{
 			Name:    "region",
@@ -550,7 +549,10 @@ var errAsyncJobAccessDenied = errors.New("async job failed - access denied")
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func shouldRetry(resp *http.Response, err error) (bool, error) {
+func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
 	retry := false
 	if resp != nil {
 		switch resp.StatusCode {
@@ -597,7 +599,7 @@ func (f *Fs) readMetaDataForPathRelativeToID(ctx context.Context, normalizedID s
 
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 
 	return info, resp, err
@@ -613,7 +615,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.It
 		opts.Path = strings.TrimSuffix(opts.Path, ":")
 		err = f.pacer.Call(func() (bool, error) {
 			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-			return shouldRetry(resp, err)
+			return shouldRetry(ctx, resp, err)
 		})
 		return info, resp, err
 	}
@@ -869,7 +871,7 @@ func (f *Fs) CreateDir(ctx context.Context, dirID, leaf string) (newID string, e
 	}
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, &mkdir, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		//fmt.Printf("...Error %v\n", err)
@@ -901,7 +903,7 @@ OUTER:
 		var resp *http.Response
 		err = f.pacer.Call(func() (bool, error) {
 			resp, err = f.srv.CallJSON(ctx, &opts, nil, &result)
-			return shouldRetry(resp, err)
+			return shouldRetry(ctx, resp, err)
 		})
 		if err != nil {
 			return found, errors.Wrap(err, "couldn't list files")
@@ -1038,7 +1040,7 @@ func (f *Fs) deleteObject(ctx context.Context, id string) error {
 
 	return f.pacer.Call(func() (bool, error) {
 		resp, err := f.srv.Call(ctx, &opts)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 }
 
@@ -1088,7 +1090,7 @@ func (f *Fs) Precision() time.Duration {
 
 // waitForJob waits for the job with status in url to complete
 func (f *Fs) waitForJob(ctx context.Context, location string, o *Object) error {
-	deadline := time.Now().Add(f.ci.Timeout)
+	deadline := time.Now().Add(f.ci.TimeoutOrInfinite())
 	for time.Now().Before(deadline) {
 		var resp *http.Response
 		var err error
@@ -1126,7 +1128,7 @@ func (f *Fs) waitForJob(ctx context.Context, location string, o *Object) error {
 
 		time.Sleep(1 * time.Second)
 	}
-	return errors.Errorf("async operation didn't complete after %v", f.ci.Timeout)
+	return errors.Errorf("async operation didn't complete after %v", f.ci.TimeoutOrInfinite())
 }
 
 // Copy src to this remote using server-side copy operations.
@@ -1194,7 +1196,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, &copyReq, nil)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1287,7 +1289,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	var info api.Item
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, &move, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1354,7 +1356,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	var info api.Item
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, &move, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return err
@@ -1380,7 +1382,7 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &drive)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "about failed")
@@ -1430,7 +1432,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 	var result api.CreateShareLinkResponse
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, &share, &result)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -1475,7 +1477,7 @@ func (o *Object) deleteVersions(ctx context.Context) error {
 	var versions api.VersionsResponse
 	err := o.fs.pacer.Call(func() (bool, error) {
 		resp, err := o.fs.srv.CallJSON(ctx, &opts, nil, &versions)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return err
@@ -1502,7 +1504,7 @@ func (o *Object) deleteVersion(ctx context.Context, ID string) error {
 	opts.NoResponse = true
 	return o.fs.pacer.Call(func() (bool, error) {
 		resp, err := o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 }
 
@@ -1653,7 +1655,7 @@ func (o *Object) setModTime(ctx context.Context, modTime time.Time) (*api.Item, 
 	var info *api.Item
 	err := o.fs.pacer.Call(func() (bool, error) {
 		resp, err := o.fs.srv.CallJSON(ctx, &opts, &update, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	// Remove versions if required
 	if o.fs.opt.NoVersions {
@@ -1695,7 +1697,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1723,7 +1725,7 @@ func (o *Object) createUploadSession(ctx context.Context, modTime time.Time) (re
 				err = errors.New(err.Error() + " (is it a OneNote file?)")
 			}
 		}
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	return response, err
 }
@@ -1738,7 +1740,7 @@ func (o *Object) getPosition(ctx context.Context, url string) (pos int64, err er
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return 0, err
@@ -1798,11 +1800,11 @@ func (o *Object) uploadFragment(ctx context.Context, url string, start int64, to
 			return true, errors.Wrapf(err, "retry this chunk skipping %d bytes", skip)
 		}
 		if err != nil {
-			return shouldRetry(resp, err)
+			return shouldRetry(ctx, resp, err)
 		}
 		body, err = rest.ReadBody(resp)
 		if err != nil {
-			return shouldRetry(resp, err)
+			return shouldRetry(ctx, resp, err)
 		}
 		if resp.StatusCode == 200 || resp.StatusCode == 201 {
 			// we are done :)
@@ -1825,7 +1827,7 @@ func (o *Object) cancelUploadSession(ctx context.Context, url string) (err error
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	return
 }
@@ -1896,7 +1898,7 @@ func (o *Object) uploadSinglepart(ctx context.Context, in io.Reader, size int64,
 				err = errors.New(err.Error() + " (is it a OneNote file?)")
 			}
 		}
-		return shouldRetry(resp, err)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err

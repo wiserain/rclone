@@ -206,6 +206,36 @@ It has been found that this helps with IBM Sterling SFTP servers which have
 any given time.
 `,
 			Advanced: true,
+		}, {
+			Name:    "disable_concurrent_reads",
+			Default: false,
+			Help: `If set don't use concurrent reads
+
+Normally concurrent reads are safe to use and not using them will
+degrade performance, so this option is disabled by default.
+
+Some servers limit the amount number of times a file can be
+downloaded. Using concurrent reads can trigger this limit, so if you
+have a server which returns
+
+    Failed to copy: file does not exist
+
+Then you may need to enable this flag.
+
+If concurrent reads are disabled, the use_fstat option is ignored.
+`,
+			Advanced: true,
+		}, {
+			Name:    "idle_timeout",
+			Default: fs.Duration(60 * time.Second),
+			Help: `Max time before closing idle connections
+
+If no connections have been returned to the connection pool in the time
+given, rclone will empty the connection pool.
+
+Set to 0 to keep connections indefinitely.
+`,
+			Advanced: true,
 		}},
 	}
 	fs.Register(fsi)
@@ -213,27 +243,29 @@ any given time.
 
 // Options defines the configuration for this backend
 type Options struct {
-	Host              string `config:"host"`
-	User              string `config:"user"`
-	Port              string `config:"port"`
-	Pass              string `config:"pass"`
-	KeyPem            string `config:"key_pem"`
-	KeyFile           string `config:"key_file"`
-	KeyFilePass       string `config:"key_file_pass"`
-	PubKeyFile        string `config:"pubkey_file"`
-	KnownHostsFile    string `config:"known_hosts_file"`
-	KeyUseAgent       bool   `config:"key_use_agent"`
-	UseInsecureCipher bool   `config:"use_insecure_cipher"`
-	DisableHashCheck  bool   `config:"disable_hashcheck"`
-	AskPassword       bool   `config:"ask_password"`
-	PathOverride      string `config:"path_override"`
-	SetModTime        bool   `config:"set_modtime"`
-	Md5sumCommand     string `config:"md5sum_command"`
-	Sha1sumCommand    string `config:"sha1sum_command"`
-	SkipLinks         bool   `config:"skip_links"`
-	Subsystem         string `config:"subsystem"`
-	ServerCommand     string `config:"server_command"`
-	UseFstat          bool   `config:"use_fstat"`
+	Host                   string      `config:"host"`
+	User                   string      `config:"user"`
+	Port                   string      `config:"port"`
+	Pass                   string      `config:"pass"`
+	KeyPem                 string      `config:"key_pem"`
+	KeyFile                string      `config:"key_file"`
+	KeyFilePass            string      `config:"key_file_pass"`
+	PubKeyFile             string      `config:"pubkey_file"`
+	KnownHostsFile         string      `config:"known_hosts_file"`
+	KeyUseAgent            bool        `config:"key_use_agent"`
+	UseInsecureCipher      bool        `config:"use_insecure_cipher"`
+	DisableHashCheck       bool        `config:"disable_hashcheck"`
+	AskPassword            bool        `config:"ask_password"`
+	PathOverride           string      `config:"path_override"`
+	SetModTime             bool        `config:"set_modtime"`
+	Md5sumCommand          string      `config:"md5sum_command"`
+	Sha1sumCommand         string      `config:"sha1sum_command"`
+	SkipLinks              bool        `config:"skip_links"`
+	Subsystem              string      `config:"subsystem"`
+	ServerCommand          string      `config:"server_command"`
+	UseFstat               bool        `config:"use_fstat"`
+	DisableConcurrentReads bool        `config:"disable_concurrent_reads"`
+	IdleTimeout            fs.Duration `config:"idle_timeout"`
 }
 
 // Fs stores the interface to the remote SFTP files
@@ -251,7 +283,8 @@ type Fs struct {
 	cachedHashes *hash.Set
 	poolMu       sync.Mutex
 	pool         []*conn
-	pacer        *fs.Pacer // pacer for operations
+	drain        *time.Timer // used to drain the pool when we stop using the connections
+	pacer        *fs.Pacer   // pacer for operations
 	savedpswd    string
 }
 
@@ -360,7 +393,10 @@ func (f *Fs) newSftpClient(conn *ssh.Client, opts ...sftp.ClientOption) (*sftp.C
 		}
 	}
 	opts = opts[:len(opts):len(opts)] // make sure we don't overwrite the callers opts
-	opts = append(opts, sftp.UseFstat(f.opt.UseFstat))
+	opts = append(opts,
+		sftp.UseFstat(f.opt.UseFstat),
+		sftp.UseConcurrentReads(!f.opt.DisableConcurrentReads),
+	)
 
 	return sftp.NewClientPipe(pr, pw, opts...)
 }
@@ -428,6 +464,9 @@ func (f *Fs) putSftpConnection(pc **conn, err error) {
 	}
 	f.poolMu.Lock()
 	f.pool = append(f.pool, c)
+	if f.opt.IdleTimeout > 0 {
+		f.drain.Reset(time.Duration(f.opt.IdleTimeout)) // nudge on the pool emptying timer
+	}
 	f.poolMu.Unlock()
 }
 
@@ -435,6 +474,12 @@ func (f *Fs) putSftpConnection(pc **conn, err error) {
 func (f *Fs) drainPool(ctx context.Context) (err error) {
 	f.poolMu.Lock()
 	defer f.poolMu.Unlock()
+	if f.opt.IdleTimeout > 0 {
+		f.drain.Stop()
+	}
+	if len(f.pool) != 0 {
+		fs.Debugf(f, "closing %d unused connections", len(f.pool))
+	}
 	for i, c := range f.pool {
 		if cErr := c.closed(); cErr == nil {
 			cErr = c.close()
@@ -667,6 +712,10 @@ func NewFsWithConnection(ctx context.Context, f *Fs, name string, root string, m
 	f.mkdirLock = newStringLock()
 	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	f.savedpswd = ""
+	// set the pool drainer timer going
+	if f.opt.IdleTimeout > 0 {
+		f.drain = time.AfterFunc(time.Duration(opt.IdleTimeout), func() { _ = f.drainPool(ctx) })
+	}
 
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
@@ -1305,18 +1354,19 @@ func (o *Object) stat(ctx context.Context) error {
 //
 // it also updates the info field
 func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
-	if o.fs.opt.SetModTime {
-		c, err := o.fs.getSftpConnection(ctx)
-		if err != nil {
-			return errors.Wrap(err, "SetModTime")
-		}
-		err = c.sftpClient.Chtimes(o.path(), modTime, modTime)
-		o.fs.putSftpConnection(&c, err)
-		if err != nil {
-			return errors.Wrap(err, "SetModTime failed")
-		}
+	if !o.fs.opt.SetModTime {
+		return nil
 	}
-	err := o.stat(ctx)
+	c, err := o.fs.getSftpConnection(ctx)
+	if err != nil {
+		return errors.Wrap(err, "SetModTime")
+	}
+	err = c.sftpClient.Chtimes(o.path(), modTime, modTime)
+	o.fs.putSftpConnection(&c, err)
+	if err != nil {
+		return errors.Wrap(err, "SetModTime failed")
+	}
+	err = o.stat(ctx)
 	if err != nil {
 		return errors.Wrap(err, "SetModTime stat failed")
 	}
@@ -1447,10 +1497,28 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		remove()
 		return errors.Wrap(err, "Update Close failed")
 	}
+
+	// Set the mod time - this stats the object if o.fs.opt.SetModTime == true
 	err = o.SetModTime(ctx, src.ModTime(ctx))
 	if err != nil {
 		return errors.Wrap(err, "Update SetModTime failed")
 	}
+
+	// Stat the file after the upload to read its stats back if o.fs.opt.SetModTime == false
+	if !o.fs.opt.SetModTime {
+		err = o.stat(ctx)
+		if err == fs.ErrorObjectNotFound {
+			// In the specific case of o.fs.opt.SetModTime == false
+			// if the object wasn't found then don't return an error
+			fs.Debugf(o, "Not found after upload with set_modtime=false so returning best guess")
+			o.modTime = src.ModTime(ctx)
+			o.size = src.Size()
+			o.mode = os.FileMode(0666) // regular file
+		} else if err != nil {
+			return errors.Wrap(err, "Update stat failed")
+		}
+	}
+
 	return nil
 }
 

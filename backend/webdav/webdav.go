@@ -10,6 +10,7 @@ package webdav
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -19,20 +20,25 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/rclone/rclone/backend/webdav/api"
 	"github.com/rclone/rclone/backend/webdav/odrvcookie"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/rest"
+
+	ntlmssp "github.com/Azure/go-ntlmssp"
 )
 
 const (
@@ -42,8 +48,22 @@ const (
 	defaultDepth  = "1" // depth for PROPFIND
 )
 
+const defaultEncodingSharepointNTLM = (encoder.EncodeWin |
+	encoder.EncodeHashPercent | // required by IIS/8.5 in contrast with onedrive which doesn't need it
+	(encoder.Display &^ encoder.EncodeDot) | // test with IIS/8.5 shows that EncodeDot is not needed
+	encoder.EncodeBackSlash |
+	encoder.EncodeLeftSpace |
+	encoder.EncodeLeftTilde |
+	encoder.EncodeRightPeriod |
+	encoder.EncodeRightSpace |
+	encoder.EncodeInvalidUtf8)
+
 // Register with Fs
 func init() {
+	configEncodingHelp := fmt.Sprintf(
+		"%s\n\nDefault encoding is %s for sharepoint-ntlm or identity otherwise.",
+		config.ConfigEncodingHelp, defaultEncodingSharepointNTLM)
+
 	fs.Register(&fs.RegInfo{
 		Name:        "webdav",
 		Description: "Webdav",
@@ -67,14 +87,17 @@ func init() {
 				Help:  "Owncloud",
 			}, {
 				Value: "sharepoint",
-				Help:  "Sharepoint",
+				Help:  "Sharepoint Online, authenticated by Microsoft account.",
+			}, {
+				Value: "sharepoint-ntlm",
+				Help:  "Sharepoint with NTLM authentication. Usually self-hosted or on-premises.",
 			}, {
 				Value: "other",
 				Help:  "Other site/service or software",
 			}},
 		}, {
 			Name: "user",
-			Help: "User name",
+			Help: "User name. In case NTLM authentication is used, the username should be in the format 'Domain\\User'.",
 		}, {
 			Name:       "pass",
 			Help:       "Password.",
@@ -86,18 +109,23 @@ func init() {
 			Name:     "bearer_token_command",
 			Help:     "Command to run to get a bearer token",
 			Advanced: true,
+		}, {
+			Name:     config.ConfigEncoding,
+			Help:     configEncodingHelp,
+			Advanced: true,
 		}},
 	})
 }
 
 // Options defines the configuration for this backend
 type Options struct {
-	URL                string `config:"url"`
-	Vendor             string `config:"vendor"`
-	User               string `config:"user"`
-	Pass               string `config:"pass"`
-	BearerToken        string `config:"bearer_token"`
-	BearerTokenCommand string `config:"bearer_token_command"`
+	URL                string               `config:"url"`
+	Vendor             string               `config:"vendor"`
+	User               string               `config:"user"`
+	Pass               string               `config:"pass"`
+	BearerToken        string               `config:"bearer_token"`
+	BearerTokenCommand string               `config:"bearer_token_command"`
+	Enc                encoder.MultiEncoder `config:"encoding"`
 }
 
 // Fs represents a remote webdav
@@ -114,8 +142,10 @@ type Fs struct {
 	canStream          bool          // set if can stream
 	useOCMtime         bool          // set if can use X-OC-Mtime
 	retryWithZeroDepth bool          // some vendors (sharepoint) won't list files when Depth is 1 (our default)
+	checkBeforePurge   bool          // enables extra check that directory to purge really exists
 	hasMD5             bool          // set if can use owncloud style checksums for MD5
 	hasSHA1            bool          // set if can use owncloud style checksums for SHA1
+	ntlmAuthMu         sync.Mutex    // mutex to serialize NTLM auth roundtrips
 }
 
 // Object describes a webdav object
@@ -166,7 +196,10 @@ var retryErrorCodes = []int{
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func (f *Fs) shouldRetry(resp *http.Response, err error) (bool, error) {
+func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
 	// If we have a bearer token command and it has expired then refresh it
 	if f.opt.BearerTokenCommand != "" && resp != nil && resp.StatusCode == 401 {
 		fs.Debugf(f, "Bearer token expired: %v", err)
@@ -177,6 +210,22 @@ func (f *Fs) shouldRetry(resp *http.Response, err error) (bool, error) {
 		return true, err
 	}
 	return fserrors.ShouldRetry(err) || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
+}
+
+// safeRoundTripper is a wrapper for http.RoundTripper that serializes
+// http roundtrips. NTLM authentication sequence can involve up to four
+// rounds of negotiations and might fail due to concurrency.
+// This wrapper allows to use ntlmssp.Negotiator safely with goroutines.
+type safeRoundTripper struct {
+	fs *Fs
+	rt http.RoundTripper
+}
+
+// RoundTrip guards wrapped RoundTripper by a mutex.
+func (srt *safeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	srt.fs.ntlmAuthMu.Lock()
+	defer srt.fs.ntlmAuthMu.Unlock()
+	return srt.rt.RoundTrip(req)
 }
 
 // itemIsDir returns true if the item is a directory
@@ -224,7 +273,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string, depth string)
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, &result)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if apiErr, ok := err.(*api.Error); ok {
 		// does not exist
@@ -285,7 +334,11 @@ func addSlash(s string) string {
 
 // filePath returns a file path (f.root, file)
 func (f *Fs) filePath(file string) string {
-	return rest.URLPathEscape(path.Join(f.root, file))
+	subPath := path.Join(f.root, file)
+	if f.opt.Enc != encoder.EncodeZero {
+		subPath = f.opt.Enc.FromStandardPath(subPath)
+	}
+	return rest.URLPathEscape(subPath)
 }
 
 // dirPath returns a directory path (f.root, dir)
@@ -324,6 +377,10 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	root = strings.Trim(root, "/")
 
+	if opt.Enc == encoder.EncodeZero && opt.Vendor == "sharepoint-ntlm" {
+		opt.Enc = defaultEncodingSharepointNTLM
+	}
+
 	// Parse the endpoint
 	u, err := url.Parse(opt.URL)
 	if err != nil {
@@ -336,10 +393,28 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		opt:         *opt,
 		endpoint:    u,
 		endpointURL: u.String(),
-		srv:         rest.NewClient(fshttp.NewClient(ctx)).SetRoot(u.String()),
 		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 		precision:   fs.ModTimeNotSupported,
 	}
+
+	client := fshttp.NewClient(ctx)
+	if opt.Vendor == "sharepoint-ntlm" {
+		// Disable transparent HTTP/2 support as per https://golang.org/pkg/net/http/ ,
+		// otherwise any connection to IIS 10.0 fails with 'stream error: stream ID 39; HTTP_1_1_REQUIRED'
+		// https://docs.microsoft.com/en-us/iis/get-started/whats-new-in-iis-10/http2-on-iis says:
+		// 'Windows authentication (NTLM/Kerberos/Negotiate) is not supported with HTTP/2.'
+		t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
+			t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		})
+
+		// Add NTLM layer
+		client.Transport = &safeRoundTripper{
+			fs: f,
+			rt: ntlmssp.Negotiator{RoundTripper: t},
+		}
+	}
+	f.srv = rest.NewClient(client).SetRoot(u.String())
+
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true,
 	}).Fill(ctx, f)
@@ -465,6 +540,16 @@ func (f *Fs) setQuirks(ctx context.Context, vendor string) error {
 		// to determine if we may have found a file, the request has to be resent
 		// with the depth set to 0
 		f.retryWithZeroDepth = true
+	case "sharepoint-ntlm":
+		// Sharepoint with NTLM authentication
+		// See comment above
+		f.retryWithZeroDepth = true
+
+		// Sharepoint 2016 returns status 204 to the purge request
+		// even if the directory to purge does not really exist
+		// so we must perform an extra check to detect this
+		// condition and return a proper error code.
+		f.checkBeforePurge = true
 	case "other":
 	default:
 		fs.Debugf(f, "Unknown vendor %q", vendor)
@@ -546,7 +631,7 @@ func (f *Fs) listAll(ctx context.Context, dir string, directoriesOnly bool, file
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, &result)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		if apiErr, ok := err.(*api.Error); ok {
@@ -583,7 +668,11 @@ func (f *Fs) listAll(ctx context.Context, dir string, directoriesOnly bool, file
 			fs.Debugf(nil, "Item with unknown path received: %q, %q", u.Path, baseURL.Path)
 			continue
 		}
-		remote := path.Join(dir, u.Path[len(baseURL.Path):])
+		subPath := u.Path[len(baseURL.Path):]
+		if f.opt.Enc != encoder.EncodeZero {
+			subPath = f.opt.Enc.ToStandardPath(subPath)
+		}
+		remote := path.Join(dir, subPath)
 		if strings.HasSuffix(remote, "/") {
 			remote = remote[:len(remote)-1]
 		}
@@ -714,7 +803,7 @@ func (f *Fs) _dirExists(ctx context.Context, dirPath string) (exists bool) {
 	var err error
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, &result)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	return err == nil
 }
@@ -736,7 +825,7 @@ func (f *Fs) _mkdir(ctx context.Context, dirPath string) error {
 	}
 	err := f.pacer.Call(func() (bool, error) {
 		resp, err := f.srv.Call(ctx, &opts)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if apiErr, ok := err.(*api.Error); ok {
 		// Check if it already exists. The response code for this isn't
@@ -800,6 +889,21 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 		if notEmpty {
 			return fs.ErrorDirectoryNotEmpty
 		}
+	} else if f.checkBeforePurge {
+		// We are doing purge as the `check` argument is unset.
+		// The quirk says that we are working with Sharepoint 2016.
+		// This provider returns status 204 even if the purged directory
+		// does not really exist so we perform an extra check here.
+		// Only the existence is checked, all other errors must be
+		// ignored here to make the rclone test suite pass.
+		depth := defaultDepth
+		if f.retryWithZeroDepth {
+			depth = "0"
+		}
+		_, err := f.readMetaDataForPath(ctx, dir, depth)
+		if err == fs.ErrorObjectNotFound {
+			return fs.ErrorDirNotFound
+		}
 	}
 	opts := rest.Opts{
 		Method:     "DELETE",
@@ -810,7 +914,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 	var err error
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, nil)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return errors.Wrap(err, "rmdir failed")
@@ -873,7 +977,7 @@ func (f *Fs) copyOrMove(ctx context.Context, src fs.Object, remote string, metho
 	}
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.Call(ctx, &opts)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "Copy call failed")
@@ -969,7 +1073,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	}
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.Call(ctx, &opts)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return errors.Wrap(err, "DirMove MOVE call failed")
@@ -1011,7 +1115,7 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	var err error
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallXML(ctx, &opts, nil, &q)
-		return f.shouldRetry(resp, err)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "about call failed")
@@ -1139,7 +1243,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	}
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return o.fs.shouldRetry(resp, err)
+		return o.fs.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1190,7 +1294,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 	err = o.fs.pacer.CallNoRetry(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return o.fs.shouldRetry(resp, err)
+		return o.fs.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		// Give the WebDAV server a chance to get its internal state in order after the
@@ -1217,7 +1321,7 @@ func (o *Object) Remove(ctx context.Context) error {
 	}
 	return o.fs.pacer.Call(func() (bool, error) {
 		resp, err := o.fs.srv.Call(ctx, &opts)
-		return o.fs.shouldRetry(resp, err)
+		return o.fs.shouldRetry(ctx, resp, err)
 	})
 }
 

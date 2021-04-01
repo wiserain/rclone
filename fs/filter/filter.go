@@ -267,6 +267,10 @@ func (f *Filter) addDirGlobs(Include bool, glob string) error {
 func (f *Filter) Add(Include bool, glob string) error {
 	isDirRule := strings.HasSuffix(glob, "/")
 	isFileRule := !isDirRule
+	// Make excluding "dir/" equivalent to excluding "dir/**"
+	if isDirRule && !Include {
+		glob += "**"
+	}
 	if strings.Contains(glob, "**") {
 		isDirRule, isFileRule = true, true
 	}
@@ -609,6 +613,19 @@ func GetConfig(ctx context.Context) *Filter {
 		return globalConfig
 	}
 	return c.(*Filter)
+}
+
+// CopyConfig copies the global config (if any) from srcCtx into
+// dstCtx returning the new context.
+func CopyConfig(dstCtx, srcCtx context.Context) context.Context {
+	if srcCtx == nil {
+		return dstCtx
+	}
+	c := srcCtx.Value(configContextKey)
+	if c == nil {
+		return dstCtx
+	}
+	return context.WithValue(dstCtx, configContextKey, c)
 }
 
 // AddConfig returns a mutable config structure based on a shallow
