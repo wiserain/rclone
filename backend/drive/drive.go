@@ -64,7 +64,8 @@ const (
 	timeFormatIn                = time.RFC3339
 	timeFormatOut               = "2006-01-02T15:04:05.000000000Z07:00"
 	defaultMinSleep             = fs.Duration(100 * time.Millisecond)
-	defaultSAMinSleep           = fs.Duration(100 * time.Millisecond)	// mod
+	defaultSAMinSleep           = fs.Duration(100 * time.Millisecond) // mod
+	defaultSAMaxLoad            = 5                                   // mod
 	defaultBurst                = 100
 	defaultExportExtensions     = "docx,xlsx,pptx,svg"
 	scopePrefix                 = "https://www.googleapis.com/auth/"
@@ -250,6 +251,13 @@ a non root folder as its starting point.
 			Name:     "service_account_per_file",
 			Default:  false,
 			Help:     "Changes service account for each file copy.",
+			Hide:     fs.OptionHideConfigurator,
+			Advanced: true,
+		}, { // mod
+			Name:     "service_account_max_load",
+			Default:  defaultSAMaxLoad,
+			Help:     "Maximum number of loads for service account.",
+			Hide:     fs.OptionHideConfigurator,
 			Advanced: true,
 		}, {
 			Name:     "service_account_credentials",
@@ -378,6 +386,11 @@ date is used.`,
 			Name:     "impersonate",
 			Default:  "",
 			Help:     `Impersonate this user when using a service account.`,
+			Advanced: true,
+		}, { // mod
+			Name:     "impersonate_user_path",
+			Default:  "",
+			Help:     `Use filenames in this folder as impersonators.`,
 			Advanced: true,
 		}, {
 			Name:    "alternate_export",
@@ -529,9 +542,10 @@ type Options struct {
 	Scope                     string               `config:"scope"`
 	RootFolderID              string               `config:"root_folder_id"`
 	ServiceAccountFile        string               `config:"service_account_file"`
-	ServiceAccountFilePath    string               `config:"service_account_file_path"` // Mod
-	ServiceAccountMinSleep    fs.Duration          `config:"service_account_min_sleep"` // Mod
-	ServiceAccountPerFile     bool                 `config:"service_account_per_file"` // Mod
+	ServiceAccountFilePath    string               `config:"service_account_file_path"` // mod
+	ServiceAccountMinSleep    fs.Duration          `config:"service_account_min_sleep"` // mod
+	ServiceAccountPerFile     bool                 `config:"service_account_per_file"`  // mod
+	ServiceAccountMaxLoad     int                  `config:"service_account_max_load"`  // mod
 	ServiceAccountCredentials string               `config:"service_account_credentials"`
 	TeamDriveID               string               `config:"team_drive"`
 	AuthOwnerOnly             bool                 `config:"auth_owner_only"`
@@ -549,6 +563,7 @@ type Options struct {
 	UseSharedDate             bool                 `config:"use_shared_date"`
 	ListChunk                 int64                `config:"list_chunk"`
 	Impersonate               string               `config:"impersonate"`
+	ImpersonateUserPath       string               `config:"impersonate_user_path"` // mod
 	UploadCutoff              fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize                 fs.SizeSuffix        `config:"chunk_size"`
 	AcknowledgeAbuse          bool                 `config:"acknowledge_abuse"`
@@ -584,9 +599,8 @@ type Fs struct {
 	grouping         int32               // number of IDs to search at once in ListR - read with atomic
 	listRmu          *sync.Mutex         // protects listRempties
 	listRempties     map[string]struct{} // IDs of supposedly empty directories which triggered grouping disable
-	// mod
-	useSArotate      bool
-	saFiles          []string
+	changeSAenabled  bool                // mod
+	changeSApool     *ServiceAccountPool
 	changeSAmu       *sync.Mutex
 	changeSAtime     time.Time
 	FileObj          *fs.Object
@@ -621,6 +635,118 @@ type Object struct {
 	md5sum     string // md5sum of the object
 	v2Download bool   // generate v2 download link ondemand
 }
+
+// mod ------------------------------------------------------------ start
+type baseSAobject struct {
+	ServiceAccountFile string
+	Impersonate        string
+}
+
+type ServiceAccountPool struct {
+	files   []string        // on newServiceAccountPool
+	users   []string        // on newServiceAccountPool
+	mutex   *sync.Mutex     // on newServiceAccountPool
+	maxLoad int             // on newServiceAccountPool
+	SAs     []*baseSAobject // on LoadSA()
+	numLoad int
+}
+
+func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
+	var saFiles, ipUsers []string
+	if opt.ServiceAccountFilePath != "" {
+		dirList, err := ioutil.ReadDir(opt.ServiceAccountFilePath)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to read service_account_file_path")
+		}
+		for _, v := range dirList {
+			filePath := filepath.Join(opt.ServiceAccountFilePath, v.Name())
+			if path.Ext(filePath) != ".json" {
+				continue
+			}
+			saFiles = append(saFiles, filePath)
+		}
+		if len(saFiles) == 0 {
+			return nil, errors.Errorf("unable to locate service account files in %s", opt.ServiceAccountFilePath)
+		}
+		fs.Debugf(nil, "%d service account files from %q", len(saFiles), opt.ServiceAccountFilePath)
+	} else if opt.ServiceAccountFile != "" {
+		saFiles = append(saFiles, opt.ServiceAccountFile)
+		fs.Debugf(nil, "1 service account file from %q", opt.ServiceAccountFile)
+	}
+	if opt.ImpersonateUserPath != "" {
+		dirList, err := ioutil.ReadDir(opt.ImpersonateUserPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to read impersonate_user_path")
+		}
+		for _, v := range dirList {
+			basename := v.Name()
+			ext := filepath.Ext(basename)
+			name := strings.TrimSuffix(basename, ext)
+			if ext != ".json" {
+				continue
+			}
+			ipUsers = append(ipUsers, name)
+		}
+		if len(ipUsers) == 0 {
+			return nil, errors.Errorf("unable to locate impersonate users in %s", opt.ImpersonateUserPath)
+		}
+		fs.Debugf(nil, "%d impersonate users from %q", len(ipUsers), opt.ImpersonateUserPath)
+	} else {
+		ipUsers = append(ipUsers, opt.Impersonate)
+	}
+	p := &ServiceAccountPool{
+		files:   saFiles,
+		users:   ipUsers,
+		mutex:   new(sync.Mutex),
+		maxLoad: opt.ServiceAccountMaxLoad,
+	}
+	return p, nil
+}
+
+func (p *ServiceAccountPool) LoadSA() error {
+	if p.numLoad >= p.maxLoad {
+		return errors.Errorf("maximum service account load exceeded")
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	// make a list of baseSAobjects
+	var saList []*baseSAobject
+	for _, sa := range p.files {
+		for _, imp := range p.users {
+			saList = append(saList, &baseSAobject{
+				ServiceAccountFile: sa,
+				Impersonate:        imp,
+			})
+		}
+	}
+	// make shuffled
+	rand.Seed(time.Now().UTC().UnixNano())
+	rand.Shuffle(len(saList), func(i, j int) {
+		saList[i], saList[j] = saList[j], saList[i]
+	})
+	p.SAs = saList
+	p.numLoad++
+	fs.Debugf(nil, "%d service account loaded (%d/%d)", len(p.SAs), p.numLoad, p.maxLoad)
+	return nil
+}
+
+func (p *ServiceAccountPool) _getSA() (newSA []*baseSAobject, err error) {
+	SAs := p.SAs
+	if len(SAs) == 0 {
+		err = errors.Errorf("no available service account")
+		return
+	}
+	p.SAs, newSA = SAs[:len(SAs)-1], SAs[len(SAs)-1:]
+	return newSA, nil
+}
+
+func (p *ServiceAccountPool) GetSA() (newSA []*baseSAobject, err error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p._getSA()
+}
+
+// mod ------------------------------------------------------------ end
 
 // ------------------------------------------------------------
 
@@ -663,10 +789,10 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 			message := gerr.Errors[0].Message
 			if reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" || (reason == "dailyLimitExceededUnreg" || strings.HasPrefix(message, "Daily Limit")) {
 				// mod - try changing service account
-				if f.useSArotate {
+				if f.changeSAenabled {
 					f.changeSAmu.Lock()
 					defer f.changeSAmu.Unlock()
-					if saerr := f.changeSAfile(); saerr == nil {
+					if saerr := f.changeServiceAccount(); saerr == nil {
 						return true, err
 					}
 				}
@@ -684,31 +810,54 @@ func (f *Fs) shouldRetry(err error) (bool, error) {
 	return false, err
 }
 
-// mod - Changing SA file
-func (f *Fs) changeSAfile() (err error) {
+// mod
+func (f *Fs) changeServiceAccount() (err error) {
 	// check min sleep
-	if fs.Duration(time.Now().Sub(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
-		fs.Debugf("sarot", "retrying with the same service account")
+	if fs.Duration(time.Since(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
+		fs.Debugf(nil, "retrying with the same service account")
 		return nil
 	}
-	// reloading SA files
-	if len(f.saFiles) < 1 {
-		fs.Debugf("sarot", "service account files exhausted. reloading ...")
-		newSAFiles, err := getServiceAccountFiles(&f.opt)
-		if err != nil {
-			fs.Debugf("sarot", err.Error())
+	// reloading SA
+	if len(f.changeSApool.SAs) < 1 {
+		if err := f.changeSApool.LoadSA(); err != nil {
 			return err
 		}
-		f.saFiles = newSAFiles
-		fs.Debugf("sarot", "keep rotating with a new batch")
 	}
-	// draw one
-	newSAFile := f.saFiles[len(f.saFiles)-1]
-	f.saFiles = f.saFiles[:len(f.saFiles)-1]
-	err = f.changeServiceAccountFile(newSAFile)
+	if len(f.changeSApool.SAs) < 1 {
+		return errors.Errorf("no available service account")
+	}
+
+	sa, err := f.changeSApool.GetSA()
+	if err != nil {
+		return err
+	}
+	newOpt := &Options{
+		ServiceAccountFile: sa[0].ServiceAccountFile,
+		Impersonate:        sa[0].Impersonate,
+	}
+	f.client, err = createOAuthClient(newOpt, f.name, f.m)
+	if err != nil {
+		return errors.Wrap(err, "failed to create oauth client")
+	}
+	f.svc, err = drive.New(f.client)
+	if err != nil {
+		return errors.Wrap(err, "couldn't create Drive client")
+	}
+	if f.opt.V2DownloadMinSize >= 0 {
+		f.v2Svc, err = drive_v2.New(f.client)
+		if err != nil {
+			return errors.Wrap(err, "couldn't create Drive v2 client")
+		}
+	}
 	if err == nil {
 		f.changeSAtime = time.Now()
 		f.pacer = fs.NewPacer(pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
+		if sa[0].Impersonate != "" {
+			fs.Debugf(nil, "Now working with %q as %q", filepath.Base(sa[0].ServiceAccountFile), sa[0].Impersonate)
+		} else {
+			fs.Debugf(nil, "Now working with %q", filepath.Base(sa[0].ServiceAccountFile))
+		}
+		fs.Debugf(nil, "%d service account remaining", len(f.changeSApool.SAs))
 	}
 	return err
 }
@@ -1050,38 +1199,6 @@ func getServiceAccountClient(opt *Options, credentialsData []byte) (*http.Client
 	return oauth2.NewClient(ctxWithSpecialClient, conf.TokenSource(ctxWithSpecialClient)), nil
 }
 
-// mod
-func getServiceAccountFiles(opt *Options) ([]string, error) {
-	dirList, err := ioutil.ReadDir(opt.ServiceAccountFilePath)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to read service_account_file_path")
-	}
-	var saFiles []string
-	for _, v := range dirList {
-		filePath := filepath.Join(opt.ServiceAccountFilePath, v.Name())
-		if path.Ext(filePath) == ".json" {
-			saFiles = append(saFiles, filePath)
-		}
-	}
-	if len(saFiles) == 0 {
-		return nil, fmt.Errorf("unable to locate service account files in \"%s\"", opt.ServiceAccountFilePath)
-	}	
-	// make shuffled
-	rand.Seed(time.Now().Unix())
-	rand.Shuffle(len(saFiles), func(i, j int) {
-		saFiles[i], saFiles[j] = saFiles[j], saFiles[i]
-	})
-	// supply one if not provided
-	if opt.ServiceAccountFile == "" {
-		opt.ServiceAccountFile = saFiles[len(saFiles)-1]
-		saFiles = saFiles[:len(saFiles)-1]
-	}
-	if len(saFiles) == 0 {
-		return nil, fmt.Errorf("not enough service account files in \"%s\"", opt.ServiceAccountFilePath)
-	}
-	return saFiles, nil
-}
-
 func createOAuthClient(opt *Options, name string, m configmap.Mapper) (*http.Client, error) {
 	var oAuthClient *http.Client
 	var err error
@@ -1194,11 +1311,19 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 	}
 
 	// mod
-	var ServiceAccountFiles []string
-	if opt.ServiceAccountFilePath != "" {
-		ServiceAccountFiles, err = getServiceAccountFiles(opt)
-		if err != nil {
-			fs.Debugf(nil, "SA rotation disabled: %s", err.Error())
+	pool, err := newServiceAccountPool(opt)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.LoadSA(); err == nil {
+		if sa, err := pool.GetSA(); err == nil {
+			opt.ServiceAccountFile = sa[0].ServiceAccountFile
+			opt.Impersonate = sa[0].Impersonate
+			if opt.Impersonate != "" {
+				fs.Debugf(nil, "Starting newFs with %q as %q", filepath.Base(opt.ServiceAccountFile), opt.Impersonate)
+			} else {
+				fs.Debugf(nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
+			}
 		}
 	}
 
@@ -1233,10 +1358,11 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 	}).Fill(f)
 
 	// mod
-	if ServiceAccountFiles != nil {
-		f.useSArotate = true
-		f.saFiles = ServiceAccountFiles
+	if len(pool.SAs) > 0 {
+		f.changeSAenabled = true
+		f.changeSApool = pool
 		f.changeSAmu = new(sync.Mutex)
+		fs.Infof(nil, "Changing service account is enabled")
 	}
 
 	// Create a new authorized Drive client.
@@ -2226,10 +2352,6 @@ func (f *Fs) createFileInfo(ctx context.Context, remote string, modTime time.Tim
 //
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	// mod
-	if f.useSArotate && f.opt.ServiceAccountPerFile {
-		f.changeSAfile()
-	}
 	exisitingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
@@ -2291,6 +2413,12 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		// Make the API request to upload metadata and file data.
 		// Don't retry, return a retry error instead
 		err = f.pacer.CallNoRetry(func() (bool, error) {
+			// mod
+			if f.changeSAenabled && f.opt.ServiceAccountPerFile {
+				f.changeSAmu.Lock()
+				defer f.changeSAmu.Unlock()
+				f.changeServiceAccount()
+			}
 			info, err = f.svc.Files.Create(createInfo).
 				Media(in, googleapi.ContentType(srcMimeType)).
 				Fields(partialFields).
@@ -2522,8 +2650,10 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	var info *drive.File
 	err = f.pacer.Call(func() (bool, error) {
 		// mod
-		if f.useSArotate && f.opt.ServiceAccountPerFile {
-			f.changeSAfile()
+		if f.changeSAenabled && f.opt.ServiceAccountPerFile {
+			f.changeSAmu.Lock()
+			defer f.changeSAmu.Unlock()
+			f.changeServiceAccount()
 		}
 		info, err = f.svc.Files.Copy(id, createInfo).
 			Fields(partialFields).
@@ -3187,7 +3317,6 @@ func (f *Fs) getID(ctx context.Context, path string, real bool) (id string, err 
 }
 
 // mod
-// TODO: annoying DEBUG : fs cache: renaming cache item "" to be canonical ""
 // Change parents of objects in (f) by an ID of (dstFs)
 func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDepth string, srcDelete bool) (o fs.Object, err error) {
 	// Find source
