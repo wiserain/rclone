@@ -96,6 +96,11 @@ func init() {
 					log.Fatalf("Failed to configure token: %v", err)
 				}
 			}
+
+			if fs.GetConfig(ctx).AutoConfirm {
+				return
+			}
+
 			if err = setupRoot(ctx, name, m); err != nil {
 				log.Fatalf("Failed to configure root directory: %v", err)
 			}
@@ -161,7 +166,7 @@ type Object struct {
 
 func setupRegion(m configmap.Mapper) {
 	region, ok := m.Get("region")
-	if !ok {
+	if !ok || region == "" {
 		log.Fatalf("No region set\n")
 	}
 	rootURL = fmt.Sprintf("https://workdrive.zoho.%s/api/v1", region)

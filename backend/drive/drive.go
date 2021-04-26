@@ -204,7 +204,7 @@ func init() {
 				m.Set("root_folder_id", "appDataFolder")
 			}
 
-			if opt.ServiceAccountFile == "" {
+			if opt.ServiceAccountFile == "" && opt.ServiceAccountCredentials == "" {
 				err = oauthutil.Config(ctx, "drive", name, m, driveConfig, nil)
 				if err != nil {
 					log.Fatalf("Failed to configure token: %v", err)
@@ -3409,7 +3409,7 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 		return err
 	}
 	if destLeaf == "" {
-		destLeaf = info.Name
+		destLeaf = path.Base(o.Remote())
 	}
 	if destDir == "" {
 		destDir = "."
