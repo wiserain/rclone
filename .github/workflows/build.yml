@@ -285,28 +285,73 @@ jobs:
   #       # Upload artifacts if not a PR && not a fork
   #       if: github.head_ref == '' && github.repository == 'rclone/rclone'
 
-  build-termux:
+  termux:
     needs:
       - create-release
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    if: github.head_ref == '' && github.repository == 'wiserain/rclone' && github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          repository: 'wiserain/termux-packages'
-          ref: 'mod'
-      - name: build
+          fetch-depth: 0
+      - name: Get Variables (beta)
+        id: varb
+        if: github.event_name == 'push' && contains(github.ref, 'refs/heads/')
         shell: bash
         run: |
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          echo ::set-output name=version::$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)
+          echo ::set-output name=revision::0
+          echo ::set-output name=branch::$(git rev-parse --abbrev-ref HEAD)
+          echo ::set-output name=version_all::v$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)-beta.$(git rev-list --count HEAD).$(git show --no-patch --no-notes --pretty='%h' HEAD).$(git rev-parse --abbrev-ref HEAD)
+      - name: Get Variables (release)
+        id: varr
+        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          echo ::set-output name=version::$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)
+          echo ::set-output name=revision::$(echo $LAST_TAG | cut -c 2- | cut -d- -f2)
+          echo ::set-output name=branch::$LAST_TAG
+          echo ::set-output name=version_all::$LAST_TAG
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: 'termux/termux-packages'
+      - name: build (beta)
+        if: github.event_name == 'push' && contains(github.ref, 'refs/heads/')
+        shell: bash
+        run: |
+          sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ steps.varb.outputs.version }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ steps.varb.outputs.revision }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=https:\/\/github.com\/wiserain\/rclone.git/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ steps.varb.outputs.branch }}/g" packages/rclone/build.sh
+          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ steps.varb.outputs.version_all }}\"/g" packages/rclone/build.sh
+          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/debs\/rclone-${{ steps.varb.outputs.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
           cd ./scripts
           ./run-docker.sh ./build-package.sh -a aarch64 rclone
           ./run-docker.sh ./build-package.sh -a arm rclone
           cd ../debs
-          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-v\1-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
-          echo $(pwd)
-        if: github.head_ref == '' && github.repository == 'wiserain/rclone'
+          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ steps.varb.outputs.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+      - name: build (release)
+        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ steps.varr.outputs.version }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ steps.varr.outputs.revision }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=https:\/\/github.com\/wiserain\/rclone.git/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ steps.varr.outputs.branch }}/g" packages/rclone/build.sh
+          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ steps.varr.outputs.version_all }}\"/g" packages/rclone/build.sh
+          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/debs\/rclone-${{ steps.varr.outputs.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
+          cd ./scripts
+          ./run-docker.sh ./build-package.sh -a aarch64 rclone
+          ./run-docker.sh ./build-package.sh -a arm rclone
+          cd ../debs
+          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ steps.varr.outputs.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - 
         name: Upload Assets to Release with a wildcard
         uses: csexton/release-asset-action@v2
