@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -18,6 +19,7 @@ import (
 	"math/rand"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -58,6 +60,7 @@ import (
 const (
 	rcloneClientID              = "202264815644.apps.googleusercontent.com"
 	rcloneEncryptedClientSecret = "eX8GpZTVx3vxMWVkuuBdDWmAUE6rGhTwVrvG9GhllYccSdj2-mvHVg"
+	gdsEncryptedEndpoint        = "S02NBrLggd4DwLGR1SNhhfDXW6ZRBPP3I1oR6E0l4vGwkkAS2HX9IRPv9ch3dPXrPg" // mod
 	driveFolderType             = "application/vnd.google-apps.folder"
 	shortcutMimeType            = "application/vnd.google-apps.shortcut"
 	shortcutMimeTypeDangling    = "application/vnd.google-apps.shortcut.dangling" // synthetic mime type for internal use
@@ -392,6 +395,26 @@ date is used.`,
 			Default:  "",
 			Help:     `Use filenames in this folder as impersonators.`,
 			Advanced: true,
+		}, { // mod
+			Name:     "gds_userid",
+			Default:  "",
+			Help:     `userid for custom google drive authentication server.`,
+			Advanced: true,
+		}, { // mod
+			Name:     "gds_apikey",
+			Default:  "",
+			Help:     `apikey for custom google drive authentication server.`,
+			Advanced: true,
+		}, { // mod
+			Name:     "gds_endpoint",
+			Default:  obscure.MustReveal(gdsEncryptedEndpoint),
+			Help:     `api endpoint for custom google drive authentication server.`,
+			Advanced: true,
+		}, { // mod
+			Name:     "gds_mode",
+			Default:  "default",
+			Help:     `api mode for custom google drive authentication server.`,
+			Advanced: true,
 		}, {
 			Name:    "alternate_export",
 			Default: false,
@@ -564,6 +587,10 @@ type Options struct {
 	ListChunk                 int64                `config:"list_chunk"`
 	Impersonate               string               `config:"impersonate"`
 	ImpersonateUserPath       string               `config:"impersonate_user_path"` // mod
+	GdsUserid                 string               `config:"gds_userid"`            // mod
+	GdsApikey                 string               `config:"gds_apikey"`            // mod
+	GdsEndpoint               string               `config:"gds_endpoint"`          // mod
+	GdsMode                   string               `config:"gds_mode"`              // mod
 	UploadCutoff              fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize                 fs.SizeSuffix        `config:"chunk_size"`
 	AcknowledgeAbuse          bool                 `config:"acknowledge_abuse"`
@@ -744,6 +771,85 @@ func (p *ServiceAccountPool) GetSA() (newSA []*baseSAobject, err error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	return p._getSA()
+}
+
+type GdsClient struct {
+	client   *http.Client
+	userid   string
+	apikey   string
+	endpoint string
+	mode     string
+}
+
+type GdsRemote struct {
+	SA           json.RawMessage `json:"sa"`
+	RootFolderID string          `json:"root_folder_id"`
+	Impersonate  string          `json:"impersonate"`
+	Scope        string          `json:"scope"`
+}
+
+func newGdsClient(opt *Options) (*GdsClient, bool, error) {
+	ok := true
+	if opt.GdsUserid == "" && opt.GdsApikey == "" {
+		ok = false
+	} else if opt.GdsUserid == "" || opt.GdsApikey == "" {
+		return nil, ok, errors.Errorf("required both --drive-gds-userid and --drive-gds-apikey")
+	}
+	gds := &GdsClient{
+		client:   &http.Client{Timeout: time.Second * 2},
+		userid:   opt.GdsUserid,
+		apikey:   opt.GdsApikey,
+		endpoint: opt.GdsEndpoint,
+		mode:     opt.GdsMode,
+	}
+	return gds, ok, nil
+}
+
+func (gds *GdsClient) getGdsRemote() (remote GdsRemote, err error) {
+	data := url.Values{
+		"userid": {gds.userid},
+		"apikey": {gds.apikey},
+		"mode":   {gds.mode},
+	}
+	req, err := http.NewRequest(http.MethodPost, gds.endpoint, strings.NewReader(data.Encode()))
+	if err != nil {
+		return
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	res, err := gds.client.Do(req)
+	if err != nil {
+		return
+	}
+	defer res.Body.Close()
+
+	statusOK := res.StatusCode >= 200 && res.StatusCode < 300
+	if !statusOK {
+		err = fmt.Errorf("StatusCode: %v", res.StatusCode)
+		return
+	}
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return
+	}
+
+	resJson := struct {
+		Result string `json:"result"`
+		Data   struct {
+			Member json.RawMessage
+			Remote GdsRemote `json:"remote"`
+		} `json:"data"`
+	}{}
+	err = json.Unmarshal(body, &resJson)
+	if err != nil {
+		return
+	}
+	if resJson.Result != "success" {
+		err = fmt.Errorf("%v", resJson.Result)
+		return
+	}
+	fs.Debugf(nil, "member: %+v\n", string(resJson.Data.Member))
+	return resJson.Data.Remote, nil
 }
 
 // mod ------------------------------------------------------------ end
@@ -1324,6 +1430,22 @@ func newFs(name, path string, m configmap.Mapper) (*Fs, error) {
 			} else {
 				fs.Debugf(nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
 			}
+		}
+	}
+
+	// mod
+	if gds, ok, err := newGdsClient(opt); err != nil {
+		return nil, err
+	} else if ok {
+		gdsRemote, authErr := gds.getGdsRemote()
+		if authErr != nil {
+			return nil, errors.Wrap(authErr, "drive: failed to get remote from gds")
+		} else {
+			opt.Scope = gdsRemote.Scope
+			opt.ServiceAccountCredentials = string(gdsRemote.SA)
+			opt.Impersonate = gdsRemote.Impersonate
+			opt.RootFolderID = gdsRemote.RootFolderID
+			fs.Debugf(nil, "Starting newFs with remote from gds")
 		}
 	}
 
