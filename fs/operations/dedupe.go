@@ -173,6 +173,8 @@ const (
 	DeduplicateRename                             // rename the objects
 	DeduplicateLargest                            // choose the largest object
 	DeduplicateSmallest                           // choose the smallest object
+	DeduplicateLongest                            // mod
+	DeduplicateShortest                           // mod
 )
 
 func (x DeduplicateMode) String() string {
@@ -193,6 +195,10 @@ func (x DeduplicateMode) String() string {
 		return "largest"
 	case DeduplicateSmallest:
 		return "smallest"
+	case DeduplicateLongest: // mod
+		return "longest"
+	case DeduplicateShortest: // mod
+		return "shortest"
 	}
 	return "unknown"
 }
@@ -216,6 +222,10 @@ func (x *DeduplicateMode) Set(s string) error {
 		*x = DeduplicateLargest
 	case "smallest":
 		*x = DeduplicateSmallest
+	case "longest": // mod
+		*x = DeduplicateLongest
+	case "shortest": // mod
+		*x = DeduplicateShortest
 	default:
 		return errors.Errorf("Unknown mode for dedupe %q.", s)
 	}
@@ -292,6 +302,13 @@ func sortSmallestFirst(objs []fs.Object) {
 	})
 }
 
+// mod
+func sortShortestFirst(objs []fs.Object) {
+	sort.Slice(objs, func(i, j int) bool {
+		return len(objs[i].String()) < len(objs[j].String())
+	})
+}
+
 // Deduplicate interactively finds duplicate files and offers to
 // delete all but one or rename them to be different. Only useful with
 // Google Drive which can have duplicate file names.
@@ -355,6 +372,12 @@ func Deduplicate(ctx context.Context, f fs.Fs, mode DeduplicateMode) error {
 				dedupeDeleteAllButOne(ctx, 0, remote, objs)
 			case DeduplicateSkip:
 				fs.Logf(remote, "Skipping %d files with duplicate names", len(objs))
+			case DeduplicateLongest: // mod
+				sortShortestFirst(objs)
+				dedupeDeleteAllButOne(ctx, len(objs)-1, remote, objs)
+			case DeduplicateShortest: // mod
+				sortShortestFirst(objs)
+				dedupeDeleteAllButOne(ctx, 0, remote, objs)
 			default:
 				//skip
 			}
