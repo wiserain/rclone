@@ -96,7 +96,7 @@ Returns the following values:
 	"lastError": last error string,
 	"renames" : number of files renamed,
 	"retryError": boolean showing whether there has been at least one non-NoRetryError,
-	"speed": average speed in bytes/sec since start of the group,
+	"speed": average speed in bytes per second since start of the group,
 	"totalBytes": total number of bytes in the group,
 	"totalChecks": total number of checks in the group,
 	"totalTransfers": total number of transfers in the group,
@@ -109,8 +109,8 @@ Returns the following values:
 				"eta": estimated time in seconds until file transfer completion
 				"name": name of the file,
 				"percentage": progress of the file transfer in percent,
-				"speed": average speed over the whole transfer in bytes/sec,
-				"speedAvg": current speed in bytes/sec as an exponentially weighted moving average,
+				"speed": average speed over the whole transfer in bytes per second,
+				"speedAvg": current speed in bytes per second as an exponentially weighted moving average,
 				"size": size of the file in bytes
 			}
 		],
@@ -349,6 +349,7 @@ func (sg *statsGroups) names() []string {
 
 // sum returns aggregate stats that contains summation of all groups.
 func (sg *statsGroups) sum(ctx context.Context) *StatsInfo {
+	startTime := GlobalStats().startTime
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
 
@@ -374,9 +375,13 @@ func (sg *statsGroups) sum(ctx context.Context) *StatsInfo {
 			sum.startedTransfers = append(sum.startedTransfers, stats.startedTransfers...)
 			sum.oldDuration += stats.oldDuration
 			sum.oldTimeRanges = append(sum.oldTimeRanges, stats.oldTimeRanges...)
+			stats.average.mu.Lock()
+			sum.average.speed += stats.average.speed
+			stats.average.mu.Unlock()
 		}
 		stats.mu.RUnlock()
 	}
+	sum.startTime = startTime
 	return sum
 }
 

@@ -1,4 +1,6 @@
 // Package httplib provides common functionality for http servers
+//
+// Deprecated: httplib has been replaced with lib/http
 package httplib
 
 import (
@@ -17,7 +19,7 @@ import (
 
 	auth "github.com/abbot/go-http-auth"
 	"github.com/pkg/errors"
-	"github.com/rclone/rclone/cmd/serve/httplib/serve/data"
+	"github.com/rclone/rclone/cmd/serve/http/data"
 	"github.com/rclone/rclone/fs"
 )
 

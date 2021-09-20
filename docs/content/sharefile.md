@@ -3,7 +3,7 @@ title: "Citrix ShareFile"
 description: "Rclone docs for Citrix ShareFile"
 ---
 
-## {{< icon "fas fa-share-square" >}} Citrix ShareFile
+# {{< icon "fas fa-share-square" >}} Citrix ShareFile
 
 [Citrix ShareFile](https://sharefile.com) is a secure file sharing and transfer service aimed as business.
 
@@ -112,10 +112,10 @@ flag.
 
 ### Transfers ###
 
-For files above 128MB rclone will use a chunked transfer.  Rclone will
+For files above 128 MiB rclone will use a chunked transfer.  Rclone will
 upload up to `--transfers` chunks at the same time (shared among all
 the multipart uploads).  Chunks are buffered in memory and are
-normally 64MB so increasing `--transfers` will increase memory use.
+normally 64 MiB so increasing `--transfers` will increase memory use.
 
 ### Limitations ###
 
@@ -191,7 +191,7 @@ Cutoff for switching to multipart upload.
 - Config:      upload_cutoff
 - Env Var:     RCLONE_SHAREFILE_UPLOAD_CUTOFF
 - Type:        SizeSuffix
-- Default:     128M
+- Default:     128Mi
 
 #### --sharefile-chunk-size
 
@@ -205,7 +205,7 @@ Reducing this will reduce memory usage but decrease performance.
 - Config:      chunk_size
 - Env Var:     RCLONE_SHAREFILE_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     64M
+- Default:     64Mi
 
 #### --sharefile-endpoint
 

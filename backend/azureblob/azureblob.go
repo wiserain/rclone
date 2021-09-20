@@ -1,5 +1,6 @@
 // Package azureblob provides an interface to the Microsoft Azure blob object storage system
 
+//go:build !plan9 && !solaris && !js && go1.14
 // +build !plan9,!solaris,!js,go1.14
 
 package azureblob
@@ -47,8 +48,8 @@ const (
 	timeFormatIn          = time.RFC3339
 	timeFormatOut         = "2006-01-02T15:04:05.000000000Z07:00"
 	storageDefaultBaseURL = "blob.core.windows.net"
-	defaultChunkSize      = 4 * fs.MebiByte
-	maxChunkSize          = 100 * fs.MebiByte
+	defaultChunkSize      = 4 * fs.Mebi
+	maxChunkSize          = 100 * fs.Mebi
 	uploadConcurrency     = 4
 	defaultAccessTier     = azblob.AccessTierNone
 	maxTryTimeout         = time.Hour * 24 * 365 //max time of an azure web request response window (whether or not data is flowing)
@@ -80,13 +81,12 @@ func init() {
 
 Leave blank normally. Needed only if you want to use a service principal instead of interactive login.
 
-    $ az sp create-for-rbac --name "<name>" \
+    $ az ad sp create-for-rbac --name "<name>" \
       --role "Storage Blob Data Owner" \
       --scopes "/subscriptions/<subscription>/resourceGroups/<resource-group>/providers/Microsoft.Storage/storageAccounts/<storage-account>/blobServices/default/containers/<container>" \
       > azure-principal.json
 
-See [Use Azure CLI to assign an Azure role for access to blob and queue data](https://docs.microsoft.com/en-us/azure/storage/common/storage-auth-aad-rbac-cli)
-for more details.
+See ["Create an Azure service principal"](https://docs.microsoft.com/en-us/cli/azure/create-an-azure-service-principal-azure-cli) and ["Assign an Azure role for access to blob data"](https://docs.microsoft.com/en-us/azure/storage/common/storage-auth-aad-rbac-cli) pages for more details.
 `,
 		}, {
 			Name: "key",
@@ -129,11 +129,11 @@ msi_client_id, or msi_mi_res_id parameters.`,
 			Advanced: true,
 		}, {
 			Name:     "upload_cutoff",
-			Help:     "Cutoff for switching to chunked upload (<= 256MB). (Deprecated)",
+			Help:     "Cutoff for switching to chunked upload (<= 256 MiB). (Deprecated)",
 			Advanced: true,
 		}, {
 			Name: "chunk_size",
-			Help: `Upload chunk size (<= 100MB).
+			Help: `Upload chunk size (<= 100 MiB).
 
 Note that this is stored in memory and there may be up to
 "--transfers" chunks stored at once in memory.`,
@@ -404,7 +404,7 @@ func (f *Fs) shouldRetry(ctx context.Context, err error) (bool, error) {
 }
 
 func checkUploadChunkSize(cs fs.SizeSuffix) error {
-	const minChunkSize = fs.Byte
+	const minChunkSize = fs.SizeSuffixBase
 	if cs < minChunkSize {
 		return errors.Errorf("%s is less than %s", cs, minChunkSize)
 	}

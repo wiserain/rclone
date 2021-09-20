@@ -853,7 +853,7 @@ var SyncPrintf = func(format string, a ...interface{}) {
 func syncFprintf(w io.Writer, format string, a ...interface{}) {
 	outMutex.Lock()
 	defer outMutex.Unlock()
-	if w == nil {
+	if w == nil || w == os.Stdout {
 		SyncPrintf(format, a...)
 	} else {
 		_, _ = fmt.Fprintf(w, format, a...)
@@ -1408,7 +1408,9 @@ func compareDest(ctx context.Context, dst, src fs.Object, CompareDest fs.Fs) (No
 	default:
 		return false, err
 	}
-	if Equal(ctx, src, CompareDestFile) {
+	opt := defaultEqualOpt(ctx)
+	opt.updateModTime = false
+	if equal(ctx, src, CompareDestFile, opt) {
 		fs.Debugf(src, "Destination found in --compare-dest, skipping")
 		return true, nil
 	}
@@ -1749,7 +1751,7 @@ func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName str
 	// This will move the file to a temporary name then
 	// move it back to the intended destination. This is required
 	// to avoid issues with certain remotes and avoid file deletion.
-	if !cp && fdst.Name() == fsrc.Name() && fdst.Features().CaseInsensitive && dstFileName != srcFileName && strings.ToLower(dstFilePath) == strings.ToLower(srcFilePath) {
+	if !cp && fdst.Name() == fsrc.Name() && fdst.Features().CaseInsensitive && dstFileName != srcFileName && strings.EqualFold(dstFilePath, srcFilePath) {
 		// Create random name to temporarily move file to
 		tmpObjName := dstFileName + "-rclone-move-" + random.String(8)
 		_, err := fdst.NewObject(ctx, tmpObjName)

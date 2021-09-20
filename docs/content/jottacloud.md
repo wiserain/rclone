@@ -3,8 +3,7 @@ title: "Jottacloud"
 description: "Rclone docs for Jottacloud"
 ---
 
-{{< icon "fa fa-cloud" >}} Jottacloud
------------------------------------------
+# {{< icon "fa fa-cloud" >}} Jottacloud
 
 Jottacloud is a cloud storage service provider from a Norwegian company, using its own datacenters in Norway.
 
@@ -195,6 +194,9 @@ Emptying the trash is supported by the [cleanup](/commands/rclone_cleanup/) comm
 Jottacloud supports file versioning. When rclone uploads a new version of a file it creates a new version of it.
 Currently rclone only supports retrieving the current version but older versions can be accessed via the Jottacloud Website.
 
+Versioning can be disabled by `--jottacloud-no-versions` option. This is achieved by deleting the remote file prior to uploading
+a new version. If the upload the fails no version of the file will be available in the remote.
+
 ### Quota information
 
 To view your current quota you can use the `rclone about remote:`
@@ -213,7 +215,7 @@ Files bigger than this will be cached on disk to calculate the MD5 if required.
 - Config:      md5_memory_limit
 - Env Var:     RCLONE_JOTTACLOUD_MD5_MEMORY_LIMIT
 - Type:        SizeSuffix
-- Default:     10M
+- Default:     10Mi
 
 #### --jottacloud-trashed-only
 
@@ -241,7 +243,16 @@ Files bigger than this can be resumed if the upload fail's.
 - Config:      upload_resume_limit
 - Env Var:     RCLONE_JOTTACLOUD_UPLOAD_RESUME_LIMIT
 - Type:        SizeSuffix
-- Default:     10M
+- Default:     10Mi
+
+#### --jottacloud-no-versions
+
+Avoid server side versioning by deleting files and recreating files instead of overwriting them.
+
+- Config:      no_versions
+- Env Var:     RCLONE_JOTTACLOUD_NO_VERSIONS
+- Type:        bool
+- Default:     false
 
 #### --jottacloud-encoding
 

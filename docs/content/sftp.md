@@ -3,8 +3,7 @@ title: "SFTP"
 description: "SFTP"
 ---
 
-{{< icon "fa fa-server" >}} SFTP
-----------------------------------------
+# {{< icon "fa fa-server" >}} SFTP
 
 SFTP is the [Secure (or SSH) File Transfer
 Protocol](https://en.wikipedia.org/wiki/SSH_File_Transfer_Protocol).
@@ -21,7 +20,10 @@ SSH installations.
 
 Paths are specified as `remote:path`. If the path does not begin with
 a `/` it is relative to the home directory of the user.  An empty path
-`remote:` refers to the user's home directory.
+`remote:` refers to the user's home directory. For example, `rclone lsd remote:` 
+would list the home directory of the user cofigured in the rclone remote config 
+(`i.e /home/sftpuser`). However, `rclone lsd remote:/` would list the root 
+directory for remote machine (i.e. `/`)
 
 "Note that some SFTP servers will need the leading / - Synology is a
 good example of this. rsync.net, on the other hand, requires users to
@@ -84,6 +86,10 @@ See all directories in the home directory
 
     rclone lsd remote:
 
+See all directories in the root directory
+
+    rclone lsd remote:/
+
 Make a new directory
 
     rclone mkdir remote:path/to/directory
@@ -96,6 +102,11 @@ Sync `/home/local/directory` to the remote directory, deleting any
 excess files in the directory.
 
     rclone sync -i /home/local/directory remote:directory
+
+Mount the remote path `/srv/www-data/` to the local path
+`/mnt/www-data`
+
+    rclone mount remote:/srv/www-data/ /mnt/www-data
 
 ### SSH Authentication ###
 
@@ -516,6 +527,21 @@ If concurrent reads are disabled, the use_fstat option is ignored.
 
 - Config:      disable_concurrent_reads
 - Env Var:     RCLONE_SFTP_DISABLE_CONCURRENT_READS
+- Type:        bool
+- Default:     false
+
+#### --sftp-disable-concurrent-writes
+
+If set don't use concurrent writes
+
+Normally rclone uses concurrent writes to upload files. This improves
+the performance greatly, especially for distant servers.
+
+This option disables concurrent writes should that be necessary.
+
+
+- Config:      disable_concurrent_writes
+- Env Var:     RCLONE_SFTP_DISABLE_CONCURRENT_WRITES
 - Type:        bool
 - Default:     false
 

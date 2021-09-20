@@ -16,7 +16,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -76,50 +75,63 @@ func init() {
 		Name:        "sugarsync",
 		Description: "Sugarsync",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 			opt := new(Options)
 			err := configstruct.Set(m, opt)
 			if err != nil {
-				log.Fatalf("Failed to read options: %v", err)
+				return nil, errors.Wrap(err, "failed to read options")
 			}
 
-			if opt.RefreshToken != "" {
-				fmt.Printf("Already have a token - refresh?\n")
-				if !config.ConfirmWithConfig(ctx, m, "config_refresh_token", true) {
-					return
+			switch config.State {
+			case "":
+				if opt.RefreshToken == "" {
+					return fs.ConfigGoto("username")
 				}
-			}
-			fmt.Printf("Username (email address)> ")
-			username := config.ReadLine()
-			password := config.GetPassword("Your Sugarsync password is only required during setup and will not be stored.")
+				return fs.ConfigConfirm("refresh", true, "config_refresh", "Already have a token - refresh?")
+			case "refresh":
+				if config.Result == "false" {
+					return nil, nil
+				}
+				return fs.ConfigGoto("username")
+			case "username":
+				return fs.ConfigInput("password", "config_username", "username (email address)")
+			case "password":
+				m.Set("username", config.Result)
+				return fs.ConfigPassword("auth", "config_password", "Your Sugarsync password.\n\nOnly required during setup and will not be stored.")
+			case "auth":
+				username, _ := m.Get("username")
+				m.Set("username", "")
+				password := config.Result
 
-			authRequest := api.AppAuthorization{
-				Username:         username,
-				Password:         password,
-				Application:      withDefault(opt.AppID, appID),
-				AccessKeyID:      withDefault(opt.AccessKeyID, accessKeyID),
-				PrivateAccessKey: withDefault(opt.PrivateAccessKey, obscure.MustReveal(encryptedPrivateAccessKey)),
-			}
+				authRequest := api.AppAuthorization{
+					Username:         username,
+					Password:         obscure.MustReveal(password),
+					Application:      withDefault(opt.AppID, appID),
+					AccessKeyID:      withDefault(opt.AccessKeyID, accessKeyID),
+					PrivateAccessKey: withDefault(opt.PrivateAccessKey, obscure.MustReveal(encryptedPrivateAccessKey)),
+				}
 
-			var resp *http.Response
-			opts := rest.Opts{
-				Method: "POST",
-				Path:   "/app-authorization",
-			}
-			srv := rest.NewClient(fshttp.NewClient(ctx)).SetRoot(rootURL) //  FIXME
+				var resp *http.Response
+				opts := rest.Opts{
+					Method: "POST",
+					Path:   "/app-authorization",
+				}
+				srv := rest.NewClient(fshttp.NewClient(ctx)).SetRoot(rootURL) //  FIXME
 
-			// FIXME
-			//err = f.pacer.Call(func() (bool, error) {
-			resp, err = srv.CallXML(context.Background(), &opts, &authRequest, nil)
-			//	return shouldRetry(ctx, resp, err)
-			//})
-			if err != nil {
-				log.Fatalf("Failed to get token: %v", err)
+				// FIXME
+				//err = f.pacer.Call(func() (bool, error) {
+				resp, err = srv.CallXML(context.Background(), &opts, &authRequest, nil)
+				//	return shouldRetry(ctx, resp, err)
+				//})
+				if err != nil {
+					return nil, errors.Wrap(err, "failed to get token")
+				}
+				opt.RefreshToken = resp.Header.Get("Location")
+				m.Set("refresh_token", opt.RefreshToken)
+				return nil, nil
 			}
-			opt.RefreshToken = resp.Header.Get("Location")
-			m.Set("refresh_token", opt.RefreshToken)
-		},
-		Options: []fs.Option{{
+			return nil, fmt.Errorf("unknown state %q", config.State)
+		}, Options: []fs.Option{{
 			Name: "app_id",
 			Help: "Sugarsync App ID.\n\nLeave blank to use rclone's.",
 		}, {

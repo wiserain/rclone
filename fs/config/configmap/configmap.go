@@ -2,8 +2,24 @@
 package configmap
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"sort"
 	"strings"
+	"unicode"
+
+	"github.com/pkg/errors"
+)
+
+// Priority of getters
+type Priority int8
+
+// Priority levels for AddGetter
+const (
+	PriorityNormal  Priority = iota
+	PriorityConfig           // use for reading from the config
+	PriorityDefault          // use for default values
+	PriorityMax
 )
 
 // Getter provides an interface to get config items
@@ -29,9 +45,13 @@ type Mapper interface {
 // Map provides a wrapper around multiple Setter and
 // Getter interfaces.
 type Map struct {
-	setters  []Setter
-	getters  []Getter
-	override []Getter
+	setters []Setter
+	getters []getprio
+}
+
+type getprio struct {
+	getter   Getter
+	priority Priority
 }
 
 // New returns an empty Map
@@ -39,18 +59,12 @@ func New() *Map {
 	return &Map{}
 }
 
-// AddGetter appends a getter onto the end of the getters
-func (c *Map) AddGetter(getter Getter) *Map {
-	c.getters = append(c.getters, getter)
-	return c
-}
-
-// AddOverrideGetter appends a getter onto the end of the getters
-//
-// It also appends it onto the override getters for GetOverride
-func (c *Map) AddOverrideGetter(getter Getter) *Map {
-	c.getters = append(c.getters, getter)
-	c.override = append(c.override, getter)
+// AddGetter appends a getter onto the end of the getters in priority order
+func (c *Map) AddGetter(getter Getter, priority Priority) *Map {
+	c.getters = append(c.getters, getprio{getter, priority})
+	sort.SliceStable(c.getters, func(i, j int) bool {
+		return c.getters[i].priority < c.getters[j].priority
+	})
 	return c
 }
 
@@ -60,12 +74,34 @@ func (c *Map) AddSetter(setter Setter) *Map {
 	return c
 }
 
-// get gets an item with the key passed in and return the value from
-// the first getter. If the item is found then it returns true,
-// otherwise false.
-func (c *Map) get(key string, getters []Getter) (value string, ok bool) {
-	for _, do := range getters {
-		value, ok = do.Get(key)
+// ClearSetters removes all the setters set so far
+func (c *Map) ClearSetters() *Map {
+	c.setters = nil
+	return c
+}
+
+// ClearGetters removes all the getters with the priority given
+func (c *Map) ClearGetters(priority Priority) *Map {
+	getters := c.getters[:0]
+	for _, item := range c.getters {
+		if item.priority != priority {
+			getters = append(getters, item)
+		}
+	}
+	c.getters = getters
+	return c
+}
+
+// GetPriority gets an item with the key passed in and return the
+// value from the first getter to return a result with priority <=
+// maxPriority. If the item is found then it returns true, otherwise
+// false.
+func (c *Map) GetPriority(key string, maxPriority Priority) (value string, ok bool) {
+	for _, item := range c.getters {
+		if item.priority > maxPriority {
+			break
+		}
+		value, ok = item.getter.Get(key)
 		if ok {
 			return value, ok
 		}
@@ -77,14 +113,7 @@ func (c *Map) get(key string, getters []Getter) (value string, ok bool) {
 // the first getter. If the item is found then it returns true,
 // otherwise false.
 func (c *Map) Get(key string) (value string, ok bool) {
-	return c.get(key, c.getters)
-}
-
-// GetOverride gets an item with the key passed in and return the
-// value from the first override getter. If the item is found then it
-// returns true, otherwise false.
-func (c *Map) GetOverride(key string) (value string, ok bool) {
-	return c.get(key, c.override)
+	return c.GetPriority(key, PriorityMax)
 }
 
 // Set sets an item into all the stored setters.
@@ -134,4 +163,39 @@ func (c Simple) String() string {
 		out.WriteRune('\'')
 	}
 	return out.String()
+}
+
+// Encode from c into a string suitable for putting on the command line
+func (c Simple) Encode() (string, error) {
+	if len(c) == 0 {
+		return "", nil
+	}
+	buf, err := json.Marshal(c)
+	if err != nil {
+		return "", errors.Wrap(err, "encode simple map")
+	}
+	return base64.RawStdEncoding.EncodeToString(buf), nil
+}
+
+// Decode an Encode~d string in into c
+func (c Simple) Decode(in string) error {
+	// Remove all whitespace from the input string
+	in = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, in)
+	if len(in) == 0 {
+		return nil
+	}
+	decodedM, err := base64.RawStdEncoding.DecodeString(in)
+	if err != nil {
+		return errors.Wrap(err, "decode simple map")
+	}
+	err = json.Unmarshal(decodedM, &c)
+	if err != nil {
+		return errors.Wrap(err, "parse simple map")
+	}
+	return nil
 }

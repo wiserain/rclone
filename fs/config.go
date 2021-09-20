@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ var (
 
 	// ConfigProvider is the config key used for provider options
 	ConfigProvider = "provider"
+
+	// ConfigEdit is the config key used to show we wish to edit existing entries
+	ConfigEdit = "config_fs_edit"
 )
 
 // ConfigInfo is filesystem config options
@@ -125,6 +129,7 @@ type ConfigInfo struct {
 	TrafficClass           uint8
 	FsCacheExpireDuration  time.Duration
 	FsCacheExpireInterval  time.Duration
+	DisableHTTP2           bool
 }
 
 // NewConfig creates a new config with everything set to the default
@@ -164,6 +169,20 @@ func NewConfig() *ConfigInfo {
 	c.TrackRenamesStrategy = "hash"
 	c.FsCacheExpireDuration = 300 * time.Second
 	c.FsCacheExpireInterval = 60 * time.Second
+
+	// Perform a simple check for debug flags to enable debug logging during the flag initialization
+	for argIndex, arg := range os.Args {
+		if strings.HasPrefix(arg, "-vv") && strings.TrimRight(arg, "v") == "-" {
+			c.LogLevel = LogLevelDebug
+		}
+		if arg == "--log-level=DEBUG" || (arg == "--log-level" && len(os.Args) > argIndex+1 && os.Args[argIndex+1] == "DEBUG") {
+			c.LogLevel = LogLevelDebug
+		}
+	}
+	envValue, found := os.LookupEnv("RCLONE_LOG_LEVEL")
+	if found && envValue == "DEBUG" {
+		c.LogLevel = LogLevelDebug
+	}
 
 	return c
 }

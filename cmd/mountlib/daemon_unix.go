@@ -1,6 +1,7 @@
 // Daemonization interface for Unix variants only
 
-// +build !windows
+//go:build !windows && !plan9 && !js
+// +build !windows,!plan9,!js
 
 package mountlib
 

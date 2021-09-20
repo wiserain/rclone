@@ -3,8 +3,7 @@ title: "Google drive"
 description: "Rclone docs for Google drive"
 ---
 
-{{< icon "fab fa-google" >}} Google Drive
------------------------------------------
+# {{< icon "fab fa-google" >}} Google Drive
 
 Paths are specified as `drive:path`
 
@@ -259,7 +258,7 @@ client_secret>   # Can be left blank
 scope>           # Select your scope, 1 for example
 root_folder_id>  # Can be left blank
 service_account_file> /home/foo/myJSONfile.json # This is where the JSON file goes!
-y/n>             # Auto config, y
+y/n>             # Auto config, n
 
 ```
 
@@ -276,7 +275,7 @@ the folder named backup.
 Note: in case you configured a specific root folder on gdrive and rclone is unable to access the contents of that folder when using `--drive-impersonate`, do this instead:
   - in the gdrive web interface, share your root folder with the user/email of the new Service Account you created/selected at step #1
   - use rclone without specifying the `--drive-impersonate` option, like this:
-        `rclone -v foo@example.com lsf gdrive:backup`
+        `rclone -v lsf gdrive:backup`
 
 
 ### Shared drives (team drives) ###
@@ -868,7 +867,7 @@ Cutoff for switching to chunked upload
 - Config:      upload_cutoff
 - Env Var:     RCLONE_DRIVE_UPLOAD_CUTOFF
 - Type:        SizeSuffix
-- Default:     8M
+- Default:     8Mi
 
 #### --drive-chunk-size
 
@@ -882,7 +881,7 @@ Reducing this will reduce memory usage but decrease performance.
 - Config:      chunk_size
 - Env Var:     RCLONE_DRIVE_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     8M
+- Default:     8Mi
 
 #### --drive-acknowledge-abuse
 
@@ -993,7 +992,7 @@ See: https://github.com/rclone/rclone/issues/3631
 
 Make upload limit errors be fatal
 
-At the time of writing it is only possible to upload 750GB of data to
+At the time of writing it is only possible to upload 750 GiB of data to
 Google Drive a day (this is an undocumented limit). When this limit is
 reached Google Drive produces a slightly different error message. When
 this flag is set it causes these errors to be fatal.  These will stop
@@ -1014,7 +1013,7 @@ See: https://github.com/rclone/rclone/issues/3857
 
 Make download limit errors be fatal
 
-At the time of writing it is only possible to download 10TB of data from
+At the time of writing it is only possible to download 10 TiB of data from
 Google Drive a day (this is an undocumented limit). When this limit is
 reached Google Drive produces a slightly different error message. When
 this flag is set it causes these errors to be fatal.  These will stop
@@ -1226,7 +1225,7 @@ Use the -i flag to see what would be copied before copying.
 
 Drive has quite a lot of rate limiting.  This causes rclone to be
 limited to transferring about 2 files per second only.  Individual
-files may be transferred much faster at 100s of MBytes/s but lots of
+files may be transferred much faster at 100s of MiByte/s but lots of
 small files can take a long time.
 
 Server side copies are also subject to a separate rate limit. If you
@@ -1324,8 +1323,11 @@ then select "OAuth client ID".
 7. Choose an application type of "Desktop app" if you using a Google account or "Other" if 
 you using a GSuite account and click "Create". (the default name is fine)
 
-8. It will show you a client ID and client secret.  Use these values
-in rclone config to add a new remote or edit an existing remote.
+8. It will show you a client ID and client secret. Make a note of these.
+
+9. Go to "Oauth consent screen" and press "Publish App"
+
+10. Provide the noted client ID and client secret to rclone.
 
 Be aware that, due to the "enhanced security" recently introduced by
 Google, you are theoretically expected to "submit your app for verification"

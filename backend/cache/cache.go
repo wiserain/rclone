@@ -1,3 +1,4 @@
+//go:build !plan9 && !js
 // +build !plan9,!js
 
 package cache
@@ -98,14 +99,14 @@ changed, any downloaded chunks will be invalid and cache-chunk-path
 will need to be cleared or unexpected EOF errors will occur.`,
 			Default: DefCacheChunkSize,
 			Examples: []fs.OptionExample{{
-				Value: "1m",
-				Help:  "1MB",
+				Value: "1M",
+				Help:  "1 MiB",
 			}, {
 				Value: "5M",
-				Help:  "5 MB",
+				Help:  "5 MiB",
 			}, {
 				Value: "10M",
-				Help:  "10 MB",
+				Help:  "10 MiB",
 			}},
 		}, {
 			Name: "info_age",
@@ -132,13 +133,13 @@ oldest chunks until it goes under this value.`,
 			Default: DefCacheTotalChunkSize,
 			Examples: []fs.OptionExample{{
 				Value: "500M",
-				Help:  "500 MB",
+				Help:  "500 MiB",
 			}, {
 				Value: "1G",
-				Help:  "1 GB",
+				Help:  "1 GiB",
 			}, {
 				Value: "10G",
-				Help:  "10 GB",
+				Help:  "10 GiB",
 			}},
 		}, {
 			Name:     "db_path",
@@ -339,8 +340,14 @@ func parseRootPath(path string) (string, error) {
 	return strings.Trim(path, "/"), nil
 }
 
+var warnDeprecated sync.Once
+
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, rootPath string, m configmap.Mapper) (fs.Fs, error) {
+	warnDeprecated.Do(func() {
+		fs.Logf(nil, "WARNING: Cache backend is deprecated and may be removed in future. Please use VFS instead.")
+	})
+
 	// Parse config into Options struct
 	opt := new(Options)
 	err := configstruct.Set(m, opt)

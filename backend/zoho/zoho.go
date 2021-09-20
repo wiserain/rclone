@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -73,41 +72,97 @@ func init() {
 		Name:        "zoho",
 		Description: "Zoho",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 			// Need to setup region before configuring oauth
-			setupRegion(m)
-			opt := oauthutil.Options{
-				// No refresh token unless ApprovalForce is set
-				OAuth2Opts: []oauth2.AuthCodeOption{oauth2.ApprovalForce},
-			}
-			if err := oauthutil.Config(ctx, "zoho", name, m, oauthConfig, &opt); err != nil {
-				log.Fatalf("Failed to configure token: %v", err)
-			}
-			// We need to rewrite the token type to "Zoho-oauthtoken" because Zoho wants
-			// it's own custom type
-			token, err := oauthutil.GetToken(name, m)
+			err := setupRegion(m)
 			if err != nil {
-				log.Fatalf("Failed to read token: %v", err)
+				return nil, err
 			}
-			if token.TokenType != "Zoho-oauthtoken" {
-				token.TokenType = "Zoho-oauthtoken"
-				err = oauthutil.PutToken(name, m, token, false)
+			getSrvs := func() (authSrv, apiSrv *rest.Client, err error) {
+				oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
 				if err != nil {
-					log.Fatalf("Failed to configure token: %v", err)
+					return nil, nil, errors.Wrap(err, "failed to load oAuthClient")
 				}
+				authSrv = rest.NewClient(oAuthClient).SetRoot(accountsURL)
+				apiSrv = rest.NewClient(oAuthClient).SetRoot(rootURL)
+				return authSrv, apiSrv, nil
 			}
 
-			if fs.GetConfig(ctx).AutoConfirm {
-				return
-			}
+			switch config.State {
+			case "":
+				return oauthutil.ConfigOut("teams", &oauthutil.Options{
+					OAuth2Config: oauthConfig,
+					// No refresh token unless ApprovalForce is set
+					OAuth2Opts: []oauth2.AuthCodeOption{oauth2.ApprovalForce},
+				})
+			case "teams":
+				// We need to rewrite the token type to "Zoho-oauthtoken" because Zoho wants
+				// it's own custom type
+				token, err := oauthutil.GetToken(name, m)
+				if err != nil {
+					return nil, errors.Wrap(err, "failed to read token")
+				}
+				if token.TokenType != "Zoho-oauthtoken" {
+					token.TokenType = "Zoho-oauthtoken"
+					err = oauthutil.PutToken(name, m, token, false)
+					if err != nil {
+						return nil, errors.Wrap(err, "failed to configure token")
+					}
+				}
 
-			if err = setupRoot(ctx, name, m); err != nil {
-				log.Fatalf("Failed to configure root directory: %v", err)
+				authSrv, apiSrv, err := getSrvs()
+				if err != nil {
+					return nil, err
+				}
+
+				// Get the user Info
+				opts := rest.Opts{
+					Method: "GET",
+					Path:   "/oauth/user/info",
+				}
+				var user api.User
+				_, err = authSrv.CallJSON(ctx, &opts, nil, &user)
+				if err != nil {
+					return nil, err
+				}
+
+				// Get the teams
+				teams, err := listTeams(ctx, user.ZUID, apiSrv)
+				if err != nil {
+					return nil, err
+				}
+				return fs.ConfigChoose("workspace", "config_team_drive_id", "Team Drive ID", len(teams), func(i int) (string, string) {
+					team := teams[i]
+					return team.ID, team.Attributes.Name
+				})
+			case "workspace":
+				_, apiSrv, err := getSrvs()
+				if err != nil {
+					return nil, err
+				}
+				teamID := config.Result
+				workspaces, err := listWorkspaces(ctx, teamID, apiSrv)
+				if err != nil {
+					return nil, err
+				}
+				return fs.ConfigChoose("workspace_end", "config_workspace", "Workspace ID", len(workspaces), func(i int) (string, string) {
+					workspace := workspaces[i]
+					return workspace.ID, workspace.Attributes.Name
+				})
+			case "workspace_end":
+				worksspaceID := config.Result
+				m.Set(configRootID, worksspaceID)
+				return nil, nil
 			}
+			return nil, fmt.Errorf("unknown state %q", config.State)
 		},
 		Options: append(oauthutil.SharedOptions, []fs.Option{{
 			Name: "region",
-			Help: "Zoho region to connect to. You'll have to use the region you organization is registered in.",
+			Help: `Zoho region to connect to.
+
+You'll have to use the region your organization is registered in. If
+not sure use the same top level domain as you connect to in your
+browser.`,
 			Examples: []fs.OptionExample{{
 				Value: "com",
 				Help:  "United states / Global",
@@ -164,15 +219,16 @@ type Object struct {
 
 // ------------------------------------------------------------
 
-func setupRegion(m configmap.Mapper) {
+func setupRegion(m configmap.Mapper) error {
 	region, ok := m.Get("region")
 	if !ok || region == "" {
-		log.Fatalf("No region set\n")
+		return errors.New("no region set")
 	}
 	rootURL = fmt.Sprintf("https://workdrive.zoho.%s/api/v1", region)
 	accountsURL = fmt.Sprintf("https://accounts.zoho.%s", region)
 	oauthConfig.Endpoint.AuthURL = fmt.Sprintf("https://accounts.zoho.%s/oauth/v2/auth", region)
 	oauthConfig.Endpoint.TokenURL = fmt.Sprintf("https://accounts.zoho.%s/oauth/v2/token", region)
+	return nil
 }
 
 // ------------------------------------------------------------
@@ -203,49 +259,6 @@ func listWorkspaces(ctx context.Context, teamID string, srv *rest.Client) ([]api
 		return nil, err
 	}
 	return workspaceList.TeamWorkspace, nil
-}
-
-func setupRoot(ctx context.Context, name string, m configmap.Mapper) error {
-	oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
-	if err != nil {
-		log.Fatalf("Failed to load oAuthClient: %s", err)
-	}
-	authSrv := rest.NewClient(oAuthClient).SetRoot(accountsURL)
-	opts := rest.Opts{
-		Method: "GET",
-		Path:   "/oauth/user/info",
-	}
-
-	var user api.User
-	_, err = authSrv.CallJSON(ctx, &opts, nil, &user)
-	if err != nil {
-		return err
-	}
-
-	apiSrv := rest.NewClient(oAuthClient).SetRoot(rootURL)
-	teams, err := listTeams(ctx, user.ZUID, apiSrv)
-	if err != nil {
-		return err
-	}
-	var teamIDs, teamNames []string
-	for _, team := range teams {
-		teamIDs = append(teamIDs, team.ID)
-		teamNames = append(teamNames, team.Attributes.Name)
-	}
-	teamID := config.Choose("Enter a Team Drive ID", teamIDs, teamNames, true)
-
-	workspaces, err := listWorkspaces(ctx, teamID, apiSrv)
-	if err != nil {
-		return err
-	}
-	var workspaceIDs, workspaceNames []string
-	for _, workspace := range workspaces {
-		workspaceIDs = append(workspaceIDs, workspace.ID)
-		workspaceNames = append(workspaceNames, workspace.Attributes.Name)
-	}
-	worksspaceID := config.Choose("Enter a Workspace ID", workspaceIDs, workspaceNames, true)
-	m.Set(configRootID, worksspaceID)
-	return nil
 }
 
 // --------------------------------------------------------------
@@ -377,7 +390,10 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	if err := configstruct.Set(m, opt); err != nil {
 		return nil, err
 	}
-	setupRegion(m)
+	err := setupRegion(m)
+	if err != nil {
+		return nil, err
+	}
 
 	root = parsePath(root)
 	oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)

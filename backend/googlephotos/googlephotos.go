@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	golog "log"
 	"net/http"
 	"net/url"
 	"path"
@@ -54,6 +53,7 @@ const (
 	minSleep                    = 10 * time.Millisecond
 	scopeReadOnly               = "https://www.googleapis.com/auth/photoslibrary.readonly"
 	scopeReadWrite              = "https://www.googleapis.com/auth/photoslibrary"
+	scopeAccess                 = 2 // position of access scope in list
 )
 
 var (
@@ -62,7 +62,7 @@ var (
 		Scopes: []string{
 			"openid",
 			"profile",
-			scopeReadWrite,
+			scopeReadWrite, // this must be at position scopeAccess
 		},
 		Endpoint:     google.Endpoint,
 		ClientID:     rcloneClientID,
@@ -78,36 +78,36 @@ func init() {
 		Prefix:      "gphotos",
 		Description: "Google Photos",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 			// Parse config into Options struct
 			opt := new(Options)
 			err := configstruct.Set(m, opt)
 			if err != nil {
-				fs.Errorf(nil, "Couldn't parse config into struct: %v", err)
-				return
+				return nil, errors.Wrap(err, "couldn't parse config into struct")
 			}
 
-			// Fill in the scopes
-			if opt.ReadOnly {
-				oauthConfig.Scopes[0] = scopeReadOnly
-			} else {
-				oauthConfig.Scopes[0] = scopeReadWrite
+			switch config.State {
+			case "":
+				// Fill in the scopes
+				if opt.ReadOnly {
+					oauthConfig.Scopes[scopeAccess] = scopeReadOnly
+				} else {
+					oauthConfig.Scopes[scopeAccess] = scopeReadWrite
+				}
+				return oauthutil.ConfigOut("warning", &oauthutil.Options{
+					OAuth2Config: oauthConfig,
+				})
+			case "warning":
+				// Warn the user as required by google photos integration
+				return fs.ConfigConfirm("warning_done", true, "config_warning", `Warning
+
+IMPORTANT: All media items uploaded to Google Photos with rclone
+are stored in full resolution at original quality.  These uploads
+will count towards storage in your Google Account.`)
+			case "warning_done":
+				return nil, nil
 			}
-
-			// Do the oauth
-			err = oauthutil.Config(ctx, "google photos", name, m, oauthConfig, nil)
-			if err != nil {
-				golog.Fatalf("Failed to configure token: %v", err)
-			}
-
-			// Warn the user
-			fmt.Print(`
-*** IMPORTANT: All media items uploaded to Google Photos with rclone
-*** are stored in full resolution at original quality.  These uploads
-*** will count towards storage in your Google Account.
-
-`)
-
+			return nil, fmt.Errorf("unknown state %q", config.State)
 		},
 		Options: append(oauthutil.SharedOptions, []fs.Option{{
 			Name:    "read_only",

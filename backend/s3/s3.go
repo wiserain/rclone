@@ -26,7 +26,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/corehandlers"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
@@ -59,7 +58,7 @@ import (
 func init() {
 	fs.Register(&fs.RegInfo{
 		Name:        "s3",
-		Description: "Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, Digital Ocean, Dreamhost, IBM COS, Minio, and Tencent COS",
+		Description: "Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, Digital Ocean, Dreamhost, IBM COS, Minio, SeaweedFS, and Tencent COS",
 		NewFs:       NewFs,
 		CommandHelp: commandHelp,
 		Options: []fs.Option{{
@@ -92,6 +91,9 @@ func init() {
 			}, {
 				Value: "Scaleway",
 				Help:  "Scaleway Object Storage",
+			}, {
+				Value: "SeaweedFS",
+				Help:  "SeaweedFS S3",
 			}, {
 				Value: "StackPath",
 				Help:  "StackPath Object Storage",
@@ -428,6 +430,12 @@ func init() {
 			Help:     "Endpoint for OSS API.",
 			Provider: "Alibaba",
 			Examples: []fs.OptionExample{{
+				Value: "oss-accelerate.aliyuncs.com",
+				Help:  "Global Accelerate",
+			}, {
+				Value: "oss-accelerate-overseas.aliyuncs.com",
+				Help:  "Global Accelerate (outside mainland China)",
+			}, {
 				Value: "oss-cn-hangzhou.aliyuncs.com",
 				Help:  "East China 1 (Hangzhou)",
 			}, {
@@ -444,10 +452,22 @@ func init() {
 				Help:  "North China 3 (Zhangjiakou)",
 			}, {
 				Value: "oss-cn-huhehaote.aliyuncs.com",
-				Help:  "North China 5 (Huhehaote)",
+				Help:  "North China 5 (Hohhot)",
+			}, {
+				Value: "oss-cn-wulanchabu.aliyuncs.com",
+				Help:  "North China 6 (Ulanqab)",
 			}, {
 				Value: "oss-cn-shenzhen.aliyuncs.com",
 				Help:  "South China 1 (Shenzhen)",
+			}, {
+				Value: "oss-cn-heyuan.aliyuncs.com",
+				Help:  "South China 2 (Heyuan)",
+			}, {
+				Value: "oss-cn-guangzhou.aliyuncs.com",
+				Help:  "South China 3 (Guangzhou)",
+			}, {
+				Value: "oss-cn-chengdu.aliyuncs.com",
+				Help:  "West China 1 (Chengdu)",
 			}, {
 				Value: "oss-cn-hongkong.aliyuncs.com",
 				Help:  "Hong Kong (Hong Kong)",
@@ -594,6 +614,10 @@ func init() {
 				Help:     "Digital Ocean Spaces Singapore 1",
 				Provider: "DigitalOcean",
 			}, {
+				Value:    "localhost:8333",
+				Help:     "SeaweedFS S3 localhost",
+				Provider: "SeaweedFS",
+			}, {
 				Value:    "s3.wasabisys.com",
 				Help:     "Wasabi US East endpoint",
 				Provider: "Wasabi",
@@ -604,6 +628,10 @@ func init() {
 			}, {
 				Value:    "s3.eu-central-1.wasabisys.com",
 				Help:     "Wasabi EU Central endpoint",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.ap-northeast-1.wasabisys.com",
+				Help:     "Wasabi AP Northeast endpoint",
 				Provider: "Wasabi",
 			}},
 		}, {
@@ -1017,7 +1045,7 @@ If you leave it blank, this is calculated automatically from the sse_customer_ke
 			Help: `Cutoff for switching to chunked upload
 
 Any files larger than this will be uploaded in chunks of chunk_size.
-The minimum is 0 and the maximum is 5GB.`,
+The minimum is 0 and the maximum is 5 GiB.`,
 			Default:  defaultUploadCutoff,
 			Advanced: true,
 		}, {
@@ -1039,9 +1067,9 @@ Rclone will automatically increase the chunk size when uploading a
 large file of known size to stay below the 10,000 chunks limit.
 
 Files of unknown size are uploaded with the configured
-chunk_size. Since the default chunk size is 5MB and there can be at
+chunk_size. Since the default chunk size is 5 MiB and there can be at
 most 10,000 chunks, this means that by default the maximum size of
-a file you can stream upload is 48GB.  If you wish to stream upload
+a file you can stream upload is 48 GiB.  If you wish to stream upload
 larger files then you will need to increase chunk_size.`,
 			Default:  minChunkSize,
 			Advanced: true,
@@ -1067,7 +1095,7 @@ large file of a known size to stay below this number of chunks limit.
 Any files larger than this that need to be server-side copied will be
 copied in chunks of this size.
 
-The minimum is 0 and the maximum is 5GB.`,
+The minimum is 0 and the maximum is 5 GiB.`,
 			Default:  fs.SizeSuffix(maxSizeForCopy),
 			Advanced: true,
 		}, {
@@ -1222,6 +1250,11 @@ very small even with this flag.
 			Default:  false,
 			Advanced: true,
 		}, {
+			Name:     "no_head_object",
+			Help:     `If set, don't HEAD objects`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
@@ -1271,7 +1304,7 @@ See: https://github.com/rclone/rclone/issues/4673, https://github.com/rclone/rcl
 const (
 	metaMtime   = "Mtime"     // the meta key to store mtime in - e.g. X-Amz-Meta-Mtime
 	metaMD5Hash = "Md5chksum" // the meta key to store md5hash in
-	// The maximum size of object we can COPY - this should be 5GiB but is < 5GB for b2 compatibility
+	// The maximum size of object we can COPY - this should be 5 GiB but is < 5 GB for b2 compatibility
 	// See https://forum.rclone.org/t/copying-files-within-a-b2-bucket/16680/76
 	maxSizeForCopy      = 4768 * 1024 * 1024
 	maxUploadParts      = 10000 // maximum allowed number of parts in a multi-part upload
@@ -1319,6 +1352,7 @@ type Options struct {
 	ListChunk             int64                `config:"list_chunk"`
 	NoCheckBucket         bool                 `config:"no_check_bucket"`
 	NoHead                bool                 `config:"no_head"`
+	NoHeadObject          bool                 `config:"no_head_object"`
 	Enc                   encoder.MultiEncoder `config:"encoding"`
 	MemoryPoolFlushTime   fs.Duration          `config:"memory_pool_flush_time"`
 	MemoryPoolUseMmap     bool                 `config:"memory_pool_use_mmap"`
@@ -1511,11 +1545,6 @@ func s3Connection(ctx context.Context, opt *Options, client *http.Client) (*s3.S
 			}),
 			ExpiryWindow: 3 * time.Minute,
 		},
-
-		// Pick up IAM role if we are in EKS
-		&stscreds.WebIdentityRoleProvider{
-			ExpiryWindow: 3 * time.Minute,
-		},
 	}
 	cred := credentials.NewChainCredentials(providers)
 
@@ -1693,7 +1722,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		GetTier:           true,
 		SlowModTime:       true,
 	}).Fill(ctx, f)
-	if f.rootBucket != "" && f.rootDirectory != "" {
+	if f.rootBucket != "" && f.rootDirectory != "" && !opt.NoHeadObject && !strings.HasSuffix(root, "/") {
 		// Check to see if the (bucket,directory) is actually an existing file
 		oldRoot := f.root
 		newRoot, leaf := path.Split(oldRoot)
@@ -1730,7 +1759,7 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *s3.Obje
 		o.setMD5FromEtag(aws.StringValue(info.ETag))
 		o.bytes = aws.Int64Value(info.Size)
 		o.storageClass = aws.StringValue(info.StorageClass)
-	} else {
+	} else if !o.fs.opt.NoHeadObject {
 		err := o.readMetaData(ctx) // reads info and meta, returning an error
 		if err != nil {
 			return nil, err
@@ -2831,15 +2860,23 @@ func (o *Object) readMetaData(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	if resp.LastModified == nil {
+		fs.Logf(o, "Failed to read last modified from HEAD: %v", err)
+	}
+	o.setMetaData(resp.ETag, resp.ContentLength, resp.LastModified, resp.Metadata, resp.ContentType, resp.StorageClass)
+	return nil
+}
+
+func (o *Object) setMetaData(etag *string, contentLength *int64, lastModified *time.Time, meta map[string]*string, mimeType *string, storageClass *string) {
 	var size int64
 	// Ignore missing Content-Length assuming it is 0
 	// Some versions of ceph do this due their apache proxies
-	if resp.ContentLength != nil {
-		size = *resp.ContentLength
+	if contentLength != nil {
+		size = *contentLength
 	}
-	o.setMD5FromEtag(aws.StringValue(resp.ETag))
+	o.setMD5FromEtag(aws.StringValue(etag))
 	o.bytes = size
-	o.meta = resp.Metadata
+	o.meta = meta
 	if o.meta == nil {
 		o.meta = map[string]*string{}
 	}
@@ -2854,15 +2891,13 @@ func (o *Object) readMetaData(ctx context.Context) (err error) {
 			o.md5 = hex.EncodeToString(md5sumBytes)
 		}
 	}
-	o.storageClass = aws.StringValue(resp.StorageClass)
-	if resp.LastModified == nil {
-		fs.Logf(o, "Failed to read last modified from HEAD: %v", err)
+	o.storageClass = aws.StringValue(storageClass)
+	if lastModified == nil {
 		o.lastModified = time.Now()
 	} else {
-		o.lastModified = *resp.LastModified
+		o.lastModified = *lastModified
 	}
-	o.mimeType = aws.StringValue(resp.ContentType)
-	return nil
+	o.mimeType = aws.StringValue(mimeType)
 }
 
 // ModTime returns the modification time of the object
@@ -2972,6 +3007,26 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if err != nil {
 		return nil, err
 	}
+	if resp.LastModified == nil {
+		fs.Logf(o, "Failed to read last modified: %v", err)
+	}
+	// read size from ContentLength or ContentRange
+	size := resp.ContentLength
+	if resp.ContentRange != nil {
+		var contentRange = *resp.ContentRange
+		slash := strings.IndexRune(contentRange, '/')
+		if slash >= 0 {
+			i, err := strconv.ParseInt(contentRange[slash+1:], 10, 64)
+			if err == nil {
+				size = &i
+			} else {
+				fs.Debugf(o, "Failed to find parse integer from in %q: %v", contentRange, err)
+			}
+		} else {
+			fs.Debugf(o, "Failed to find length in %q", contentRange)
+		}
+	}
+	o.setMetaData(resp.ETag, size, resp.LastModified, resp.Metadata, resp.ContentType, resp.StorageClass)
 	return resp.Body, nil
 }
 
@@ -2997,9 +3052,9 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 	// calculate size of parts
 	partSize := int(f.opt.ChunkSize)
 
-	// size can be -1 here meaning we don't know the size of the incoming file.  We use ChunkSize
-	// buffers here (default 5MB). With a maximum number of parts (10,000) this will be a file of
-	// 48GB which seems like a not too unreasonable limit.
+	// size can be -1 here meaning we don't know the size of the incoming file. We use ChunkSize
+	// buffers here (default 5 MiB). With a maximum number of parts (10,000) this will be a file of
+	// 48 GiB which seems like a not too unreasonable limit.
 	if size == -1 {
 		warnStreamUpload.Do(func() {
 			fs.Logf(f, "Streaming uploads using chunk size %v will have maximum file size of %v",
@@ -3008,7 +3063,7 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 	} else {
 		// Adjust partSize until the number of parts is small enough.
 		if size/int64(partSize) >= uploadParts {
-			// Calculate partition size rounded up to the nearest MB
+			// Calculate partition size rounded up to the nearest MiB
 			partSize = int((((size / uploadParts) >> 20) + 1) << 20)
 		}
 	}

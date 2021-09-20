@@ -3,8 +3,7 @@ title: "Microsoft OneDrive"
 description: "Rclone docs for Microsoft OneDrive"
 ---
 
-{{< icon "fab fa-windows" >}} Microsoft OneDrive
------------------------------------------
+# {{< icon "fab fa-windows" >}} Microsoft OneDrive
 
 Paths are specified as `remote:path`
 
@@ -129,7 +128,7 @@ Client ID and Key by following the steps below:
 
 1. Open https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade and then click `New registration`.
 2. Enter a name for your app, choose account type `Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)`, select `Web` in `Redirect URI`, then type (do not copy and paste) `http://localhost:53682/` and click Register. Copy and keep the `Application (client) ID` under the app name for later use.
-3. Under `manage` select `Certificates & secrets`, click `New client secret`. Copy and keep that secret for later use.
+3. Under `manage` select `Certificates & secrets`, click `New client secret`. Enter a description (can be anything) and set `Expires` to 24 months. Copy and keep that secret _Value_ for later use (you _won't_ be able to see this value afterwards).
 4. Under `manage` select `API permissions`, click `Add a permission` and select `Microsoft Graph` then select `delegated permissions`.
 5. Search and select the following permissions: `Files.Read`, `Files.ReadWrite`, `Files.Read.All`, `Files.ReadWrite.All`, `offline_access`, `User.Read`. Once selected click `Add permissions` at the bottom.
 
@@ -277,7 +276,7 @@ Note that the chunks will be buffered into memory.
 - Config:      chunk_size
 - Env Var:     RCLONE_ONEDRIVE_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     10M
+- Default:     10Mi
 
 #### --onedrive-drive-id
 
@@ -324,6 +323,15 @@ fall back to normal copy (which will be slightly slower).
 - Env Var:     RCLONE_ONEDRIVE_SERVER_SIDE_ACROSS_CONFIGS
 - Type:        bool
 - Default:     false
+
+#### --onedrive-list-chunk
+
+Size of listing chunk.
+
+- Config:      list_chunk
+- Env Var:     RCLONE_ONEDRIVE_LIST_CHUNK
+- Type:        int
+- Default:     1000
 
 #### --onedrive-no-versions
 
@@ -421,7 +429,7 @@ in it will be mapped to `？` instead.
 
 #### File sizes ####
 
-The largest allowed file size is 250GB for both OneDrive Personal and OneDrive for Business [(Updated 13 Jan 2021)](https://support.microsoft.com/en-us/office/invalid-file-names-and-file-types-in-onedrive-and-sharepoint-64883a5d-228e-48f5-b3d2-eb39e07630fa?ui=en-us&rs=en-us&ad=us#individualfilesize).
+The largest allowed file size is 250 GiB for both OneDrive Personal and OneDrive for Business [(Updated 13 Jan 2021)](https://support.microsoft.com/en-us/office/invalid-file-names-and-file-types-in-onedrive-and-sharepoint-64883a5d-228e-48f5-b3d2-eb39e07630fa?ui=en-us&rs=en-us&ad=us#individualfilesize).
 
 #### Path length ####
 
@@ -508,6 +516,12 @@ is a great way to see what it would do.
 
 ### Troubleshooting ###
 
+#### Excessive throttling or blocked on SharePoint
+
+If you experience excessive throttling or is being blocked on SharePoint then it may help to set the user agent explicitly with a flag like this: `--user-agent "ISV|rclone.org|rclone/v1.55.1"`  
+ 
+The specific details can be found in the Microsoft document: [Avoid getting throttled or blocked in SharePoint Online](https://docs.microsoft.com/en-us/sharepoint/dev/general-development/how-to-avoid-getting-throttled-or-blocked-in-sharepoint-online#how-to-decorate-your-http-traffic-to-avoid-throttling)
+
 #### Unexpected file size/hash differences on Sharepoint ####
 
 It is a
@@ -568,3 +582,12 @@ Description: Due to a configuration change made by your administrator, or becaus
 ```
 
 If you see the error above after enabling multi-factor authentication for your account, you can fix it by refreshing your OAuth refresh token. To do that, run `rclone config`, and choose to edit your OneDrive backend. Then, you don't need to actually make any changes until you reach this question: `Already have a token - refresh?`. For this question, answer `y` and go through the process to refresh your token, just like the first time the backend is configured. After this, rclone should work again for this backend.
+
+#### Invalid request when making public links ####
+
+On Sharepoint and OneDrive for Business, `rclone link` may return an "Invalid
+request" error. A possible cause is that the organisation admin didn't allow
+public links to be made for the organisation/sharepoint library. To fix the
+permissions as an admin, take a look at the docs:
+[1](https://docs.microsoft.com/en-us/sharepoint/turn-external-sharing-on-or-off),
+[2](https://support.microsoft.com/en-us/office/set-up-and-manage-access-requests-94b26e0b-2822-49d4-929a-8455698654b3).

@@ -35,26 +35,26 @@ you expect. Instead use a `--filter...` flag.
 
 Rclone matching rules follow a glob style:
 
-    `*`         matches any sequence of non-separator (`/`) characters
-    `**`        matches any sequence of characters including `/` separators
-    `?`         matches any single non-separator (`/`) character
-    `[` [ `!` ] { character-range } `]`
-                character class (must be non-empty)
-    `{` pattern-list `}`
-                pattern alternatives
-    c           matches character c (c != `*`, `**`, `?`, `\`, `[`, `{`, `}`)
-    `\` c       matches character c
+    *         matches any sequence of non-separator (/) characters
+    **        matches any sequence of characters including / separators
+    ?         matches any single non-separator (/) character
+    [ [ ! ] { character-range } ]
+              character class (must be non-empty)
+    { pattern-list }
+              pattern alternatives
+    c         matches character c (c != *, **, ?, \, [, {, })
+    \c        matches reserved character c (c = *, **, ?, \, [, {, })
 
 character-range:
 
-    c           matches character c (c != `\\`, `-`, `]`)
-    `\` c       matches character c
-    lo `-` hi   matches character c for lo <= c <= hi
+    c         matches character c (c != \, -, ])
+    \c        matches reserved character c (c = \, -, ])
+    lo - hi   matches character c for lo <= c <= hi
 
 pattern-list:
 
-    pattern { `,` pattern }
-                comma-separated (without spaces) patterns
+    pattern { , pattern }
+              comma-separated (without spaces) patterns
 
 character classes (see [Go regular expression reference](https://golang.org/pkg/regexp/syntax/)) include:
 
@@ -586,17 +586,17 @@ remote or flag value. The fix then is to quote values containing spaces.
 ### `--min-size` - Don't transfer any file smaller than this
 
 Controls the minimum size file within the scope of an rclone command.
-Default units are `kBytes` but abbreviations `k`, `M`, or `G` are valid.
+Default units are `KiByte` but abbreviations `K`, `M`, `G`, `T` or `P` are valid.
 
-E.g. `rclone ls remote: --min-size 50k` lists files on `remote:` of 50kByte
+E.g. `rclone ls remote: --min-size 50k` lists files on `remote:` of 50 KiByte
 size or larger.
 
 ### `--max-size` - Don't transfer any file larger than this
 
 Controls the maximum size file within the scope of an rclone command.
-Default units are `kBytes` but abbreviations `k`, `M`, or `G` are valid.
+Default units are `KiByte` but abbreviations `K`, `M`, `G`, `T` or `P` are valid.
 
-E.g. `rclone ls remote: --max-size 1G` lists files on `remote:` of 1GByte
+E.g. `rclone ls remote: --max-size 1G` lists files on `remote:` of 1 GiByte
 size or smaller.
 
 ### `--max-age` - Don't transfer any file older than this
@@ -650,8 +650,8 @@ E.g. the scope of `rclone sync -i A: B:` can be restricted:
 
     rclone --min-size 50k --delete-excluded sync A: B:
 
-All files on `B:` which are less than 50 kBytes are deleted
-because they are excluded from the rclone sync command. 
+All files on `B:` which are less than 50 KiByte are deleted
+because they are excluded from the rclone sync command.
 
 ### `--dump filters` - dump the filters to the output
 

@@ -25,14 +25,19 @@ Run without a hash to see the list of all supported hashes, e.g.
 
     $ rclone hashsum
     Supported hashes are:
-      * MD5
-      * SHA-1
-      * DropboxHash
-      * QuickXorHash
+      * md5
+      * sha1
+      * whirlpool
+      * crc32
+      * dropbox
+      * mailru
+      * quickxor
 
 Then
 
     $ rclone hashsum MD5 remote:path
+
+Note that hash names are case insensitive.
 
 
 ```
@@ -43,6 +48,7 @@ rclone hashsum <hash> remote:path [flags]
 
 ```
       --base64               Output base64 encoded hashsum
+  -C, --checkfile string     Validate hashes against a given SUM file instead of printing them
       --download             Download the file and hash it locally; if this flag is not specified, the hash is requested from the remote
   -h, --help                 help for hashsum
       --output-file string   Output hashsums to a file rather than the terminal

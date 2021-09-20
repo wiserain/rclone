@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -49,35 +48,27 @@ const (
 	rootURL            = "https://jfs.jottacloud.com/jfs/"
 	apiURL             = "https://api.jottacloud.com/"
 	baseURL            = "https://www.jottacloud.com/"
-	defaultTokenURL    = "https://id.jottacloud.com/auth/realms/jottacloud/protocol/openid-connect/token"
 	cachePrefix        = "rclone-jcmd5-"
 	configDevice       = "device"
 	configMountpoint   = "mountpoint"
 	configTokenURL     = "tokenURL"
 	configClientID     = "client_id"
 	configClientSecret = "client_secret"
+	configUsername     = "username"
 	configVersion      = 1
 
-	v1tokenURL              = "https://api.jottacloud.com/auth/v1/token"
-	v1registerURL           = "https://api.jottacloud.com/auth/v1/register"
-	v1ClientID              = "nibfk8biu12ju7hpqomr8b1e40"
-	v1EncryptedClientSecret = "Vp8eAv7eVElMnQwN-kgU9cbhgApNDaMqWdlDi5qFydlQoji4JBxrGMF2"
-	v1configVersion         = 0
+	defaultTokenURL = "https://id.jottacloud.com/auth/realms/jottacloud/protocol/openid-connect/token"
+	defaultClientID = "jottacli"
+
+	legacyTokenURL              = "https://api.jottacloud.com/auth/v1/token"
+	legacyRegisterURL           = "https://api.jottacloud.com/auth/v1/register"
+	legacyClientID              = "nibfk8biu12ju7hpqomr8b1e40"
+	legacyEncryptedClientSecret = "Vp8eAv7eVElMnQwN-kgU9cbhgApNDaMqWdlDi5qFydlQoji4JBxrGMF2"
+	legacyConfigVersion         = 0
 
 	teliaCloudTokenURL = "https://cloud-auth.telia.se/auth/realms/telia_se/protocol/openid-connect/token"
 	teliaCloudAuthURL  = "https://cloud-auth.telia.se/auth/realms/telia_se/protocol/openid-connect/auth"
 	teliaCloudClientID = "desktop"
-)
-
-var (
-	// Description of how to auth for this app for a personal account
-	oauthConfig = &oauth2.Config{
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  defaultTokenURL,
-			TokenURL: defaultTokenURL,
-		},
-		RedirectURL: oauthutil.RedirectLocalhostURL,
-	}
 )
 
 // Register with Fs
@@ -87,42 +78,7 @@ func init() {
 		Name:        "jottacloud",
 		Description: "Jottacloud",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
-			refresh := false
-			if version, ok := m.Get("configVersion"); ok {
-				ver, err := strconv.Atoi(version)
-				if err != nil {
-					log.Fatalf("Failed to parse config version - corrupted config")
-				}
-				refresh = (ver != configVersion) && (ver != v1configVersion)
-			}
-
-			if refresh {
-				fmt.Printf("Config outdated - refreshing\n")
-			} else {
-				tokenString, ok := m.Get("token")
-				if ok && tokenString != "" {
-					fmt.Printf("Already have a token - refresh?\n")
-					if !config.Confirm(false) {
-						return
-					}
-				}
-			}
-
-			fmt.Printf("Choose authentication type:\n" +
-				"1: Standard authentication - use this if you're a normal Jottacloud user.\n" +
-				"2: Legacy authentication - this is only required for certain whitelabel versions of Jottacloud and not recommended for normal users.\n" +
-				"3: Telia Cloud authentication - use this if you are using Telia Cloud.\n")
-
-			switch config.ChooseNumber("Your choice", 1, 3) {
-			case 1:
-				v2config(ctx, name, m)
-			case 2:
-				v1config(ctx, name, m)
-			case 3:
-				teliaCloudConfig(ctx, name, m)
-			}
-		},
+		Config:      Config,
 		Options: []fs.Option{{
 			Name:     "md5_memory_limit",
 			Help:     "Files bigger than this will be cached on disk to calculate the MD5 if required.",
@@ -144,6 +100,11 @@ func init() {
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
 			Advanced: true,
 		}, {
+			Name:     "no_versions",
+			Help:     "Avoid server side versioning by deleting files and recreating files instead of overwriting them.",
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
@@ -157,6 +118,183 @@ func init() {
 	})
 }
 
+// Config runs the backend configuration protocol
+func Config(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
+	switch config.State {
+	case "":
+		return fs.ConfigChooseFixed("auth_type_done", "config_type", `Authentication type`, []fs.OptionExample{{
+			Value: "standard",
+			Help:  "Standard authentication - use this if you're a normal Jottacloud user.",
+		}, {
+			Value: "legacy",
+			Help:  "Legacy authentication - this is only required for certain whitelabel versions of Jottacloud and not recommended for normal users.",
+		}, {
+			Value: "telia",
+			Help:  "Telia Cloud authentication - use this if you are using Telia Cloud.",
+		}})
+	case "auth_type_done":
+		// Jump to next state according to config chosen
+		return fs.ConfigGoto(config.Result)
+	case "standard": // configure a jottacloud backend using the modern JottaCli token based authentication
+		m.Set("configVersion", fmt.Sprint(configVersion))
+		return fs.ConfigInput("standard_token", "config_login_token", "Personal login token.\n\nGenerate here: https://www.jottacloud.com/web/secure")
+	case "standard_token":
+		loginToken := config.Result
+		m.Set(configClientID, defaultClientID)
+		m.Set(configClientSecret, "")
+
+		srv := rest.NewClient(fshttp.NewClient(ctx))
+		token, tokenEndpoint, err := doTokenAuth(ctx, srv, loginToken)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get oauth token")
+		}
+		m.Set(configTokenURL, tokenEndpoint)
+		err = oauthutil.PutToken(name, m, &token, true)
+		if err != nil {
+			return nil, errors.Wrap(err, "error while saving token")
+		}
+		return fs.ConfigGoto("choose_device")
+	case "legacy": // configure a jottacloud backend using legacy authentication
+		m.Set("configVersion", fmt.Sprint(legacyConfigVersion))
+		return fs.ConfigConfirm("legacy_api", false, "config_machine_specific", `Do you want to create a machine specific API key?
+
+Rclone has it's own Jottacloud API KEY which works fine as long as one
+only uses rclone on a single machine. When you want to use rclone with
+this account on more than one machine it's recommended to create a
+machine specific API key. These keys can NOT be shared between
+machines.`)
+	case "legacy_api":
+		srv := rest.NewClient(fshttp.NewClient(ctx))
+		if config.Result == "true" {
+			deviceRegistration, err := registerDevice(ctx, srv)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to register device")
+			}
+			m.Set(configClientID, deviceRegistration.ClientID)
+			m.Set(configClientSecret, obscure.MustObscure(deviceRegistration.ClientSecret))
+			fs.Debugf(nil, "Got clientID %q and clientSecret %q", deviceRegistration.ClientID, deviceRegistration.ClientSecret)
+		}
+		return fs.ConfigInput("legacy_username", "config_username", "Username (e-mail address)")
+	case "legacy_username":
+		m.Set(configUsername, config.Result)
+		return fs.ConfigPassword("legacy_password", "config_password", "Password (only used in setup, will not be stored)")
+	case "legacy_password":
+		m.Set("password", config.Result)
+		m.Set("auth_code", "")
+		return fs.ConfigGoto("legacy_do_auth")
+	case "legacy_auth_code":
+		authCode := strings.Replace(config.Result, "-", "", -1) // remove any "-" contained in the code so we have a 6 digit number
+		m.Set("auth_code", authCode)
+		return fs.ConfigGoto("legacy_do_auth")
+	case "legacy_do_auth":
+		username, _ := m.Get(configUsername)
+		password, _ := m.Get("password")
+		password = obscure.MustReveal(password)
+		authCode, _ := m.Get("auth_code")
+
+		srv := rest.NewClient(fshttp.NewClient(ctx))
+		clientID, ok := m.Get(configClientID)
+		if !ok {
+			clientID = legacyClientID
+		}
+		clientSecret, ok := m.Get(configClientSecret)
+		if !ok {
+			clientSecret = legacyEncryptedClientSecret
+		}
+
+		oauthConfig := &oauth2.Config{
+			Endpoint: oauth2.Endpoint{
+				AuthURL: legacyTokenURL,
+			},
+			ClientID:     clientID,
+			ClientSecret: obscure.MustReveal(clientSecret),
+		}
+		token, err := doLegacyAuth(ctx, srv, oauthConfig, username, password, authCode)
+		if err == errAuthCodeRequired {
+			return fs.ConfigInput("legacy_auth_code", "config_auth_code", "Verification Code\nThis account uses 2 factor authentication you will receive a verification code via SMS.")
+		}
+		m.Set("password", "")
+		m.Set("auth_code", "")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get oauth token")
+		}
+		err = oauthutil.PutToken(name, m, &token, true)
+		if err != nil {
+			return nil, errors.Wrap(err, "error while saving token")
+		}
+		return fs.ConfigGoto("choose_device")
+	case "telia": // telia cloud config
+		m.Set("configVersion", fmt.Sprint(configVersion))
+		m.Set(configClientID, teliaCloudClientID)
+		m.Set(configTokenURL, teliaCloudTokenURL)
+		return oauthutil.ConfigOut("choose_device", &oauthutil.Options{
+			OAuth2Config: &oauth2.Config{
+				Endpoint: oauth2.Endpoint{
+					AuthURL:  teliaCloudAuthURL,
+					TokenURL: teliaCloudTokenURL,
+				},
+				ClientID:    teliaCloudClientID,
+				Scopes:      []string{"openid", "jotta-default", "offline_access"},
+				RedirectURL: oauthutil.RedirectLocalhostURL,
+			},
+		})
+	case "choose_device":
+		return fs.ConfigConfirm("choose_device_query", false, "config_non_standard", "Use a non standard device/mountpoint e.g. for accessing files uploaded using the official Jottacloud client?")
+	case "choose_device_query":
+		if config.Result != "true" {
+			m.Set(configDevice, "")
+			m.Set(configMountpoint, "")
+			return fs.ConfigGoto("end")
+		}
+		oAuthClient, _, err := getOAuthClient(ctx, name, m)
+		if err != nil {
+			return nil, err
+		}
+		srv := rest.NewClient(oAuthClient).SetRoot(rootURL)
+		apiSrv := rest.NewClient(oAuthClient).SetRoot(apiURL)
+
+		cust, err := getCustomerInfo(ctx, apiSrv)
+		if err != nil {
+			return nil, err
+		}
+		m.Set(configUsername, cust.Username)
+
+		acc, err := getDriveInfo(ctx, srv, cust.Username)
+		if err != nil {
+			return nil, err
+		}
+		return fs.ConfigChoose("choose_device_result", "config_device", `Please select the device to use. Normally this will be Jotta`, len(acc.Devices), func(i int) (string, string) {
+			return acc.Devices[i].Name, ""
+		})
+	case "choose_device_result":
+		device := config.Result
+		m.Set(configDevice, device)
+
+		oAuthClient, _, err := getOAuthClient(ctx, name, m)
+		if err != nil {
+			return nil, err
+		}
+		srv := rest.NewClient(oAuthClient).SetRoot(rootURL)
+
+		username, _ := m.Get(configUsername)
+		dev, err := getDeviceInfo(ctx, srv, path.Join(username, device))
+		if err != nil {
+			return nil, err
+		}
+		return fs.ConfigChoose("choose_device_mountpoint", "config_mountpoint", `Please select the mountpoint to use. Normally this will be Archive.`, len(dev.MountPoints), func(i int) (string, string) {
+			return dev.MountPoints[i].Name, ""
+		})
+	case "choose_device_mountpoint":
+		mountpoint := config.Result
+		m.Set(configMountpoint, mountpoint)
+		return fs.ConfigGoto("end")
+	case "end":
+		// All the config flows end up here in case we need to carry on with something
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unknown state %q", config.State)
+}
+
 // Options defines the configuration for this backend
 type Options struct {
 	Device             string               `config:"device"`
@@ -164,6 +302,7 @@ type Options struct {
 	MD5MemoryThreshold fs.SizeSuffix        `config:"md5_memory_limit"`
 	TrashedOnly        bool                 `config:"trashed_only"`
 	HardDelete         bool                 `config:"hard_delete"`
+	NoVersions         bool                 `config:"no_versions"`
 	UploadThreshold    fs.SizeSuffix        `config:"upload_resume_limit"`
 	Enc                encoder.MultiEncoder `config:"encoding"`
 }
@@ -217,10 +356,21 @@ func (f *Fs) Features() *fs.Features {
 	return f.features
 }
 
-// parsePath parses a box 'url'
-func parsePath(path string) (root string) {
-	root = strings.Trim(path, "/")
-	return
+// joinPath joins two path/url elements
+//
+// Does not perform clean on the result like path.Join does,
+// which breaks urls by changing prefix "https://" into "https:/".
+func joinPath(base string, rel string) string {
+	if rel == "" {
+		return base
+	}
+	if strings.HasSuffix(base, "/") {
+		return base + strings.TrimPrefix(rel, "/")
+	}
+	if strings.HasPrefix(rel, "/") {
+		return strings.TrimSuffix(base, "/") + rel
+	}
+	return base + "/" + rel
 }
 
 // retryErrorCodes is a slice of error codes that we will retry
@@ -242,110 +392,6 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 	return fserrors.ShouldRetry(err) || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
 
-func teliaCloudConfig(ctx context.Context, name string, m configmap.Mapper) {
-	teliaCloudOauthConfig := &oauth2.Config{
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  teliaCloudAuthURL,
-			TokenURL: teliaCloudTokenURL,
-		},
-		ClientID:    teliaCloudClientID,
-		Scopes:      []string{"openid", "jotta-default", "offline_access"},
-		RedirectURL: oauthutil.RedirectLocalhostURL,
-	}
-
-	err := oauthutil.Config(ctx, "jottacloud", name, m, teliaCloudOauthConfig, nil)
-	if err != nil {
-		log.Fatalf("Failed to configure token: %v", err)
-		return
-	}
-
-	fmt.Printf("\nDo you want to use a non standard device/mountpoint e.g. for accessing files uploaded using the official Jottacloud client?\n\n")
-	if config.Confirm(false) {
-		oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, teliaCloudOauthConfig)
-		if err != nil {
-			log.Fatalf("Failed to load oAuthClient: %s", err)
-		}
-
-		srv := rest.NewClient(oAuthClient).SetRoot(rootURL)
-		apiSrv := rest.NewClient(oAuthClient).SetRoot(apiURL)
-
-		device, mountpoint, err := setupMountpoint(ctx, srv, apiSrv)
-		if err != nil {
-			log.Fatalf("Failed to setup mountpoint: %s", err)
-		}
-		m.Set(configDevice, device)
-		m.Set(configMountpoint, mountpoint)
-	}
-
-	m.Set("configVersion", strconv.Itoa(configVersion))
-	m.Set(configClientID, teliaCloudClientID)
-	m.Set(configTokenURL, teliaCloudTokenURL)
-}
-
-// v1config configure a jottacloud backend using legacy authentication
-func v1config(ctx context.Context, name string, m configmap.Mapper) {
-	srv := rest.NewClient(fshttp.NewClient(ctx))
-
-	fmt.Printf("\nDo you want to create a machine specific API key?\n\nRclone has it's own Jottacloud API KEY which works fine as long as one only uses rclone on a single machine. When you want to use rclone with this account on more than one machine it's recommended to create a machine specific API key. These keys can NOT be shared between machines.\n\n")
-	if config.Confirm(false) {
-		deviceRegistration, err := registerDevice(ctx, srv)
-		if err != nil {
-			log.Fatalf("Failed to register device: %v", err)
-		}
-
-		m.Set(configClientID, deviceRegistration.ClientID)
-		m.Set(configClientSecret, obscure.MustObscure(deviceRegistration.ClientSecret))
-		fs.Debugf(nil, "Got clientID '%s' and clientSecret '%s'", deviceRegistration.ClientID, deviceRegistration.ClientSecret)
-	}
-
-	clientID, ok := m.Get(configClientID)
-	if !ok {
-		clientID = v1ClientID
-	}
-	clientSecret, ok := m.Get(configClientSecret)
-	if !ok {
-		clientSecret = v1EncryptedClientSecret
-	}
-	oauthConfig.ClientID = clientID
-	oauthConfig.ClientSecret = obscure.MustReveal(clientSecret)
-
-	oauthConfig.Endpoint.AuthURL = v1tokenURL
-	oauthConfig.Endpoint.TokenURL = v1tokenURL
-
-	fmt.Printf("Username> ")
-	username := config.ReadLine()
-	password := config.GetPassword("Your Jottacloud password is only required during setup and will not be stored.")
-
-	token, err := doAuthV1(ctx, srv, username, password)
-	if err != nil {
-		log.Fatalf("Failed to get oauth token: %s", err)
-	}
-	err = oauthutil.PutToken(name, m, &token, true)
-	if err != nil {
-		log.Fatalf("Error while saving token: %s", err)
-	}
-
-	fmt.Printf("\nDo you want to use a non standard device/mountpoint e.g. for accessing files uploaded using the official Jottacloud client?\n\n")
-	if config.Confirm(false) {
-		oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
-		if err != nil {
-			log.Fatalf("Failed to load oAuthClient: %s", err)
-		}
-
-		srv = rest.NewClient(oAuthClient).SetRoot(rootURL)
-		apiSrv := rest.NewClient(oAuthClient).SetRoot(apiURL)
-
-		device, mountpoint, err := setupMountpoint(ctx, srv, apiSrv)
-		if err != nil {
-			log.Fatalf("Failed to setup mountpoint: %s", err)
-		}
-		m.Set(configDevice, device)
-		m.Set(configMountpoint, mountpoint)
-	}
-
-	m.Set("configVersion", strconv.Itoa(v1configVersion))
-}
-
 // registerDevice register a new device for use with the jottacloud API
 func registerDevice(ctx context.Context, srv *rest.Client) (reg *api.DeviceRegistrationResponse, err error) {
 	// random generator to generate random device names
@@ -364,7 +410,7 @@ func registerDevice(ctx context.Context, srv *rest.Client) (reg *api.DeviceRegis
 
 	opts := rest.Opts{
 		Method:       "POST",
-		RootURL:      v1registerURL,
+		RootURL:      legacyRegisterURL,
 		ContentType:  "application/x-www-form-urlencoded",
 		ExtraHeaders: map[string]string{"Authorization": "Bearer c2xrZmpoYWRsZmFramhkc2xma2phaHNkbGZramhhc2xkZmtqaGFzZGxrZmpobGtq"},
 		Parameters:   values,
@@ -375,8 +421,13 @@ func registerDevice(ctx context.Context, srv *rest.Client) (reg *api.DeviceRegis
 	return deviceRegistration, err
 }
 
-// doAuthV1 runs the actual token request for V1 authentication
-func doAuthV1(ctx context.Context, srv *rest.Client, username, password string) (token oauth2.Token, err error) {
+var errAuthCodeRequired = errors.New("auth code required")
+
+// doLegacyAuth runs the actual token request for V1 authentication
+//
+// Call this first with blank authCode. If errAuthCodeRequired is
+// returned then call it again with an authCode
+func doLegacyAuth(ctx context.Context, srv *rest.Client, oauthConfig *oauth2.Config, username, password, authCode string) (token oauth2.Token, err error) {
 	// prepare out token request with username and password
 	values := url.Values{}
 	values.Set("grant_type", "PASSWORD")
@@ -390,22 +441,19 @@ func doAuthV1(ctx context.Context, srv *rest.Client, username, password string) 
 		ContentType: "application/x-www-form-urlencoded",
 		Parameters:  values,
 	}
+	if authCode != "" {
+		opts.ExtraHeaders = make(map[string]string)
+		opts.ExtraHeaders["X-Jottacloud-Otp"] = authCode
+	}
 
 	// do the first request
 	var jsonToken api.TokenJSON
 	resp, err := srv.CallJSON(ctx, &opts, nil, &jsonToken)
-	if err != nil {
+	if err != nil && authCode == "" {
 		// if 2fa is enabled the first request is expected to fail. We will do another request with the 2fa code as an additional http header
 		if resp != nil {
 			if resp.Header.Get("X-JottaCloud-OTP") == "required; SMS" {
-				fmt.Printf("This account uses 2 factor authentication you will receive a verification code via SMS.\n")
-				fmt.Printf("Enter verification code> ")
-				authCode := config.ReadLine()
-
-				authCode = strings.Replace(authCode, "-", "", -1) // remove any "-" contained in the code so we have a 6 digit number
-				opts.ExtraHeaders = make(map[string]string)
-				opts.ExtraHeaders["X-Jottacloud-Otp"] = authCode
-				_, err = srv.CallJSON(ctx, &opts, nil, &jsonToken)
+				return token, errAuthCodeRequired
 			}
 		}
 	}
@@ -417,51 +465,11 @@ func doAuthV1(ctx context.Context, srv *rest.Client, username, password string) 
 	return token, err
 }
 
-// v2config configure a jottacloud backend using the modern JottaCli token based authentication
-func v2config(ctx context.Context, name string, m configmap.Mapper) {
-	srv := rest.NewClient(fshttp.NewClient(ctx))
-
-	fmt.Printf("Generate a personal login token here: https://www.jottacloud.com/web/secure\n")
-	fmt.Printf("Login Token> ")
-	loginToken := config.ReadLine()
-
-	m.Set(configClientID, "jottacli")
-	m.Set(configClientSecret, "")
-
-	token, err := doAuthV2(ctx, srv, loginToken, m)
-	if err != nil {
-		log.Fatalf("Failed to get oauth token: %s", err)
-	}
-	err = oauthutil.PutToken(name, m, &token, true)
-	if err != nil {
-		log.Fatalf("Error while saving token: %s", err)
-	}
-
-	fmt.Printf("\nDo you want to use a non standard device/mountpoint e.g. for accessing files uploaded using the official Jottacloud client?\n\n")
-	if config.Confirm(false) {
-		oAuthClient, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
-		if err != nil {
-			log.Fatalf("Failed to load oAuthClient: %s", err)
-		}
-
-		srv = rest.NewClient(oAuthClient).SetRoot(rootURL)
-		apiSrv := rest.NewClient(oAuthClient).SetRoot(apiURL)
-		device, mountpoint, err := setupMountpoint(ctx, srv, apiSrv)
-		if err != nil {
-			log.Fatalf("Failed to setup mountpoint: %s", err)
-		}
-		m.Set(configDevice, device)
-		m.Set(configMountpoint, mountpoint)
-	}
-
-	m.Set("configVersion", strconv.Itoa(configVersion))
-}
-
-// doAuthV2 runs the actual token request for V2 authentication
-func doAuthV2(ctx context.Context, srv *rest.Client, loginTokenBase64 string, m configmap.Mapper) (token oauth2.Token, err error) {
+// doTokenAuth runs the actual token request for V2 authentication
+func doTokenAuth(ctx context.Context, apiSrv *rest.Client, loginTokenBase64 string) (token oauth2.Token, tokenEndpoint string, err error) {
 	loginTokenBytes, err := base64.RawURLEncoding.DecodeString(loginTokenBase64)
 	if err != nil {
-		return token, err
+		return token, "", err
 	}
 
 	// decode login token
@@ -469,7 +477,7 @@ func doAuthV2(ctx context.Context, srv *rest.Client, loginTokenBase64 string, m 
 	decoder := json.NewDecoder(bytes.NewReader(loginTokenBytes))
 	err = decoder.Decode(&loginToken)
 	if err != nil {
-		return token, err
+		return token, "", err
 	}
 
 	// retrieve endpoint urls
@@ -478,19 +486,14 @@ func doAuthV2(ctx context.Context, srv *rest.Client, loginTokenBase64 string, m 
 		RootURL: loginToken.WellKnownLink,
 	}
 	var wellKnown api.WellKnown
-	_, err = srv.CallJSON(ctx, &opts, nil, &wellKnown)
+	_, err = apiSrv.CallJSON(ctx, &opts, nil, &wellKnown)
 	if err != nil {
-		return token, err
+		return token, "", err
 	}
-
-	// save the tokenurl
-	oauthConfig.Endpoint.AuthURL = wellKnown.TokenEndpoint
-	oauthConfig.Endpoint.TokenURL = wellKnown.TokenEndpoint
-	m.Set(configTokenURL, wellKnown.TokenEndpoint)
 
 	// prepare out token request with username and password
 	values := url.Values{}
-	values.Set("client_id", "jottacli")
+	values.Set("client_id", defaultClientID)
 	values.Set("grant_type", "password")
 	values.Set("password", loginToken.AuthToken)
 	values.Set("scope", "offline_access+openid")
@@ -498,68 +501,33 @@ func doAuthV2(ctx context.Context, srv *rest.Client, loginTokenBase64 string, m 
 	values.Encode()
 	opts = rest.Opts{
 		Method:      "POST",
-		RootURL:     oauthConfig.Endpoint.AuthURL,
+		RootURL:     wellKnown.TokenEndpoint,
 		ContentType: "application/x-www-form-urlencoded",
 		Body:        strings.NewReader(values.Encode()),
 	}
 
 	// do the first request
 	var jsonToken api.TokenJSON
-	_, err = srv.CallJSON(ctx, &opts, nil, &jsonToken)
+	_, err = apiSrv.CallJSON(ctx, &opts, nil, &jsonToken)
 	if err != nil {
-		return token, err
+		return token, "", err
 	}
 
 	token.AccessToken = jsonToken.AccessToken
 	token.RefreshToken = jsonToken.RefreshToken
 	token.TokenType = jsonToken.TokenType
 	token.Expiry = time.Now().Add(time.Duration(jsonToken.ExpiresIn) * time.Second)
-	return token, err
-}
-
-// setupMountpoint sets up a custom device and mountpoint if desired by the user
-func setupMountpoint(ctx context.Context, srv *rest.Client, apiSrv *rest.Client) (device, mountpoint string, err error) {
-	cust, err := getCustomerInfo(ctx, apiSrv)
-	if err != nil {
-		return "", "", err
-	}
-
-	acc, err := getDriveInfo(ctx, srv, cust.Username)
-	if err != nil {
-		return "", "", err
-	}
-	var deviceNames []string
-	for i := range acc.Devices {
-		deviceNames = append(deviceNames, acc.Devices[i].Name)
-	}
-	fmt.Printf("Please select the device to use. Normally this will be Jotta\n")
-	device = config.Choose("Devices", deviceNames, nil, false)
-
-	dev, err := getDeviceInfo(ctx, srv, path.Join(cust.Username, device))
-	if err != nil {
-		return "", "", err
-	}
-	if len(dev.MountPoints) == 0 {
-		return "", "", errors.New("no mountpoints for selected device")
-	}
-	var mountpointNames []string
-	for i := range dev.MountPoints {
-		mountpointNames = append(mountpointNames, dev.MountPoints[i].Name)
-	}
-	fmt.Printf("Please select the mountpoint to user. Normally this will be Archive\n")
-	mountpoint = config.Choose("Mountpoints", mountpointNames, nil, false)
-
-	return device, mountpoint, err
+	return token, wellKnown.TokenEndpoint, err
 }
 
 // getCustomerInfo queries general information about the account
-func getCustomerInfo(ctx context.Context, srv *rest.Client) (info *api.CustomerInfo, err error) {
+func getCustomerInfo(ctx context.Context, apiSrv *rest.Client) (info *api.CustomerInfo, err error) {
 	opts := rest.Opts{
 		Method: "GET",
 		Path:   "account/v1/customer",
 	}
 
-	_, err = srv.CallJSON(ctx, &opts, nil, &info)
+	_, err = apiSrv.CallJSON(ctx, &opts, nil, &info)
 	if err != nil {
 		return nil, errors.Wrap(err, "couldn't get customer info")
 	}
@@ -676,7 +644,7 @@ func (f *Fs) filePath(file string) string {
 // This filter catches all refresh requests, reads the body,
 // changes the case and then sends it on
 func grantTypeFilter(req *http.Request) {
-	if v1tokenURL == req.URL.String() {
+	if legacyTokenURL == req.URL.String() {
 		// read the entire body
 		refreshBody, err := ioutil.ReadAll(req.Body)
 		if err != nil {
@@ -692,53 +660,50 @@ func grantTypeFilter(req *http.Request) {
 	}
 }
 
-// NewFs constructs an Fs from the path, container:path
-func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
-	// Parse config into Options struct
-	opt := new(Options)
-	err := configstruct.Set(m, opt)
-	if err != nil {
-		return nil, err
-	}
-
+func getOAuthClient(ctx context.Context, name string, m configmap.Mapper) (oAuthClient *http.Client, ts *oauthutil.TokenSource, err error) {
 	// Check config version
 	var ver int
 	version, ok := m.Get("configVersion")
 	if ok {
 		ver, err = strconv.Atoi(version)
 		if err != nil {
-			return nil, errors.New("Failed to parse config version")
+			return nil, nil, errors.New("Failed to parse config version")
 		}
-		ok = (ver == configVersion) || (ver == v1configVersion)
+		ok = (ver == configVersion) || (ver == legacyConfigVersion)
 	}
 	if !ok {
-		return nil, errors.New("Outdated config - please reconfigure this backend")
+		return nil, nil, errors.New("Outdated config - please reconfigure this backend")
 	}
 
 	baseClient := fshttp.NewClient(ctx)
-
+	oauthConfig := &oauth2.Config{
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  defaultTokenURL,
+			TokenURL: defaultTokenURL,
+		},
+	}
 	if ver == configVersion {
-		oauthConfig.ClientID = "jottacli"
+		oauthConfig.ClientID = defaultClientID
 		// if custom endpoints are set use them else stick with defaults
 		if tokenURL, ok := m.Get(configTokenURL); ok {
 			oauthConfig.Endpoint.TokenURL = tokenURL
 			// jottacloud is weird. we need to use the tokenURL as authURL
 			oauthConfig.Endpoint.AuthURL = tokenURL
 		}
-	} else if ver == v1configVersion {
+	} else if ver == legacyConfigVersion {
 		clientID, ok := m.Get(configClientID)
 		if !ok {
-			clientID = v1ClientID
+			clientID = legacyClientID
 		}
 		clientSecret, ok := m.Get(configClientSecret)
 		if !ok {
-			clientSecret = v1EncryptedClientSecret
+			clientSecret = legacyEncryptedClientSecret
 		}
 		oauthConfig.ClientID = clientID
 		oauthConfig.ClientSecret = obscure.MustReveal(clientSecret)
 
-		oauthConfig.Endpoint.TokenURL = v1tokenURL
-		oauthConfig.Endpoint.AuthURL = v1tokenURL
+		oauthConfig.Endpoint.TokenURL = legacyTokenURL
+		oauthConfig.Endpoint.AuthURL = legacyTokenURL
 
 		// add the request filter to fix token refresh
 		if do, ok := baseClient.Transport.(interface {
@@ -751,13 +716,29 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 
 	// Create OAuth Client
-	oAuthClient, ts, err := oauthutil.NewClientWithBaseClient(ctx, name, m, oauthConfig, baseClient)
+	oAuthClient, ts, err = oauthutil.NewClientWithBaseClient(ctx, name, m, oauthConfig, baseClient)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to configure Jottacloud oauth client")
+		return nil, nil, errors.Wrap(err, "Failed to configure Jottacloud oauth client")
+	}
+	return oAuthClient, ts, nil
+}
+
+// NewFs constructs an Fs from the path, container:path
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
+	// Parse config into Options struct
+	opt := new(Options)
+	err := configstruct.Set(m, opt)
+	if err != nil {
+		return nil, err
+	}
+
+	oAuthClient, ts, err := getOAuthClient(ctx, name, m)
+	if err != nil {
+		return nil, err
 	}
 
 	rootIsDir := strings.HasSuffix(root, "/")
-	root = parsePath(root)
+	root = strings.Trim(root, "/")
 
 	f := &Fs{
 		name:   name,
@@ -1295,8 +1276,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 	if result.PublicSharePath == "" {
 		return "", errors.New("couldn't create public link - no link path received")
 	}
-	link = path.Join(baseURL, result.PublicSharePath)
-	return link, nil
+	return joinPath(baseURL, result.PublicSharePath), nil
 }
 
 // About gets quota information
@@ -1520,6 +1500,20 @@ func readMD5(in io.Reader, size, threshold int64) (md5sum string, out io.Reader,
 //
 // The new object may have been created if an error is returned
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (err error) {
+	if o.fs.opt.NoVersions {
+		err := o.readMetaData(ctx, false)
+		if err == nil {
+			// if the object exists delete it
+			err = o.remove(ctx, true)
+			if err != nil {
+				return errors.Wrap(err, "failed to remove old object")
+			}
+		}
+		// if the object does not exist we can just continue but if the error is something different we should report that
+		if err != fs.ErrorObjectNotFound {
+			return err
+		}
+	}
 	o.fs.tokenRenewer.Start()
 	defer o.fs.tokenRenewer.Stop()
 	size := src.Size()
@@ -1610,8 +1604,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	return nil
 }
 
-// Remove an object
-func (o *Object) Remove(ctx context.Context) error {
+func (o *Object) remove(ctx context.Context, hard bool) error {
 	opts := rest.Opts{
 		Method:     "POST",
 		Path:       o.filePath(),
@@ -1619,7 +1612,7 @@ func (o *Object) Remove(ctx context.Context) error {
 		NoResponse: true,
 	}
 
-	if o.fs.opt.HardDelete {
+	if hard {
 		opts.Parameters.Set("rm", "true")
 	} else {
 		opts.Parameters.Set("dl", "true")
@@ -1629,6 +1622,11 @@ func (o *Object) Remove(ctx context.Context) error {
 		resp, err := o.fs.srv.CallXML(ctx, &opts, nil, nil)
 		return shouldRetry(ctx, resp, err)
 	})
+}
+
+// Remove an object
+func (o *Object) Remove(ctx context.Context) error {
+	return o.remove(ctx, o.fs.opt.HardDelete)
 }
 
 // Check the interfaces are satisfied

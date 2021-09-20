@@ -69,9 +69,9 @@ func Initialise() {
 	// parse the flags any more so this doesn't happen
 	// automatically
 	if envConfig := os.Getenv("RCLONE_CONFIG"); envConfig != "" {
-		config.ConfigPath = envConfig
+		_ = config.SetConfigPath(envConfig)
 	}
-	configfile.LoadConfig(ctx)
+	configfile.Install()
 	accounting.Start(ctx)
 	if *Verbose {
 		ci.LogLevel = fs.LogLevelDebug

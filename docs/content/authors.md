@@ -372,7 +372,7 @@ put them back in again.` >}}
   * Fred <fred@creativeprojects.tech>
   * Sébastien Gross <renard@users.noreply.github.com>
   * Maxime Suret <11944422+msuret@users.noreply.github.com>
-  * Caleb Case <caleb@storj.io>
+  * Caleb Case <caleb@storj.io> <calebcase@gmail.com>
   * Ben Zenker <imbenzenker@gmail.com>
   * Martin Michlmayr <tbm@cyrius.com>
   * Brandon McNama <bmcnama@pagerduty.com>
@@ -431,7 +431,7 @@ put them back in again.` >}}
   * Laurens Janssen <BD69BM@insim.biz>
   * Bob Bagwill <bobbagwill@gmail.com>
   * Nathan Collins <colli372@msu.edu>
-  * lostheli <unknown>
+  * lostheli
   * kelv <kelvin@acks.org>
   * Milly <milly.ca@gmail.com>
   * gtorelly <gtorelly@gmail.com>
@@ -478,3 +478,36 @@ put them back in again.` >}}
   * Manish Kumar <krmanish260@gmail.com>
   * x0b <x0bdev@gmail.com>
   * CERN through the CS3MESH4EOSC Project
+  * Nick Gaya <nicholasgaya+github@gmail.com>
+  * Ashok Gelal <401055+ashokgelal@users.noreply.github.com>
+  * Dominik Mydlil <dominik.mydlil@outlook.com>
+  * Nazar Mishturak <nazarmx@gmail.com>
+  * Ansh Mittal <iamAnshMittal@gmail.com>
+  * noabody <noabody@yahoo.com>
+  * OleFrost <82263101+olefrost@users.noreply.github.com>
+  * Kenny Parsons <kennyparsons93@gmail.com>
+  * Jeffrey Tolar <tolar.jeffrey@gmail.com>
+  * jtagcat <git-514635f7@jtag.cat>
+  * Tatsuya Noyori <63089076+public-tatsuya-noyori@users.noreply.github.com>
+  * lewisxy <lewisxy@users.noreply.github.com>
+  * Nolan Woods <nolan_w@sfu.ca>
+  * Gautam Kumar <25435568+gautamajay52@users.noreply.github.com>
+  * Chris Macklin <chris.macklin@10xgenomics.com>
+  * Antoon Prins <antoon.prins@surfsara.nl>
+  * Alexey Ivanov <rbtz@dropbox.com>
+  * Serge Pouliquen <sp31415@free.fr>
+  * acsfer <carlos@reendex.com>
+  * Tom <tom@tom-fitzhenry.me.uk>
+  * Tyson Moore <tyson@tyson.me>
+  * database64128 <free122448@hotmail.com>
+  * Chris Lu <chrislusf@users.noreply.github.com>
+  * Reid Buzby <reid@rethink.software>
+  * darrenrhs <darrenrhs@gmail.com>
+  * Florian Penzkofer <fp@nullptr.de>
+  * Xuanchen Wu <117010292@link.cuhk.edu.cn>
+  * partev <petrosyan@gmail.com>
+  * Dmitry Sitnikov <fo2@inbox.ru>
+  * Haochen Tong <i@hexchain.org>
+  * Michael Hanselmann <public@hansmi.ch>
+  * Chuan Zh <zhchuan7@gmail.com>
+  * Antoine GIRARD <antoine.girard@sapk.fr>

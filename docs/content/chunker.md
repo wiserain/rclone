@@ -3,8 +3,7 @@ title: "Chunker"
 description: "Split-chunking overlay remote"
 ---
 
-{{< icon "fa fa-cut" >}}Chunker (BETA)
-----------------------------------------
+# {{< icon "fa fa-cut" >}}Chunker (BETA)
 
 The `chunker` overlay transparently splits large files into smaller chunks
 during upload to wrapped remote and transparently assembles them back
@@ -43,7 +42,7 @@ Normally should contain a ':' and a path, e.g. "myremote:path/to/dir",
 Enter a string value. Press Enter for the default ("").
 remote> remote:path
 Files larger than chunk size will be split in chunks.
-Enter a size with suffix k,M,G,T. Press Enter for the default ("2G").
+Enter a size with suffix K,M,G,T. Press Enter for the default ("2G").
 chunk_size> 100M
 Choose how chunker handles hash sums. All modes but "none" require metadata.
 Enter a string value. Press Enter for the default ("md5").
@@ -332,7 +331,7 @@ Files larger than chunk size will be split in chunks.
 - Config:      chunk_size
 - Env Var:     RCLONE_CHUNKER_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     2G
+- Default:     2Gi
 
 #### --chunker-hash-type
 

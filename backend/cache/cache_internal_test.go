@@ -1,5 +1,5 @@
-// +build !plan9,!js
-// +build !race
+//go:build !plan9 && !js && !race
+// +build !plan9,!js,!race
 
 package cache_test
 
@@ -836,7 +836,7 @@ func newRun() *run {
 	if uploadDir == "" {
 		r.tmpUploadDir, err = ioutil.TempDir("", "rclonecache-tmp")
 		if err != nil {
-			log.Fatalf("Failed to create temp dir: %v", err)
+			panic(fmt.Sprintf("Failed to create temp dir: %v", err))
 		}
 	} else {
 		r.tmpUploadDir = uploadDir

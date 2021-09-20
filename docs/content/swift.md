@@ -3,8 +3,7 @@ title: "Swift"
 description: "Swift"
 ---
 
-{{< icon "fa fa-space-shuttle" >}}Swift
-----------------------------------------
+# {{< icon "fa fa-space-shuttle" >}}Swift
 
 Swift refers to [OpenStack Object Storage](https://docs.openstack.org/swift/latest/).
 Commercial implementations of that being:
@@ -444,12 +443,12 @@ If true avoid calling abort upload on a failure. It should be set to true for re
 Above this size files will be chunked into a _segments container.
 
 Above this size files will be chunked into a _segments container.  The
-default for this is 5GB which is its maximum value.
+default for this is 5 GiB which is its maximum value.
 
 - Config:      chunk_size
 - Env Var:     RCLONE_SWIFT_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     5G
+- Default:     5Gi
 
 #### --swift-no-chunk
 
@@ -458,7 +457,7 @@ Don't chunk files during streaming upload.
 When doing streaming uploads (e.g. using rcat or mount) setting this
 flag will cause the swift backend to not upload chunked files.
 
-This will limit the maximum upload size to 5GB. However non chunked
+This will limit the maximum upload size to 5 GiB. However non chunked
 files are easier to deal with and have an MD5SUM.
 
 Rclone will still chunk files bigger than chunk_size when doing normal

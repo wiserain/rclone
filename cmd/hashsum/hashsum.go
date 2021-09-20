@@ -15,11 +15,12 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Global hashsum flags for reuse in md5sum, sha1sum, and dbhashsum
+// Global hashsum flags for reuse in hashsum, md5sum, sha1sum
 var (
 	OutputBase64   = false
 	DownloadFlag   = false
 	HashsumOutfile = ""
+	ChecksumFile   = ""
 )
 
 func init() {
@@ -28,10 +29,11 @@ func init() {
 	AddHashFlags(cmdFlags)
 }
 
-// AddHashFlags is a convenience function to add the command flags OutputBase64 and DownloadFlag to hashsum, md5sum, sha1sum, and dbhashsum
+// AddHashFlags is a convenience function to add the command flags OutputBase64 and DownloadFlag to hashsum, md5sum, sha1sum
 func AddHashFlags(cmdFlags *pflag.FlagSet) {
 	flags.BoolVarP(cmdFlags, &OutputBase64, "base64", "", OutputBase64, "Output base64 encoded hashsum")
 	flags.StringVarP(cmdFlags, &HashsumOutfile, "output-file", "", HashsumOutfile, "Output hashsums to a file rather than the terminal")
+	flags.StringVarP(cmdFlags, &ChecksumFile, "checkfile", "C", ChecksumFile, "Validate hashes against a given SUM file instead of printing them")
 	flags.BoolVarP(cmdFlags, &DownloadFlag, "download", "", DownloadFlag, "Download the file and hash it locally; if this flag is not specified, the hash is requested from the remote")
 }
 
@@ -69,23 +71,17 @@ hashed locally enabling any hash for any remote.
 Run without a hash to see the list of all supported hashes, e.g.
 
     $ rclone hashsum
-    Supported hashes are:
-      * MD5
-      * SHA-1
-      * DropboxHash
-      * QuickXorHash
-
+` + hash.HelpString(4) + `
 Then
 
     $ rclone hashsum MD5 remote:path
+
+Note that hash names are case insensitive.
 `,
 	RunE: func(command *cobra.Command, args []string) error {
 		cmd.CheckArgs(0, 2, command, args)
 		if len(args) == 0 {
-			fmt.Printf("Supported hashes are:\n")
-			for _, ht := range hash.Supported().Array() {
-				fmt.Printf("  * %v\n", ht)
-			}
+			fmt.Print(hash.HelpString(0))
 			return nil
 		} else if len(args) == 1 {
 			return errors.New("need hash type and remote")
@@ -93,11 +89,16 @@ Then
 		var ht hash.Type
 		err := ht.Set(args[0])
 		if err != nil {
+			fmt.Println(hash.HelpString(0))
 			return err
 		}
 		fsrc := cmd.NewFsSrc(args[1:])
 
 		cmd.Run(false, false, command, func() error {
+			if ChecksumFile != "" {
+				fsum, sumFile := cmd.NewFsFile(ChecksumFile)
+				return operations.CheckSum(context.Background(), fsrc, fsum, sumFile, ht, nil, DownloadFlag)
+			}
 			if HashsumOutfile == "" {
 				return operations.HashLister(context.Background(), ht, OutputBase64, DownloadFlag, fsrc, nil)
 			}

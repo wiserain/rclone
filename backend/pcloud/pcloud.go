@@ -12,7 +12,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -72,7 +71,7 @@ func init() {
 		Name:        "pcloud",
 		Description: "Pcloud",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 			optc := new(Options)
 			err := configstruct.Set(m, optc)
 			if err != nil {
@@ -94,14 +93,11 @@ func init() {
 				fs.Debugf(nil, "pcloud: got hostname %q", hostname)
 				return nil
 			}
-			opt := oauthutil.Options{
+			return oauthutil.ConfigOut("", &oauthutil.Options{
+				OAuth2Config: oauthConfig,
 				CheckAuth:    checkAuth,
 				StateBlankOK: true, // pCloud seems to drop the state parameter now - see #4210
-			}
-			err = oauthutil.Config(ctx, "pcloud", name, m, oauthConfig, &opt)
-			if err != nil {
-				log.Fatalf("Failed to configure token: %v", err)
-			}
+			})
 		},
 		Options: append(oauthutil.SharedOptions, []fs.Option{{
 			Name:     config.ConfigEncoding,
@@ -1096,6 +1092,10 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	modTime := src.ModTime(ctx)
 	remote := o.Remote()
 
+	if size < 0 {
+		return errors.New("can't upload unknown sizes objects")
+	}
+
 	// Create the directory for the object if it doesn't exist
 	leaf, directoryID, err := o.fs.dirCache.FindPath(ctx, remote, true)
 	if err != nil {
@@ -1158,10 +1158,14 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	})
 	if err != nil {
 		// sometimes pcloud leaves a half complete file on
-		// error, so delete it if it exists
-		delObj, delErr := o.fs.NewObject(ctx, o.remote)
-		if delErr == nil && delObj != nil {
-			_ = delObj.Remove(ctx)
+		// error, so delete it if it exists, trying a few times
+		for i := 0; i < 5; i++ {
+			delObj, delErr := o.fs.NewObject(ctx, o.remote)
+			if delErr == nil && delObj != nil {
+				_ = delObj.Remove(ctx)
+				break
+			}
+			time.Sleep(time.Second)
 		}
 		return err
 	}

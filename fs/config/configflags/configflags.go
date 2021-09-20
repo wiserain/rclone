@@ -6,7 +6,6 @@ package configflags
 import (
 	"log"
 	"net"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -23,6 +22,7 @@ var (
 	// these will get interpreted into fs.Config via SetFlags() below
 	verbose         int
 	quiet           bool
+	configPath      string
 	dumpHeaders     bool
 	dumpBodies      bool
 	deleteBefore    bool
@@ -45,7 +45,7 @@ func AddFlags(ci *fs.ConfigInfo, flagSet *pflag.FlagSet) {
 	flags.DurationVarP(flagSet, &ci.ModifyWindow, "modify-window", "", ci.ModifyWindow, "Max time diff to be considered the same")
 	flags.IntVarP(flagSet, &ci.Checkers, "checkers", "", ci.Checkers, "Number of checkers to run in parallel.")
 	flags.IntVarP(flagSet, &ci.Transfers, "transfers", "", ci.Transfers, "Number of file transfers to run in parallel.")
-	flags.StringVarP(flagSet, &config.ConfigPath, "config", "", config.ConfigPath, "Config file.")
+	flags.StringVarP(flagSet, &configPath, "config", "", config.GetConfigPath(), "Config file.")
 	flags.StringVarP(flagSet, &config.CacheDir, "cache-dir", "", config.CacheDir, "Directory rclone will use for caching.")
 	flags.BoolVarP(flagSet, &ci.CheckSum, "checksum", "c", ci.CheckSum, "Skip based on checksum (if available) & size, not mod-time & size")
 	flags.BoolVarP(flagSet, &ci.SizeOnly, "size-only", "", ci.SizeOnly, "Skip based on size only, not mod-time or checksum")
@@ -90,15 +90,15 @@ func AddFlags(ci *fs.ConfigInfo, flagSet *pflag.FlagSet) {
 	flags.Float64VarP(flagSet, &ci.TPSLimit, "tpslimit", "", ci.TPSLimit, "Limit HTTP transactions per second to this.")
 	flags.IntVarP(flagSet, &ci.TPSLimitBurst, "tpslimit-burst", "", ci.TPSLimitBurst, "Max burst of transactions for --tpslimit.")
 	flags.StringVarP(flagSet, &bindAddr, "bind", "", "", "Local address to bind to for outgoing connections, IPv4, IPv6 or name.")
-	flags.StringVarP(flagSet, &disableFeatures, "disable", "", "", "Disable a comma separated list of features.  Use help to see a list.")
+	flags.StringVarP(flagSet, &disableFeatures, "disable", "", "", "Disable a comma separated list of features.  Use --disable help to see a list.")
 	flags.StringVarP(flagSet, &ci.UserAgent, "user-agent", "", ci.UserAgent, "Set the user-agent to a specified string. The default is rclone/ version")
 	flags.BoolVarP(flagSet, &ci.Immutable, "immutable", "", ci.Immutable, "Do not modify files. Fail if existing files have been modified.")
 	flags.BoolVarP(flagSet, &ci.AutoConfirm, "auto-confirm", "", ci.AutoConfirm, "If enabled, do not request console confirmation.")
 	flags.IntVarP(flagSet, &ci.StatsFileNameLength, "stats-file-name-length", "", ci.StatsFileNameLength, "Max file name length in stats. 0 for no limit")
 	flags.FVarP(flagSet, &ci.LogLevel, "log-level", "", "Log level DEBUG|INFO|NOTICE|ERROR")
 	flags.FVarP(flagSet, &ci.StatsLogLevel, "stats-log-level", "", "Log level to show --stats output DEBUG|INFO|NOTICE|ERROR")
-	flags.FVarP(flagSet, &ci.BwLimit, "bwlimit", "", "Bandwidth limit in kBytes/s, or use suffix b|k|M|G or a full timetable.")
-	flags.FVarP(flagSet, &ci.BwLimitFile, "bwlimit-file", "", "Bandwidth limit per file in kBytes/s, or use suffix b|k|M|G or a full timetable.")
+	flags.FVarP(flagSet, &ci.BwLimit, "bwlimit", "", "Bandwidth limit in KiByte/s, or use suffix B|K|M|G|T|P or a full timetable.")
+	flags.FVarP(flagSet, &ci.BwLimitFile, "bwlimit-file", "", "Bandwidth limit per file in KiByte/s, or use suffix B|K|M|G|T|P or a full timetable.")
 	flags.FVarP(flagSet, &ci.BufferSize, "buffer-size", "", "In memory buffer size when reading files for each --transfer.")
 	flags.FVarP(flagSet, &ci.StreamingUploadCutoff, "streaming-upload-cutoff", "", "Cutoff for switching to chunked upload if file size is unknown. Upload starts after reaching cutoff or when file ends.")
 	flags.FVarP(flagSet, &ci.Dump, "dump", "", "List of items to dump from: "+fs.DumpFlagsList)
@@ -130,6 +130,7 @@ func AddFlags(ci *fs.ConfigInfo, flagSet *pflag.FlagSet) {
 	flags.StringVarP(flagSet, &dscp, "dscp", "", "", "Set DSCP value to connections. Can be value or names, eg. CS1, LE, DF, AF21.")
 	flags.DurationVarP(flagSet, &ci.FsCacheExpireDuration, "fs-cache-expire-duration", "", ci.FsCacheExpireDuration, "cache remotes for this long (0 to disable caching)")
 	flags.DurationVarP(flagSet, &ci.FsCacheExpireInterval, "fs-cache-expire-interval", "", ci.FsCacheExpireInterval, "interval to check for expired remotes")
+	flags.BoolVarP(flagSet, &ci.DisableHTTP2, "disable-http2", "", ci.DisableHTTP2, "Disable HTTP/2 in the global transport.")
 }
 
 // ParseHeaders converts the strings passed in via the header flags into HTTPOptions
@@ -151,6 +152,19 @@ func ParseHeaders(headers []string) []*fs.HTTPOption {
 
 // SetFlags converts any flags into config which weren't straight forward
 func SetFlags(ci *fs.ConfigInfo) {
+	if dumpHeaders {
+		ci.Dump |= fs.DumpHeaders
+		fs.Logf(nil, "--dump-headers is obsolete - please use --dump headers instead")
+	}
+	if dumpBodies {
+		ci.Dump |= fs.DumpBodies
+		fs.Logf(nil, "--dump-bodies is obsolete - please use --dump bodies instead")
+	}
+	if ci.Dump != 0 && verbose < 2 && ci.LogLevel != fs.LogLevelDebug {
+		fs.Logf(nil, "Automatically setting -vv as --dump is enabled")
+		verbose = 2
+	}
+
 	if verbose >= 2 {
 		ci.LogLevel = fs.LogLevelDebug
 	} else if verbose >= 1 {
@@ -194,15 +208,6 @@ func SetFlags(ci *fs.ConfigInfo) {
 		case fs.LogLevelDebug:
 			logrus.SetLevel(logrus.DebugLevel)
 		}
-	}
-
-	if dumpHeaders {
-		ci.Dump |= fs.DumpHeaders
-		fs.Logf(nil, "--dump-headers is obsolete - please use --dump headers instead")
-	}
-	if dumpBodies {
-		ci.Dump |= fs.DumpBodies
-		fs.Logf(nil, "--dump-bodies is obsolete - please use --dump bodies instead")
 	}
 
 	switch {
@@ -267,10 +272,9 @@ func SetFlags(ci *fs.ConfigInfo) {
 		}
 	}
 
-	// Make the config file absolute
-	configPath, err := filepath.Abs(config.ConfigPath)
-	if err == nil {
-		config.ConfigPath = configPath
+	// Set path to configuration file
+	if err := config.SetConfigPath(configPath); err != nil {
+		log.Fatalf("--config: Failed to set %q as config path: %v", configPath, err)
 	}
 
 	// Set whether multi-thread-streams was set

@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -84,7 +83,7 @@ func init() {
 		Name:        "box",
 		Description: "Box",
 		NewFs:       NewFs,
-		Config: func(ctx context.Context, name string, m configmap.Mapper) {
+		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 			jsonFile, ok := m.Get("box_config_file")
 			boxSubType, boxSubTypeOk := m.Get("box_sub_type")
 			boxAccessToken, boxAccessTokenOk := m.Get("access_token")
@@ -93,15 +92,15 @@ func init() {
 			if ok && boxSubTypeOk && jsonFile != "" && boxSubType != "" {
 				err = refreshJWTToken(ctx, jsonFile, boxSubType, name, m)
 				if err != nil {
-					log.Fatalf("Failed to configure token with jwt authentication: %v", err)
+					return nil, errors.Wrap(err, "failed to configure token with jwt authentication")
 				}
 				// Else, if not using an access token, use oauth2
 			} else if boxAccessToken == "" || !boxAccessTokenOk {
-				err = oauthutil.Config(ctx, "box", name, m, oauthConfig, nil)
-				if err != nil {
-					log.Fatalf("Failed to configure token with oauth authentication: %v", err)
-				}
+				return oauthutil.ConfigOut("", &oauthutil.Options{
+					OAuth2Config: oauthConfig,
+				})
 			}
+			return nil, nil
 		},
 		Options: append(oauthutil.SharedOptions, []fs.Option{{
 			Name:     "root_folder_id",
@@ -126,7 +125,7 @@ func init() {
 			}},
 		}, {
 			Name:     "upload_cutoff",
-			Help:     "Cutoff for switching to multipart upload (>= 50MB).",
+			Help:     "Cutoff for switching to multipart upload (>= 50 MiB).",
 			Default:  fs.SizeSuffix(defaultUploadCutoff),
 			Advanced: true,
 		}, {
@@ -157,15 +156,15 @@ func refreshJWTToken(ctx context.Context, jsonFile string, boxSubType string, na
 	jsonFile = env.ShellExpand(jsonFile)
 	boxConfig, err := getBoxConfig(jsonFile)
 	if err != nil {
-		log.Fatalf("Failed to configure token: %v", err)
+		return errors.Wrap(err, "get box config")
 	}
 	privateKey, err := getDecryptedPrivateKey(boxConfig)
 	if err != nil {
-		log.Fatalf("Failed to configure token: %v", err)
+		return errors.Wrap(err, "get decrypted private key")
 	}
 	claims, err := getClaims(boxConfig, boxSubType)
 	if err != nil {
-		log.Fatalf("Failed to configure token: %v", err)
+		return errors.Wrap(err, "get claims")
 	}
 	signingHeaders := getSigningHeaders(boxConfig)
 	queryParams := getQueryParams(boxConfig)
@@ -686,22 +685,80 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	return o, leaf, directoryID, nil
 }
 
+// preUploadCheck checks to see if a file can be uploaded
+//
+// It returns "", nil if the file is good to go
+// It returns "ID", nil if the file must be updated
+func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string, size int64) (ID string, err error) {
+	check := api.PreUploadCheck{
+		Name: f.opt.Enc.FromStandardName(leaf),
+		Parent: api.Parent{
+			ID: directoryID,
+		},
+	}
+	if size >= 0 {
+		check.Size = &size
+	}
+	opts := rest.Opts{
+		Method: "OPTIONS",
+		Path:   "/files/content/",
+	}
+	var result api.PreUploadCheckResponse
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, &check, &result)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		if apiErr, ok := err.(*api.Error); ok && apiErr.Code == "item_name_in_use" {
+			var conflict api.PreUploadCheckConflict
+			err = json.Unmarshal(apiErr.ContextInfo, &conflict)
+			if err != nil {
+				return "", errors.Wrap(err, "pre-upload check: JSON decode failed")
+			}
+			if conflict.Conflicts.Type != api.ItemTypeFile {
+				return "", errors.Wrap(err, "pre-upload check: can't overwrite non file with file")
+			}
+			return conflict.Conflicts.ID, nil
+		}
+		return "", errors.Wrap(err, "pre-upload check")
+	}
+	return "", nil
+}
+
 // Put the object
 //
 // Copy the reader in to the new object which is returned
 //
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	existingObj, err := f.newObjectWithInfo(ctx, src.Remote(), nil)
-	switch err {
-	case nil:
-		return existingObj, existingObj.Update(ctx, in, src, options...)
-	case fs.ErrorObjectNotFound:
-		// Not found so create it
-		return f.PutUnchecked(ctx, in, src)
-	default:
+	// If directory doesn't exist, file doesn't exist so can upload
+	remote := src.Remote()
+	leaf, directoryID, err := f.dirCache.FindPath(ctx, remote, false)
+	if err != nil {
+		if err == fs.ErrorDirNotFound {
+			return f.PutUnchecked(ctx, in, src, options...)
+		}
 		return nil, err
 	}
+
+	// Preflight check the upload, which returns the ID if the
+	// object already exists
+	ID, err := f.preUploadCheck(ctx, leaf, directoryID, src.Size())
+	if err != nil {
+		return nil, err
+	}
+	if ID == "" {
+		return f.PutUnchecked(ctx, in, src, options...)
+	}
+
+	// If object exists then create a skeleton one with just id
+	o := &Object{
+		fs:     f,
+		remote: remote,
+		id:     ID,
+	}
+	return o, o.Update(ctx, in, src, options...)
 }
 
 // PutStream uploads to the remote path with the modTime given of indeterminate size
@@ -1228,7 +1285,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // upload does a single non-multipart upload
 //
-// This is recommended for less than 50 MB of content
+// This is recommended for less than 50 MiB of content
 func (o *Object) upload(ctx context.Context, in io.Reader, leaf, directoryID string, modTime time.Time, options ...fs.OpenOption) (err error) {
 	upload := api.UploadFile{
 		Name:              o.fs.opt.Enc.FromStandardName(leaf),

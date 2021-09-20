@@ -23,6 +23,7 @@ docs = [
     "rc.md",
     "overview.md",
     "flags.md",
+    "docker.md",
 
     # Keep these alphabetical by full name
     "fichier.md",
@@ -62,6 +63,7 @@ docs = [
     "sftp.md",
     "sugarsync.md",
     "tardigrade.md",
+    "uptobox.md",
     "union.md",
     "webdav.md",
     "yandex.md",

@@ -1,6 +1,7 @@
 // Package qingstor provides an interface to QingStor object storage
 // Home: https://www.qingcloud.com/
 
+//go:build !plan9 && !js
 // +build !plan9,!js
 
 package qingstor
@@ -80,7 +81,7 @@ func init() {
 			Help: `Cutoff for switching to chunked upload
 
 Any files larger than this will be uploaded in chunks of chunk_size.
-The minimum is 0 and the maximum is 5GB.`,
+The minimum is 0 and the maximum is 5 GiB.`,
 			Default:  defaultUploadCutoff,
 			Advanced: true,
 		}, {

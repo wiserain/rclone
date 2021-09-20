@@ -3,8 +3,7 @@ title: "QingStor"
 description: "Rclone docs for QingStor Object Storage"
 ---
 
-{{< icon "fas fa-hdd" >}} QingStor
----------------------------------------
+# {{< icon "fas fa-hdd" >}} QingStor
 
 Paths are specified as `remote:bucket` (or `remote:` for the `lsd`
 command.)  You may put subdirectories in too, e.g. `remote:bucket/path/to/dir`.
@@ -101,7 +100,7 @@ docs](/docs/#fast-list) for more details.
 ### Multipart uploads ###
 
 rclone supports multipart uploads with QingStor which means that it can
-upload files bigger than 5GB. Note that files uploaded with multipart
+upload files bigger than 5 GiB. Note that files uploaded with multipart
 upload don't have an MD5SUM.
 
 Note that incomplete multipart uploads older than 24 hours can be
@@ -227,12 +226,12 @@ Number of connection retries.
 Cutoff for switching to chunked upload
 
 Any files larger than this will be uploaded in chunks of chunk_size.
-The minimum is 0 and the maximum is 5GB.
+The minimum is 0 and the maximum is 5 GiB.
 
 - Config:      upload_cutoff
 - Env Var:     RCLONE_QINGSTOR_UPLOAD_CUTOFF
 - Type:        SizeSuffix
-- Default:     200M
+- Default:     200Mi
 
 #### --qingstor-chunk-size
 
@@ -250,7 +249,7 @@ enough memory, then increasing this will speed up the transfers.
 - Config:      chunk_size
 - Env Var:     RCLONE_QINGSTOR_CHUNK_SIZE
 - Type:        SizeSuffix
-- Default:     4M
+- Default:     4Mi
 
 #### --qingstor-upload-concurrency
 

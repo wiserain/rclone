@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/skratchdot/open-golang/open"
@@ -166,9 +168,11 @@ type TokenSource struct {
 	expiryTimer *time.Timer // signals whenever the token expires
 }
 
-// If token has expired then first try re-reading it from the config
-// file in case a concurrently running rclone has updated it already
-func (ts *TokenSource) reReadToken() bool {
+// If token has expired then first try re-reading it (and its refresh token)
+// from the config file in case a concurrently running rclone has updated them
+// already.
+// Returns whether either of the two tokens has been reread.
+func (ts *TokenSource) reReadToken() (changed bool) {
 	tokenString, found := ts.m.Get(config.ConfigToken)
 	if !found || tokenString == "" {
 		fs.Debugf(ts.name, "Failed to read token out of config file")
@@ -180,14 +184,23 @@ func (ts *TokenSource) reReadToken() bool {
 		fs.Debugf(ts.name, "Failed to parse token out of config file: %v", err)
 		return false
 	}
+
 	if !newToken.Valid() {
 		fs.Debugf(ts.name, "Loaded invalid token from config file - ignoring")
-		return false
+	} else {
+		fs.Debugf(ts.name, "Loaded fresh token from config file")
+		changed = true
 	}
-	fs.Debugf(ts.name, "Loaded fresh token from config file")
-	ts.token = newToken
-	ts.tokenSource = nil // invalidate since we changed the token
-	return true
+	if newToken.RefreshToken != "" && newToken.RefreshToken != ts.token.RefreshToken {
+		fs.Debugf(ts.name, "Loaded new refresh token from config file")
+		changed = true
+	}
+
+	if changed {
+		ts.token = newToken
+		ts.tokenSource = nil // invalidate since we changed the token
+	}
+	return changed
 }
 
 // Token returns a token or an error.
@@ -212,6 +225,10 @@ func (ts *TokenSource) Token() (*oauth2.Token, error) {
 		if !ts.token.Valid() {
 			if ts.reReadToken() {
 				changed = true
+			} else if ts.token.RefreshToken == "" {
+				return nil, fserrors.FatalError(
+					fmt.Errorf("token expired and there's no refresh token - manually refresh with \"rclone config reconnect %s:\"", ts.name),
+				)
 			}
 		}
 
@@ -377,68 +394,94 @@ type CheckAuthFn func(*oauth2.Config, *AuthResult) error
 
 // Options for the oauth config
 type Options struct {
+	OAuth2Config *oauth2.Config          // Basic config for oauth2
 	NoOffline    bool                    // If set then "access_type=offline" parameter is not passed
 	CheckAuth    CheckAuthFn             // When the AuthResult is known the checkAuth function is called if set
 	OAuth2Opts   []oauth2.AuthCodeOption // extra oauth2 options
 	StateBlankOK bool                    // If set, state returned as "" is deemed to be OK
 }
 
-// Config does the initial creation of the token
+// ConfigOut returns a config item suitable for the backend config
 //
-// If opt is nil it will use the default Options
+// state is the place to return the config to
+// oAuth is the config to run the oauth with
+func ConfigOut(state string, oAuth *Options) (*fs.ConfigOut, error) {
+	return &fs.ConfigOut{
+		State: state,
+		OAuth: oAuth,
+	}, nil
+}
+
+// ConfigOAuth does the oauth config specified in the config block
 //
-// It may run an internal webserver to receive the results
-func Config(ctx context.Context, id, name string, m configmap.Mapper, oauthConfig *oauth2.Config, opt *Options) error {
-	if opt == nil {
-		opt = &Options{}
-	}
-	oauthConfig, changed := overrideCredentials(name, m, oauthConfig)
-	authorizeOnlyValue, ok := m.Get(config.ConfigAuthorize)
-	authorizeOnly := ok && authorizeOnlyValue != "" // set if being run by "rclone authorize"
-	authorizeNoAutoBrowserValue, ok := m.Get(config.ConfigAuthNoBrowser)
-	authorizeNoAutoBrowser := ok && authorizeNoAutoBrowserValue != ""
+// This is called with a state which has pushed on it
+//
+//    state prefixed with "*oauth"
+//    state for oauth to return to
+//    state that returned the OAuth when we wish to recall it
+//    value that returned the OAuth
+func ConfigOAuth(ctx context.Context, name string, m configmap.Mapper, ri *fs.RegInfo, in fs.ConfigIn) (*fs.ConfigOut, error) {
+	stateParams, state := fs.StatePop(in.State)
 
-	// See if already have a token
-	tokenString, ok := m.Get("token")
-	if ok && tokenString != "" {
-		fmt.Printf("Already have a token - refresh?\n")
-		if !config.ConfirmWithConfig(ctx, m, "config_refresh_token", true) {
-			return nil
-		}
+	// Make the next state
+	newState := func(state string) string {
+		return fs.StatePush(stateParams, state)
 	}
 
-	// Ask the user whether they are using a local machine
-	isLocal := func() bool {
-		fmt.Printf("Use auto config?\n")
-		fmt.Printf(" * Say Y if not sure\n")
-		fmt.Printf(" * Say N if you are working on a remote or headless machine\n")
-		return config.ConfirmWithConfig(ctx, m, "config_is_local", true)
+	// Recall the Oauth state again by calling the Config with the same input again
+	getOAuth := func() (opt *Options, err error) {
+		tmpState, _ := fs.StatePop(stateParams)
+		tmpState, State := fs.StatePop(tmpState)
+		_, Result := fs.StatePop(tmpState)
+		out, err := ri.Config(ctx, name, m, fs.ConfigIn{State: State, Result: Result})
+		if err != nil {
+			return nil, err
+		}
+		if out.OAuth == nil {
+			return nil, errors.New("failed to recall OAuth state")
+		}
+		opt, ok := out.OAuth.(*Options)
+		if !ok {
+			return nil, errors.Errorf("internal error: oauth failed: wrong type in config: %T", out.OAuth)
+		}
+		if opt.OAuth2Config == nil {
+			return nil, errors.New("internal error: oauth failed: OAuth2Config not set")
+		}
+		return opt, nil
 	}
 
-	// Detect whether we should use internal web server
-	useWebServer := false
-	switch oauthConfig.RedirectURL {
-	case TitleBarRedirectURL:
-		useWebServer = authorizeOnly
-		if !authorizeOnly {
-			useWebServer = isLocal()
+	switch state {
+	case "*oauth":
+		// See if already have a token
+		tokenString, ok := m.Get("token")
+		if ok && tokenString != "" {
+			return fs.ConfigConfirm(newState("*oauth-confirm"), true, "config_refresh_token", "Already have a token - refresh?")
 		}
-		if useWebServer {
-			// copy the config and set to use the internal webserver
-			configCopy := *oauthConfig
-			oauthConfig = &configCopy
-			oauthConfig.RedirectURL = RedirectURL
+		return fs.ConfigGoto(newState("*oauth-confirm"))
+	case "*oauth-confirm":
+		if in.Result == "false" {
+			return fs.ConfigGoto(newState("*oauth-done"))
 		}
-	default:
-		if changed {
-			fmt.Printf("Make sure your Redirect URL is set to %q in your custom config.\n", oauthConfig.RedirectURL)
+		return fs.ConfigConfirm(newState("*oauth-islocal"), true, "config_is_local", "Use auto config?\n * Say Y if not sure\n * Say N if you are working on a remote or headless machine\n")
+	case "*oauth-islocal":
+		if in.Result == "true" {
+			return fs.ConfigGoto(newState("*oauth-do"))
 		}
-		useWebServer = true
-		if authorizeOnly {
-			break
+		return fs.ConfigGoto(newState("*oauth-remote"))
+	case "*oauth-remote":
+		opt, err := getOAuth()
+		if err != nil {
+			return nil, err
 		}
-		if !isLocal() {
-			fmt.Printf(`For this to work, you will need rclone available on a machine that has
+		if noWebserverNeeded(opt.OAuth2Config) {
+			authURL, _, err := getAuthURL(name, m, opt.OAuth2Config, opt)
+			if err != nil {
+				return nil, err
+			}
+			return fs.ConfigInput(newState("*oauth-do"), "config_verification_code", fmt.Sprintf("Verification code\n\nGo to this URL, authenticate then paste the code here.\n\n%s\n", authURL))
+		}
+		var out strings.Builder
+		fmt.Fprintf(&out, `For this to work, you will need rclone available on a machine that has
 a web browser available.
 
 For more help and alternate methods see: https://rclone.org/remote_setup/
@@ -447,26 +490,97 @@ Execute the following on the machine with the web browser (same rclone
 version recommended):
 
 `)
-			if changed {
-				fmt.Printf("\trclone authorize %q -- %q %q\n", id, oauthConfig.ClientID, oauthConfig.ClientSecret)
-			} else {
-				fmt.Printf("\trclone authorize %q\n", id)
-			}
-			fmt.Println("\nThen paste the result below:")
-			code := config.ReadNonEmptyLine("result> ")
-			token := &oauth2.Token{}
-			err := json.Unmarshal([]byte(code), token)
-			if err != nil {
-				return err
-			}
-			return PutToken(name, m, token, true)
+		// Find the overridden options
+		inM := ri.Options.NonDefault(m)
+		delete(inM, fs.ConfigToken) // delete token as we are refreshing it
+		for k, v := range inM {
+			fs.Debugf(nil, "sending %s = %q", k, v)
 		}
+		// Encode them into a string
+		mCopyString, err := inM.Encode()
+		if err != nil {
+			return nil, errors.Wrap(err, "oauthutil authorize encode")
+		}
+		// Write what the user has to do
+		if len(mCopyString) > 0 {
+			fmt.Fprintf(&out, "\trclone authorize %q %q\n", ri.Name, mCopyString)
+		} else {
+			fmt.Fprintf(&out, "\trclone authorize %q\n", ri.Name)
+		}
+		fmt.Fprintln(&out, "\nThen paste the result.")
+		return fs.ConfigInput(newState("*oauth-authorize"), "config_token", out.String())
+	case "*oauth-authorize":
+		// Read the updates to the config
+		outM := configmap.Simple{}
+		token := oauth2.Token{}
+		code := in.Result
+		newFormat := true
+		err := outM.Decode(code)
+		if err != nil {
+			newFormat = false
+			err = json.Unmarshal([]byte(code), &token)
+		}
+		if err != nil {
+			return fs.ConfigError(newState("*oauth-authorize"), fmt.Sprintf("Couldn't decode response - try again (make sure you are using a matching version of rclone on both sides: %v\n", err))
+		}
+		// Save the config updates
+		if newFormat {
+			for k, v := range outM {
+				m.Set(k, v)
+				fs.Debugf(nil, "received %s = %q", k, v)
+			}
+		} else {
+			m.Set(fs.ConfigToken, code)
+		}
+		return fs.ConfigGoto(newState("*oauth-done"))
+	case "*oauth-do":
+		code := in.Result
+		opt, err := getOAuth()
+		if err != nil {
+			return nil, err
+		}
+		oauthConfig, changed := overrideCredentials(name, m, opt.OAuth2Config)
+		if changed {
+			fs.Logf(nil, "Make sure your Redirect URL is set to %q in your custom config.\n", oauthConfig.RedirectURL)
+		}
+		if code == "" {
+			oauthConfig = fixRedirect(oauthConfig)
+			code, err = configSetup(ctx, ri.Name, name, m, oauthConfig, opt)
+			if err != nil {
+				return nil, errors.Wrap(err, "config failed to refresh token")
+			}
+		}
+		err = configExchange(ctx, name, m, oauthConfig, code)
+		if err != nil {
+			return nil, err
+		}
+		return fs.ConfigGoto(newState("*oauth-done"))
+	case "*oauth-done":
+		// Return to the state indicated in the State stack
+		_, returnState := fs.StatePop(stateParams)
+		return fs.ConfigGoto(returnState)
 	}
+	return nil, errors.Errorf("unknown internal oauth state %q", state)
+}
+
+func init() {
+	// Set the function to avoid circular import
+	fs.ConfigOAuth = ConfigOAuth
+}
+
+// Return true if can run without a webserver and just entering a code
+func noWebserverNeeded(oauthConfig *oauth2.Config) bool {
+	return oauthConfig.RedirectURL == TitleBarRedirectURL
+}
+
+// get the URL we need to send the user to
+func getAuthURL(name string, m configmap.Mapper, oauthConfig *oauth2.Config, opt *Options) (authURL string, state string, err error) {
+	oauthConfig, _ = overrideCredentials(name, m, oauthConfig)
 
 	// Make random state
-	state, err := random.Password(128)
+	state, err = random.Password(128)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	// Generate oauth URL
@@ -474,65 +588,81 @@ version recommended):
 	if !opt.NoOffline {
 		opts = append(opts, oauth2.AccessTypeOffline)
 	}
-	authURL := oauthConfig.AuthCodeURL(state, opts...)
+	authURL = oauthConfig.AuthCodeURL(state, opts...)
+	return authURL, state, nil
+}
 
-	// Prepare webserver if needed
-	var server *authServer
-	if useWebServer {
-		server = newAuthServer(opt, bindAddress, state, authURL)
-		err := server.Init()
-		if err != nil {
-			return errors.Wrap(err, "failed to start auth webserver")
-		}
-		go server.Serve()
-		defer server.Stop()
-		authURL = "http://" + bindAddress + "/auth?state=" + state
+// If TitleBarRedirect is set but we are doing a real oauth, then
+// override our redirect URL
+func fixRedirect(oauthConfig *oauth2.Config) *oauth2.Config {
+	switch oauthConfig.RedirectURL {
+	case TitleBarRedirectURL:
+		// copy the config and set to use the internal webserver
+		configCopy := *oauthConfig
+		oauthConfig = &configCopy
+		oauthConfig.RedirectURL = RedirectURL
+	}
+	return oauthConfig
+}
+
+// configSetup does the initial creation of the token
+//
+// If opt is nil it will use the default Options
+//
+// It will run an internal webserver to receive the results
+func configSetup(ctx context.Context, id, name string, m configmap.Mapper, oauthConfig *oauth2.Config, opt *Options) (string, error) {
+	if opt == nil {
+		opt = &Options{}
+	}
+	authorizeNoAutoBrowserValue, ok := m.Get(config.ConfigAuthNoBrowser)
+	authorizeNoAutoBrowser := ok && authorizeNoAutoBrowserValue != ""
+
+	authURL, state, err := getAuthURL(name, m, oauthConfig, opt)
+	if err != nil {
+		return "", err
 	}
 
-	if !authorizeNoAutoBrowser && oauthConfig.RedirectURL != TitleBarRedirectURL {
+	// Prepare webserver
+	server := newAuthServer(opt, bindAddress, state, authURL)
+	err = server.Init()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to start auth webserver")
+	}
+	go server.Serve()
+	defer server.Stop()
+	authURL = "http://" + bindAddress + "/auth?state=" + state
+
+	if !authorizeNoAutoBrowser {
 		// Open the URL for the user to visit
 		_ = open.Start(authURL)
-		fmt.Printf("If your browser doesn't open automatically go to the following link: %s\n", authURL)
+		fs.Logf(nil, "If your browser doesn't open automatically go to the following link: %s\n", authURL)
 	} else {
-		fmt.Printf("Please go to the following link: %s\n", authURL)
+		fs.Logf(nil, "Please go to the following link: %s\n", authURL)
 	}
-	fmt.Printf("Log in and authorize rclone for access\n")
+	fs.Logf(nil, "Log in and authorize rclone for access\n")
 
-	// Read the code via the webserver or manually
-	var auth *AuthResult
-	if useWebServer {
-		fmt.Printf("Waiting for code...\n")
-		auth = <-server.result
-		if !auth.OK || auth.Code == "" {
-			return auth
-		}
-		fmt.Printf("Got code\n")
-		if opt.CheckAuth != nil {
-			err = opt.CheckAuth(oauthConfig, auth)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		auth = &AuthResult{
-			Code: config.ReadNonEmptyLine("Enter verification code> "),
+	// Read the code via the webserver
+	fs.Logf(nil, "Waiting for code...\n")
+	auth := <-server.result
+	if !auth.OK || auth.Code == "" {
+		return "", auth
+	}
+	fs.Logf(nil, "Got code\n")
+	if opt.CheckAuth != nil {
+		err = opt.CheckAuth(oauthConfig, auth)
+		if err != nil {
+			return "", err
 		}
 	}
+	return auth.Code, nil
+}
 
-	// Exchange the code for a token
+// Exchange the code for a token
+func configExchange(ctx context.Context, name string, m configmap.Mapper, oauthConfig *oauth2.Config, code string) error {
 	ctx = Context(ctx, fshttp.NewClient(ctx))
-	token, err := oauthConfig.Exchange(ctx, auth.Code)
+	token, err := oauthConfig.Exchange(ctx, code)
 	if err != nil {
 		return errors.Wrap(err, "failed to get token")
-	}
-
-	// Print code if we are doing a manual auth
-	if authorizeOnly {
-		result, err := json.Marshal(token)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal token")
-		}
-		fmt.Printf("Paste the following into your remote machine --->\n%s\n<---End paste\n", result)
 	}
 	return PutToken(name, m, token, true)
 }

@@ -1,6 +1,7 @@
 // Package ncdu implements a text based user interface for exploring a remote
 
-//+build !plan9,!solaris,!js
+//go:build !plan9 && !solaris && !js
+// +build !plan9,!solaris,!js
 
 package ncdu
 
@@ -373,7 +374,7 @@ func (u *UI) Draw() error {
 			extras := ""
 			if u.showCounts {
 				if count > 0 {
-					extras += fmt.Sprintf("%8v ", fs.SizeSuffix(count))
+					extras += fmt.Sprintf("%8v ", fs.CountSuffix(count))
 				} else {
 					extras += "         "
 				}
@@ -385,9 +386,9 @@ func (u *UI) Draw() error {
 			}
 			if u.showDirAverageSize {
 				if averageSize > 0 {
-					extras += fmt.Sprintf("%8v ", fs.SizeSuffix(int64(averageSize)))
+					extras += fmt.Sprintf("%9v ", fs.SizeSuffix(int64(averageSize)))
 				} else {
-					extras += "         "
+					extras += "          "
 				}
 
 			}
@@ -406,7 +407,7 @@ func (u *UI) Draw() error {
 				}
 				extras += "[" + graph[graphBars-bars:2*graphBars-bars] + "] "
 			}
-			Linef(0, y, w, fg, bg, ' ', "%c %8v %s%c%s%s", fileFlag, fs.SizeSuffix(size), extras, mark, path.Base(entry.Remote()), message)
+			Linef(0, y, w, fg, bg, ' ', "%c %9v %s%c%s%s", fileFlag, fs.SizeSuffix(size), extras, mark, path.Base(entry.Remote()), message)
 			y++
 		}
 	}
@@ -485,11 +486,15 @@ func (u *UI) removeEntry(pos int) {
 
 // delete the entry at the current position
 func (u *UI) delete() {
+	if u.d == nil || len(u.entries) == 0 {
+		return
+	}
 	ctx := context.Background()
-	dirPos := u.sortPerm[u.dirPosMap[u.path].entry]
-	entry := u.entries[dirPos]
+	cursorPos := u.dirPosMap[u.path]
+	dirPos := u.sortPerm[cursorPos.entry]
+	dirEntry := u.entries[dirPos]
 	u.boxMenu = []string{"cancel", "confirm"}
-	if obj, isFile := entry.(fs.Object); isFile {
+	if obj, isFile := dirEntry.(fs.Object); isFile {
 		u.boxMenuHandler = func(f fs.Fs, p string, o int) (string, error) {
 			if o != 1 {
 				return "Aborted!", nil
@@ -499,27 +504,33 @@ func (u *UI) delete() {
 				return "", err
 			}
 			u.removeEntry(dirPos)
+			if cursorPos.entry >= len(u.entries) {
+				u.move(-1) // move back onto a valid entry
+			}
 			return "Successfully deleted file!", nil
 		}
 		u.popupBox([]string{
 			"Delete this file?",
-			u.fsName + entry.String()})
+			u.fsName + dirEntry.String()})
 	} else {
 		u.boxMenuHandler = func(f fs.Fs, p string, o int) (string, error) {
 			if o != 1 {
 				return "Aborted!", nil
 			}
-			err := operations.Purge(ctx, f, entry.String())
+			err := operations.Purge(ctx, f, dirEntry.String())
 			if err != nil {
 				return "", err
 			}
 			u.removeEntry(dirPos)
+			if cursorPos.entry >= len(u.entries) {
+				u.move(-1) // move back onto a valid entry
+			}
 			return "Successfully purged folder!", nil
 		}
 		u.popupBox([]string{
 			"Purge this directory?",
 			"ALL files in it will be deleted",
-			u.fsName + entry.String()})
+			u.fsName + dirEntry.String()})
 	}
 }
 

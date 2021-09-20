@@ -222,7 +222,7 @@ func New(f fs.Fs, opt *vfscommon.Options) *VFS {
 		vfs.pollChan = make(chan time.Duration)
 		do(context.TODO(), vfs.root.changeNotify, vfs.pollChan)
 		vfs.pollChan <- vfs.Opt.PollInterval
-	} else {
+	} else if vfs.Opt.PollInterval > 0 {
 		fs.Infof(f, "poll-interval is not supported by this remote")
 	}
 
@@ -543,7 +543,7 @@ func fillInMissingSizes(total, used, free, unknownFree int64) (newTotal, newUsed
 	return total, used, free
 }
 
-// If the total size isn't known then we will aim for this many bytes free (1PB)
+// If the total size isn't known then we will aim for this many bytes free (1 PiB)
 const unknownFreeBytes = 1 << 50
 
 // Statfs returns into about the filing system if known

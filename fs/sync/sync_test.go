@@ -1048,7 +1048,7 @@ func TestSyncWithMaxDuration(t *testing.T) {
 	ci.Transfers = 1
 	defer accounting.TokenBucket.SetBwLimit(fs.BwPair{Tx: -1, Rx: -1})
 
-	// 5 files of 60 bytes at 60 bytes/s 5 seconds
+	// 5 files of 60 bytes at 60 Byte/s 5 seconds
 	testFiles := make([]fstest.Item, 5)
 	for i := 0; i < len(testFiles); i++ {
 		testFiles[i] = r.WriteFile(fmt.Sprintf("file%d", i), "------------------------------------------------------------", t1)
@@ -1496,19 +1496,49 @@ func TestSyncCompareDest(t *testing.T) {
 
 	fstest.CheckItems(t, r.Fremote, file2, file3, file4)
 
+	// Work out if we actually have hashes for uploaded files
+	haveHash := false
+	if ht := fdst.Hashes().GetOne(); ht != hash.None {
+		file2obj, err := fdst.NewObject(ctx, "one")
+		if err == nil {
+			file2objHash, err := file2obj.Hash(ctx, ht)
+			if err == nil {
+				haveHash = file2objHash != ""
+			}
+		}
+	}
+
+	// check new dest, new compare, src timestamp differs
+	//
+	// we only check this if we the file we uploaded previously
+	// actually has a hash otherwise the differing timestamp is
+	// always copied.
+	if haveHash {
+		file5b := r.WriteFile("two", "two", t3)
+		fstest.CheckItems(t, r.Flocal, file1c, file5b)
+
+		accounting.GlobalStats().ResetCounters()
+		err = Sync(ctx, fdst, r.Flocal, false)
+		require.NoError(t, err)
+
+		fstest.CheckItems(t, r.Fremote, file2, file3, file4)
+	} else {
+		t.Log("No hash on uploaded file so skipping compare timestamp test")
+	}
+
 	// check empty dest, old compare
-	file5b := r.WriteFile("two", "twot3", t3)
+	file5c := r.WriteFile("two", "twot3", t3)
 	fstest.CheckItems(t, r.Fremote, file2, file3, file4)
-	fstest.CheckItems(t, r.Flocal, file1c, file5b)
+	fstest.CheckItems(t, r.Flocal, file1c, file5c)
 
 	accounting.GlobalStats().ResetCounters()
 	err = Sync(ctx, fdst, r.Flocal, false)
 	require.NoError(t, err)
 
-	file5bdst := file5b
-	file5bdst.Path = "dst/two"
+	file5cdst := file5c
+	file5cdst.Path = "dst/two"
 
-	fstest.CheckItems(t, r.Fremote, file2, file3, file4, file5bdst)
+	fstest.CheckItems(t, r.Fremote, file2, file3, file4, file5cdst)
 }
 
 // Test with multiple CompareDest
@@ -1962,4 +1992,55 @@ func TestMaxTransfer(t *testing.T) {
 	t.Run("Hard", func(t *testing.T) { test(t, fs.CutoffModeHard) })
 	t.Run("Soft", func(t *testing.T) { test(t, fs.CutoffModeSoft) })
 	t.Run("Cautious", func(t *testing.T) { test(t, fs.CutoffModeCautious) })
+}
+
+func testSyncConcurrent(t *testing.T, subtest string) {
+	const (
+		NFILES     = 20
+		NCHECKERS  = 4
+		NTRANSFERS = 4
+	)
+
+	ctx, ci := fs.AddConfig(context.Background())
+	ci.Checkers = NCHECKERS
+	ci.Transfers = NTRANSFERS
+
+	r := fstest.NewRun(t)
+	defer r.Finalise()
+	stats := accounting.GlobalStats()
+
+	itemsBefore := []fstest.Item{}
+	itemsAfter := []fstest.Item{}
+	for i := 0; i < NFILES; i++ {
+		nameBoth := fmt.Sprintf("both%d", i)
+		nameOnly := fmt.Sprintf("only%d", i)
+		switch subtest {
+		case "delete":
+			fileBoth := r.WriteBoth(ctx, nameBoth, "potato", t1)
+			fileOnly := r.WriteObject(ctx, nameOnly, "potato", t1)
+			itemsBefore = append(itemsBefore, fileBoth, fileOnly)
+			itemsAfter = append(itemsAfter, fileBoth)
+		case "truncate":
+			fileBoth := r.WriteBoth(ctx, nameBoth, "potato", t1)
+			fileFull := r.WriteObject(ctx, nameOnly, "potato", t1)
+			fileEmpty := r.WriteFile(nameOnly, "", t1)
+			itemsBefore = append(itemsBefore, fileBoth, fileFull)
+			itemsAfter = append(itemsAfter, fileBoth, fileEmpty)
+		}
+	}
+
+	fstest.CheckItems(t, r.Fremote, itemsBefore...)
+	stats.ResetErrors()
+	err := Sync(ctx, r.Fremote, r.Flocal, false)
+	assert.NoError(t, err, "Sync must not return a error")
+	assert.False(t, stats.Errored(), "Low level errors must not have happened")
+	fstest.CheckItems(t, r.Fremote, itemsAfter...)
+}
+
+func TestSyncConcurrentDelete(t *testing.T) {
+	testSyncConcurrent(t, "delete")
+}
+
+func TestSyncConcurrentTruncate(t *testing.T) {
+	testSyncConcurrent(t, "truncate")
 }

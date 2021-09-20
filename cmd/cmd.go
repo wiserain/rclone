@@ -37,6 +37,7 @@ import (
 	"github.com/rclone/rclone/fs/rc/rcserver"
 	"github.com/rclone/rclone/lib/atexit"
 	"github.com/rclone/rclone/lib/buildinfo"
+	"github.com/rclone/rclone/lib/exitcode"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/terminal"
 	"github.com/spf13/cobra"
@@ -49,7 +50,7 @@ var (
 	cpuProfile      = flags.StringP("cpuprofile", "", "", "Write cpu profile to file")
 	memProfile      = flags.StringP("memprofile", "", "", "Write memory profile to file")
 	statsInterval   = flags.DurationP("stats", "", time.Minute*1, "Interval between printing stats, e.g 500ms, 60s, 5m. (0 to disable)")
-	dataRateUnit    = flags.StringP("stats-unit", "", "bytes", "Show data rate in stats as either 'bits' or 'bytes'/s")
+	dataRateUnit    = flags.StringP("stats-unit", "", "bytes", "Show data rate in stats as either 'bits' or 'bytes' per second")
 	version         bool
 	retries         = flags.IntP("retries", "", 3, "Retry operations this many times if they fail")
 	retriesInterval = flags.DurationP("retries-sleep", "", 0, "Interval between retrying operations if they fail, e.g 500ms, 60s, 5m. (0 to disable)")
@@ -60,23 +61,21 @@ var (
 	errorTooManyArguments   = errors.New("too many arguments")
 )
 
-const (
-	exitCodeSuccess = iota
-	exitCodeUsageError
-	exitCodeUncategorizedError
-	exitCodeDirNotFound
-	exitCodeFileNotFound
-	exitCodeRetryError
-	exitCodeNoRetryError
-	exitCodeFatalError
-	exitCodeTransferExceeded
-	exitCodeNoFilesTransferred
-)
-
 // ShowVersion prints the version to stdout
 func ShowVersion() {
+	osVersion, osKernel := buildinfo.GetOSVersion()
+	if osVersion == "" {
+		osVersion = "unknown"
+	}
+	if osKernel == "" {
+		osKernel = "unknown"
+	}
+
 	linking, tagString := buildinfo.GetLinkingAndTags()
+
 	fmt.Printf("rclone %s\n", fs.Version)
+	fmt.Printf("- os/version: %s\n", osVersion)
+	fmt.Printf("- os/kernel: %s\n", osKernel)
 	fmt.Printf("- os/type: %s\n", runtime.GOOS)
 	fmt.Printf("- os/arch: %s\n", runtime.GOARCH)
 	fmt.Printf("- go/version: %s\n", runtime.Version())
@@ -389,7 +388,7 @@ func initConfig() {
 	configflags.SetFlags(ci)
 
 	// Load the config
-	configfile.LoadConfig(ctx)
+	configfile.Install()
 
 	// Start accounting
 	accounting.Start(ctx)
@@ -473,31 +472,31 @@ func resolveExitCode(err error) {
 	if err == nil {
 		if ci.ErrorOnNoTransfer {
 			if accounting.GlobalStats().GetTransfers() == 0 {
-				os.Exit(exitCodeNoFilesTransferred)
+				os.Exit(exitcode.NoFilesTransferred)
 			}
 		}
-		os.Exit(exitCodeSuccess)
+		os.Exit(exitcode.Success)
 	}
 
 	_, unwrapped := fserrors.Cause(err)
 
 	switch {
 	case unwrapped == fs.ErrorDirNotFound:
-		os.Exit(exitCodeDirNotFound)
+		os.Exit(exitcode.DirNotFound)
 	case unwrapped == fs.ErrorObjectNotFound:
-		os.Exit(exitCodeFileNotFound)
+		os.Exit(exitcode.FileNotFound)
 	case unwrapped == errorUncategorized:
-		os.Exit(exitCodeUncategorizedError)
+		os.Exit(exitcode.UncategorizedError)
 	case unwrapped == accounting.ErrorMaxTransferLimitReached:
-		os.Exit(exitCodeTransferExceeded)
+		os.Exit(exitcode.TransferExceeded)
 	case fserrors.ShouldRetry(err):
-		os.Exit(exitCodeRetryError)
+		os.Exit(exitcode.RetryError)
 	case fserrors.IsNoRetryError(err):
-		os.Exit(exitCodeNoRetryError)
+		os.Exit(exitcode.NoRetryError)
 	case fserrors.IsFatalError(err):
-		os.Exit(exitCodeFatalError)
+		os.Exit(exitcode.FatalError)
 	default:
-		os.Exit(exitCodeUsageError)
+		os.Exit(exitcode.UsageError)
 	}
 }
 
@@ -528,7 +527,8 @@ func AddBackendFlags() {
 				if opt.IsPassword {
 					help += " (obscured)"
 				}
-				flag := flags.VarPF(pflag.CommandLine, opt, name, opt.ShortOpt, help)
+				flag := pflag.CommandLine.VarPF(opt, name, opt.ShortOpt, help)
+				flags.SetDefaultFromEnv(pflag.CommandLine, name)
 				if _, isBool := opt.Default.(bool); isBool {
 					flag.NoOptDefVal = "true"
 				}

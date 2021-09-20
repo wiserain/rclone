@@ -189,6 +189,9 @@ backends:
  - backend:  "sftp"
    remote:   "TestSFTPRclone:"
    fastlist: false
+ - backend:  "sftp"
+   remote:   "TestSFTPRsyncNet:"
+   fastlist: false
  - backend:  "sugarsync"
    remote:   "TestSugarSync:Test"
    fastlist: false
@@ -323,3 +326,8 @@ backends:
    fastlist: false
    ignore:
      - TestSyncUTFNorm
+ - backend: "uptobox"
+   remote: "TestUptobox:"
+   fastlist: false
+   ignore:
+     - TestRWFileHandleWriteNoWrite

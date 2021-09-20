@@ -3,8 +3,7 @@ title: "Tardigrade"
 description: "Rclone docs for Tardigrade"
 ---
 
-{{< icon "fas fa-dove" >}} Tardigrade
------------------------------------------
+# {{< icon "fas fa-dove" >}} Tardigrade
 
 [Tardigrade](https://tardigrade.io) is an encrypted, secure, and 
 cost-effective object storage service that enables you to store, back up, and 
@@ -310,3 +309,8 @@ remote.
 See [List of backends that do not support rclone about](https://rclone.org/overview/#optional-features)
 See [rclone about](https://rclone.org/commands/rclone_about/)
 
+### Known issues
+
+If you get errors like `too many open files` this usually happens when the default `ulimit` for system max open files is exceeded. Native Storj protocol opens a large number of TCP connections (each of which is counted as an open file). For a single upload stream you can expect 110 TCP connections to be opened. For a single download stream you can expect 35. This batch of connections will be opened for every 64 MiB segment and you should also expect TCP connections to be reused. If you do many transfers you eventually open a connection to most storage nodes (thousands of nodes).
+
+To fix these, please raise your system limits. You can do this issuing a `ulimit -n 65536` just before you run rclone. To change the limits more permanently you can add this to your shell startup script, e.g. `$HOME/.bashrc`, or change the system-wide configuration, usually `/etc/sysctl.conf` and/or `/etc/security/limits.conf`, but please refer to your operating system manual.
