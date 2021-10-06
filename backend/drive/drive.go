@@ -1549,7 +1549,7 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 
 		err = f.pacer.Call(func() (bool, error) {
 			srcFile, err = f.svc.Files.Get(rootID).
-				Fields("name", "id", "size", "mimeType", "driveId").
+				Fields("name", "id", "size", "mimeType", "driveId", "md5Checksum").
 				SupportsAllDrives(true).
 				Context(ctx).Do()
 			return f.shouldRetry(ctx, err)
