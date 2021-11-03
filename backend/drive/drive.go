@@ -3570,6 +3570,19 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 // mod
 // get an id of file or directory
 func (f *Fs) getID(ctx context.Context, path string, real bool) (id string, err error) {
+	if id, _ := parseRootID(path); len(id) > 6 {
+		info, err := f.getFile(ctx, id, f.fileFields)
+		if err != nil {
+			return "", errors.Wrap(err, "couldn't find id")
+		}
+		if info.ShortcutDetails != nil {
+			newInfo, err := f.getFile(ctx, info.ShortcutDetails.TargetId, f.fileFields)
+			if err == nil {
+				return newInfo.Id, nil
+			}
+		}
+		return info.Id, nil
+	}
 	path = strings.Trim(path, "/")
 	id, err = f.dirCache.FindDir(ctx, path, false)
 	if err != nil {
