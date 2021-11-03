@@ -1044,13 +1044,13 @@ func Run(t *testing.T, opt *Opt) {
 				fstest.CheckListing(t, f, []fstest.Item{file1, file2})
 			})
 
-			// TestFsNewObjectDir tests NewObject on a directory which should produce an error
+			// TestFsNewObjectDir tests NewObject on a directory which should produce fs.ErrorIsDir if possible or fs.ErrorObjectNotFound if not
 			t.Run("FsNewObjectDir", func(t *testing.T) {
 				skipIfNotOk(t)
 				dir := path.Dir(file2.Path)
 				obj, err := f.NewObject(ctx, dir)
 				assert.Nil(t, obj)
-				assert.NotNil(t, err)
+				assert.True(t, err == fs.ErrorIsDir || err == fs.ErrorObjectNotFound, fmt.Sprintf("Wrong error: expecting fs.ErrorIsDir or fs.ErrorObjectNotFound but got: %#v", err))
 			})
 
 			// TestFsPurge tests Purge
@@ -1333,12 +1333,14 @@ func Run(t *testing.T, opt *Opt) {
 				features := f.Features()
 				obj := findObject(ctx, t, f, file1.Path)
 				do, ok := obj.(fs.MimeTyper)
-				require.Equal(t, features.ReadMimeType, ok, "mismatch between Object.MimeType and Features.ReadMimeType")
 				if !ok {
+					require.False(t, features.ReadMimeType, "Features.ReadMimeType is set but Object.MimeType method not found")
 					t.Skip("MimeType method not supported")
 				}
 				mimeType := do.MimeType(ctx)
-				if features.WriteMimeType {
+				if !features.ReadMimeType {
+					require.Equal(t, "", mimeType, "Features.ReadMimeType is not set but Object.MimeType returned a non-empty MimeType")
+				} else if features.WriteMimeType {
 					assert.Equal(t, file1MimeType, mimeType, "can read and write mime types but failed")
 				} else {
 					if strings.ContainsRune(mimeType, ';') {

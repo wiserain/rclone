@@ -31,6 +31,7 @@ For documentation see the Go documentation for:
 - [RcloneInitialize](https://pkg.go.dev/github.com/rclone/rclone/librclone#RcloneInitialize)
 - [RcloneFinalize](https://pkg.go.dev/github.com/rclone/rclone/librclone#RcloneFinalize)
 - [RcloneRPC](https://pkg.go.dev/github.com/rclone/rclone/librclone#RcloneRPC)
+- [RcloneFreeString](https://pkg.go.dev/github.com/rclone/rclone/librclone#RcloneFreeString)
 
 ### C Example
 
@@ -85,6 +86,10 @@ API using rclone linked as a shared library with `ctypes`.
 You are welcome to use this directly.
 
 This needs expanding and submitting to pypi...
+
+## Rust
+
+Rust bindings are available in the `librclone` crate: https://crates.io/crates/librclone
 
 ## TODO
 

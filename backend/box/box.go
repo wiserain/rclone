@@ -22,6 +22,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rclone/rclone/lib/encoder"
@@ -56,7 +58,6 @@ const (
 	decayConstant               = 2 // bigger for slower decay, exponential
 	rootURL                     = "https://api.box.com/2.0"
 	uploadURL                   = "https://upload.box.com/api/2.0"
-	listChunks                  = 1000     // chunk size to read directory listings
 	minUploadCutoff             = 50000000 // upload cutoff can be no lower than this
 	defaultUploadCutoff         = 50 * 1024 * 1024
 	tokenURL                    = "https://api.box.com/oauth2/token"
@@ -109,19 +110,19 @@ func init() {
 			Advanced: true,
 		}, {
 			Name: "box_config_file",
-			Help: "Box App config.json location\nLeave blank normally." + env.ShellExpandHelp,
+			Help: "Box App config.json location\n\nLeave blank normally." + env.ShellExpandHelp,
 		}, {
 			Name: "access_token",
-			Help: "Box App Primary Access Token\nLeave blank normally.",
+			Help: "Box App Primary Access Token\n\nLeave blank normally.",
 		}, {
 			Name:    "box_sub_type",
 			Default: "user",
 			Examples: []fs.OptionExample{{
 				Value: "user",
-				Help:  "Rclone should act on behalf of a user",
+				Help:  "Rclone should act on behalf of a user.",
 			}, {
 				Value: "enterprise",
-				Help:  "Rclone should act on behalf of a service account",
+				Help:  "Rclone should act on behalf of a service account.",
 			}},
 		}, {
 			Name:     "upload_cutoff",
@@ -132,6 +133,16 @@ func init() {
 			Name:     "commit_retries",
 			Help:     "Max number of times to try committing a multipart file.",
 			Default:  100,
+			Advanced: true,
+		}, {
+			Name:     "list_chunk",
+			Default:  1000,
+			Help:     "Size of listing chunk 1-1000.",
+			Advanced: true,
+		}, {
+			Name:     "owned_by",
+			Default:  "",
+			Help:     "Only show items owned by the login (email address) passed in.",
 			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
@@ -247,6 +258,8 @@ type Options struct {
 	Enc           encoder.MultiEncoder `config:"encoding"`
 	RootFolderID  string               `config:"root_folder_id"`
 	AccessToken   string               `config:"access_token"`
+	ListChunk     int                  `config:"list_chunk"`
+	OwnedBy       string               `config:"owned_by"`
 }
 
 // Fs represents a remote box
@@ -326,6 +339,13 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 		authRetry = true
 		fs.Debugf(nil, "Should retry: %v", err)
 	}
+
+	// Box API errors which should be retries
+	if apiErr, ok := err.(*api.Error); ok && apiErr.Code == "operation_blocked_temporary" {
+		fs.Debugf(nil, "Retrying API error %v", err)
+		return true, err
+	}
+
 	return authRetry || fserrors.ShouldRetry(err) || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
 
@@ -340,7 +360,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.It
 		return nil, err
 	}
 
-	found, err := f.listAll(ctx, directoryID, false, true, func(item *api.Item) bool {
+	found, err := f.listAll(ctx, directoryID, false, true, true, func(item *api.Item) bool {
 		if strings.EqualFold(item.Name, leaf) {
 			info = item
 			return true
@@ -515,7 +535,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
 	// Find the leaf in pathID
-	found, err = f.listAll(ctx, pathID, true, false, func(item *api.Item) bool {
+	found, err = f.listAll(ctx, pathID, true, false, true, func(item *api.Item) bool {
 		if strings.EqualFold(item.Name, leaf) {
 			pathIDOut = item.ID
 			return true
@@ -571,17 +591,20 @@ type listAllFn func(*api.Item) bool
 // Lists the directory required calling the user function on each item found
 //
 // If the user fn ever returns true then it early exits with found = true
-func (f *Fs) listAll(ctx context.Context, dirID string, directoriesOnly bool, filesOnly bool, fn listAllFn) (found bool, err error) {
+func (f *Fs) listAll(ctx context.Context, dirID string, directoriesOnly bool, filesOnly bool, activeOnly bool, fn listAllFn) (found bool, err error) {
 	opts := rest.Opts{
 		Method:     "GET",
 		Path:       "/folders/" + dirID + "/items",
 		Parameters: fieldsValue(),
 	}
-	opts.Parameters.Set("limit", strconv.Itoa(listChunks))
-	offset := 0
+	opts.Parameters.Set("limit", strconv.Itoa(f.opt.ListChunk))
+	opts.Parameters.Set("usemarker", "true")
+	var marker *string
 OUTER:
 	for {
-		opts.Parameters.Set("offset", strconv.Itoa(offset))
+		if marker != nil {
+			opts.Parameters.Set("marker", *marker)
+		}
 
 		var result api.FolderItems
 		var resp *http.Response
@@ -606,7 +629,10 @@ OUTER:
 				fs.Debugf(f, "Ignoring %q - unknown type %q", item.Name, item.Type)
 				continue
 			}
-			if item.ItemStatus != api.ItemStatusActive {
+			if activeOnly && item.ItemStatus != api.ItemStatusActive {
+				continue
+			}
+			if f.opt.OwnedBy != "" && f.opt.OwnedBy != item.OwnedBy.Login {
 				continue
 			}
 			item.Name = f.opt.Enc.ToStandardName(item.Name)
@@ -615,8 +641,8 @@ OUTER:
 				break OUTER
 			}
 		}
-		offset += result.Limit
-		if offset >= result.TotalCount {
+		marker = result.NextMarker
+		if marker == nil {
 			break
 		}
 	}
@@ -638,7 +664,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 		return nil, err
 	}
 	var iErr error
-	_, err = f.listAll(ctx, directoryID, false, false, func(info *api.Item) bool {
+	_, err = f.listAll(ctx, directoryID, false, false, true, func(info *api.Item) bool {
 		remote := path.Join(dir, info.Name)
 		if info.Type == api.ItemTypeFolder {
 			// cache the directory ID for later lookups
@@ -1092,45 +1118,36 @@ func (f *Fs) deletePermanently(ctx context.Context, itemType, id string) error {
 
 // CleanUp empties the trash
 func (f *Fs) CleanUp(ctx context.Context) (err error) {
-	opts := rest.Opts{
-		Method: "GET",
-		Path:   "/folders/trash/items",
-		Parameters: url.Values{
-			"fields": []string{"type", "id"},
-		},
-	}
-	opts.Parameters.Set("limit", strconv.Itoa(listChunks))
-	offset := 0
-	for {
-		opts.Parameters.Set("offset", strconv.Itoa(offset))
-
-		var result api.FolderItems
-		var resp *http.Response
-		err = f.pacer.Call(func() (bool, error) {
-			resp, err = f.srv.CallJSON(ctx, &opts, nil, &result)
-			return shouldRetry(ctx, resp, err)
-		})
-		if err != nil {
-			return errors.Wrap(err, "couldn't list trash")
-		}
-		for i := range result.Entries {
-			item := &result.Entries[i]
-			if item.Type == api.ItemTypeFolder || item.Type == api.ItemTypeFile {
+	var (
+		deleteErrors       = int64(0)
+		concurrencyControl = make(chan struct{}, fs.GetConfig(ctx).Checkers)
+		wg                 sync.WaitGroup
+	)
+	_, err = f.listAll(ctx, "trash", false, false, false, func(item *api.Item) bool {
+		if item.Type == api.ItemTypeFolder || item.Type == api.ItemTypeFile {
+			wg.Add(1)
+			concurrencyControl <- struct{}{}
+			go func() {
+				defer func() {
+					<-concurrencyControl
+					wg.Done()
+				}()
 				err := f.deletePermanently(ctx, item.Type, item.ID)
 				if err != nil {
-					return errors.Wrap(err, "failed to delete file")
+					fs.Errorf(f, "failed to delete trash item %q (%q): %v", item.Name, item.ID, err)
+					atomic.AddInt64(&deleteErrors, 1)
 				}
-			} else {
-				fs.Debugf(f, "Ignoring %q - unknown type %q", item.Name, item.Type)
-				continue
-			}
+			}()
+		} else {
+			fs.Debugf(f, "Ignoring %q - unknown type %q", item.Name, item.Type)
 		}
-		offset += result.Limit
-		if offset >= result.TotalCount {
-			break
-		}
+		return false
+	})
+	wg.Wait()
+	if deleteErrors != 0 {
+		return errors.Errorf("failed to delete %d trash items", deleteErrors)
 	}
-	return
+	return err
 }
 
 // DirCacheFlush resets the directory cache - used in testing as an
@@ -1184,6 +1201,9 @@ func (o *Object) Size() int64 {
 
 // setMetaData sets the metadata from info
 func (o *Object) setMetaData(info *api.Item) (err error) {
+	if info.Type == api.ItemTypeFolder {
+		return fs.ErrorIsDir
+	}
 	if info.Type != api.ItemTypeFile {
 		return errors.Wrapf(fs.ErrorNotAFile, "%q is %q", o.remote, info.Type)
 	}

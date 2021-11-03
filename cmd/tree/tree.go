@@ -32,16 +32,16 @@ func init() {
 	cmd.Root.AddCommand(commandDefinition)
 	cmdFlags := commandDefinition.Flags()
 	// List
-	flags.BoolVarP(cmdFlags, &opts.All, "all", "a", false, "All files are listed (list . files too).")
-	flags.BoolVarP(cmdFlags, &opts.DirsOnly, "dirs-only", "d", false, "List directories only.")
-	flags.BoolVarP(cmdFlags, &opts.FullPath, "full-path", "", false, "Print the full path prefix for each file.")
-	//flags.BoolVarP(cmdFlags, &opts.IgnoreCase, "ignore-case", "", false, "Ignore case when pattern matching.")
-	flags.BoolVarP(cmdFlags, &noReport, "noreport", "", false, "Turn off file/directory count at end of tree listing.")
-	// flags.BoolVarP(cmdFlags, &opts.FollowLink, "follow", "l", false, "Follow symbolic links like directories.")
-	flags.IntVarP(cmdFlags, &opts.DeepLevel, "level", "", 0, "Descend only level directories deep.")
-	// flags.StringVarP(cmdFlags, &opts.Pattern, "pattern", "P", "", "List only those files that match the pattern given.")
-	// flags.StringVarP(cmdFlags, &opts.IPattern, "exclude", "", "", "Do not list files that match the given pattern.")
-	flags.StringVarP(cmdFlags, &outFileName, "output", "o", "", "Output to file instead of stdout.")
+	flags.BoolVarP(cmdFlags, &opts.All, "all", "a", false, "All files are listed (list . files too)")
+	flags.BoolVarP(cmdFlags, &opts.DirsOnly, "dirs-only", "d", false, "List directories only")
+	flags.BoolVarP(cmdFlags, &opts.FullPath, "full-path", "", false, "Print the full path prefix for each file")
+	//flags.BoolVarP(cmdFlags, &opts.IgnoreCase, "ignore-case", "", false, "Ignore case when pattern matching")
+	flags.BoolVarP(cmdFlags, &noReport, "noreport", "", false, "Turn off file/directory count at end of tree listing")
+	// flags.BoolVarP(cmdFlags, &opts.FollowLink, "follow", "l", false, "Follow symbolic links like directories")
+	flags.IntVarP(cmdFlags, &opts.DeepLevel, "level", "", 0, "Descend only level directories deep")
+	// flags.StringVarP(cmdFlags, &opts.Pattern, "pattern", "P", "", "List only those files that match the pattern given")
+	// flags.StringVarP(cmdFlags, &opts.IPattern, "exclude", "", "", "Do not list files that match the given pattern")
+	flags.StringVarP(cmdFlags, &outFileName, "output", "o", "", "Output to file instead of stdout")
 	// Files
 	flags.BoolVarP(cmdFlags, &opts.ByteSize, "size", "s", false, "Print the size in bytes of each file.")
 	flags.BoolVarP(cmdFlags, &opts.UnitSize, "human", "", false, "Print the size in a more human readable way.")
@@ -53,16 +53,16 @@ func init() {
 	// flags.BoolVarP(cmdFlags, &opts.Inodes, "inodes", "", false, "Print inode number of each file.")
 	// flags.BoolVarP(cmdFlags, &opts.Device, "device", "", false, "Print device ID number to which each file belongs.")
 	// Sort
-	flags.BoolVarP(cmdFlags, &opts.NoSort, "unsorted", "U", false, "Leave files unsorted.")
-	flags.BoolVarP(cmdFlags, &opts.VerSort, "version", "", false, "Sort files alphanumerically by version.")
-	flags.BoolVarP(cmdFlags, &opts.ModSort, "sort-modtime", "t", false, "Sort files by last modification time.")
-	flags.BoolVarP(cmdFlags, &opts.CTimeSort, "sort-ctime", "", false, "Sort files by last status change time.")
-	flags.BoolVarP(cmdFlags, &opts.ReverSort, "sort-reverse", "r", false, "Reverse the order of the sort.")
-	flags.BoolVarP(cmdFlags, &opts.DirSort, "dirsfirst", "", false, "List directories before files (-U disables).")
-	flags.StringVarP(cmdFlags, &sort, "sort", "", "", "Select sort: name,version,size,mtime,ctime.")
+	flags.BoolVarP(cmdFlags, &opts.NoSort, "unsorted", "U", false, "Leave files unsorted")
+	flags.BoolVarP(cmdFlags, &opts.VerSort, "version", "", false, "Sort files alphanumerically by version")
+	flags.BoolVarP(cmdFlags, &opts.ModSort, "sort-modtime", "t", false, "Sort files by last modification time")
+	flags.BoolVarP(cmdFlags, &opts.CTimeSort, "sort-ctime", "", false, "Sort files by last status change time")
+	flags.BoolVarP(cmdFlags, &opts.ReverSort, "sort-reverse", "r", false, "Reverse the order of the sort")
+	flags.BoolVarP(cmdFlags, &opts.DirSort, "dirsfirst", "", false, "List directories before files (-U disables)")
+	flags.StringVarP(cmdFlags, &sort, "sort", "", "", "Select sort: name,version,size,mtime,ctime")
 	// Graphics
-	flags.BoolVarP(cmdFlags, &opts.NoIndent, "noindent", "", false, "Don't print indentation lines.")
-	flags.BoolVarP(cmdFlags, &opts.Colorize, "color", "C", false, "Turn colorization on always.")
+	flags.BoolVarP(cmdFlags, &opts.NoIndent, "noindent", "", false, "Don't print indentation lines")
+	flags.BoolVarP(cmdFlags, &opts.Colorize, "color", "C", false, "Turn colorization on always")
 }
 
 var commandDefinition = &cobra.Command{
@@ -109,6 +109,7 @@ short options as they conflict with rclone's short options.
 		opts.NameSort = sort == "name"
 		opts.SizeSort = sort == "size"
 		ci := fs.GetConfig(context.Background())
+		opts.UnitSize = ci.HumanReadable
 		if opts.DeepLevel == 0 {
 			opts.DeepLevel = ci.MaxDepth
 		}

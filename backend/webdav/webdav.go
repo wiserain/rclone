@@ -70,15 +70,11 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "url",
-			Help:     "URL of http host to connect to",
+			Help:     "URL of http host to connect to.\n\nE.g. https://example.com.",
 			Required: true,
-			Examples: []fs.OptionExample{{
-				Value: "https://example.com",
-				Help:  "Connect to example.com",
-			}},
 		}, {
 			Name: "vendor",
-			Help: "Name of the Webdav site/service/software you are using",
+			Help: "Name of the Webdav site/service/software you are using.",
 			Examples: []fs.OptionExample{{
 				Value: "nextcloud",
 				Help:  "Nextcloud",
@@ -87,27 +83,27 @@ func init() {
 				Help:  "Owncloud",
 			}, {
 				Value: "sharepoint",
-				Help:  "Sharepoint Online, authenticated by Microsoft account.",
+				Help:  "Sharepoint Online, authenticated by Microsoft account",
 			}, {
 				Value: "sharepoint-ntlm",
-				Help:  "Sharepoint with NTLM authentication. Usually self-hosted or on-premises.",
+				Help:  "Sharepoint with NTLM authentication, usually self-hosted or on-premises",
 			}, {
 				Value: "other",
 				Help:  "Other site/service or software",
 			}},
 		}, {
 			Name: "user",
-			Help: "User name. In case NTLM authentication is used, the username should be in the format 'Domain\\User'.",
+			Help: "User name.\n\nIn case NTLM authentication is used, the username should be in the format 'Domain\\User'.",
 		}, {
 			Name:       "pass",
 			Help:       "Password.",
 			IsPassword: true,
 		}, {
 			Name: "bearer_token",
-			Help: "Bearer token instead of user/pass (e.g. a Macaroon)",
+			Help: "Bearer token instead of user/pass (e.g. a Macaroon).",
 		}, {
 			Name:     "bearer_token_command",
-			Help:     "Command to run to get a bearer token",
+			Help:     "Command to run to get a bearer token.",
 			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
@@ -115,7 +111,7 @@ func init() {
 			Advanced: true,
 		}, {
 			Name: "headers",
-			Help: `Set HTTP headers for all transactions
+			Help: `Set HTTP headers for all transactions.
 
 Use this to set additional HTTP headers for all transactions
 
@@ -317,7 +313,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string, depth string)
 		return nil, fs.ErrorObjectNotFound
 	}
 	if itemIsDir(&item) {
-		return nil, fs.ErrorNotAFile
+		return nil, fs.ErrorIsDir
 	}
 	return &item.Props, nil
 }
@@ -469,7 +465,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		}
 		_, err := f.NewObject(ctx, remote)
 		if err != nil {
-			if errors.Cause(err) == fs.ErrorObjectNotFound || errors.Cause(err) == fs.ErrorNotAFile {
+			if errors.Cause(err) == fs.ErrorObjectNotFound || errors.Cause(err) == fs.ErrorIsDir {
 				// File doesn't exist so return old f
 				f.root = root
 				return f, nil

@@ -23,6 +23,7 @@ func init() {
 	configCommand.AddCommand(configEditCommand)
 	configCommand.AddCommand(configFileCommand)
 	configCommand.AddCommand(configTouchCommand)
+	configCommand.AddCommand(configPathsCommand)
 	configCommand.AddCommand(configShowCommand)
 	configCommand.AddCommand(configDumpCommand)
 	configCommand.AddCommand(configProvidersCommand)
@@ -70,6 +71,17 @@ var configTouchCommand = &cobra.Command{
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(0, 0, command, args)
 		config.SaveConfig()
+	},
+}
+
+var configPathsCommand = &cobra.Command{
+	Use:   "paths",
+	Short: `Show paths used for configuration, cache, temp etc.`,
+	Run: func(command *cobra.Command, args []string) {
+		cmd.CheckArgs(0, 0, command, args)
+		fmt.Printf("Config file: %s\n", config.GetConfigPath())
+		fmt.Printf("Cache dir:   %s\n", config.GetCacheDir())
+		fmt.Printf("Temp dir:    %s\n", os.TempDir())
 	},
 }
 
@@ -196,7 +208,7 @@ Note that |bin/config.py| in the rclone source implements this protocol
 as a readable demonstration.
 `, "|", "`")
 var configCreateCommand = &cobra.Command{
-	Use:   "create `name` `type` [`key` `value`]*",
+	Use:   "create name type [key value]*",
 	Short: `Create a new remote with name, type and options.`,
 	Long: strings.ReplaceAll(`
 Create a new remote of |name| with |type| and options.  The options
@@ -248,18 +260,18 @@ func doConfig(name string, in rc.Params, do func(config.UpdateRemoteOpt) (*fs.Co
 
 func init() {
 	for _, cmdFlags := range []*pflag.FlagSet{configCreateCommand.Flags(), configUpdateCommand.Flags()} {
-		flags.BoolVarP(cmdFlags, &updateRemoteOpt.Obscure, "obscure", "", false, "Force any passwords to be obscured.")
-		flags.BoolVarP(cmdFlags, &updateRemoteOpt.NoObscure, "no-obscure", "", false, "Force any passwords not to be obscured.")
-		flags.BoolVarP(cmdFlags, &updateRemoteOpt.NonInteractive, "non-interactive", "", false, "Don't interact with user and return questions.")
-		flags.BoolVarP(cmdFlags, &updateRemoteOpt.Continue, "continue", "", false, "Continue the configuration process with an answer.")
-		flags.BoolVarP(cmdFlags, &updateRemoteOpt.All, "all", "", false, "Ask the full set of config questions.")
-		flags.StringVarP(cmdFlags, &updateRemoteOpt.State, "state", "", "", "State - use with --continue.")
-		flags.StringVarP(cmdFlags, &updateRemoteOpt.Result, "result", "", "", "Result - use with --continue.")
+		flags.BoolVarP(cmdFlags, &updateRemoteOpt.Obscure, "obscure", "", false, "Force any passwords to be obscured")
+		flags.BoolVarP(cmdFlags, &updateRemoteOpt.NoObscure, "no-obscure", "", false, "Force any passwords not to be obscured")
+		flags.BoolVarP(cmdFlags, &updateRemoteOpt.NonInteractive, "non-interactive", "", false, "Don't interact with user and return questions")
+		flags.BoolVarP(cmdFlags, &updateRemoteOpt.Continue, "continue", "", false, "Continue the configuration process with an answer")
+		flags.BoolVarP(cmdFlags, &updateRemoteOpt.All, "all", "", false, "Ask the full set of config questions")
+		flags.StringVarP(cmdFlags, &updateRemoteOpt.State, "state", "", "", "State - use with --continue")
+		flags.StringVarP(cmdFlags, &updateRemoteOpt.Result, "result", "", "", "Result - use with --continue")
 	}
 }
 
 var configUpdateCommand = &cobra.Command{
-	Use:   "update `name` [`key` `value`]+",
+	Use:   "update name [key value]+",
 	Short: `Update options in an existing remote.`,
 	Long: strings.ReplaceAll(`
 Update an existing remote's options. The options should be passed in
@@ -289,8 +301,8 @@ require this add an extra parameter thus:
 }
 
 var configDeleteCommand = &cobra.Command{
-	Use:   "delete `name`",
-	Short: "Delete an existing remote `name`.",
+	Use:   "delete name",
+	Short: "Delete an existing remote.",
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		config.DeleteRemote(args[0])
@@ -298,7 +310,7 @@ var configDeleteCommand = &cobra.Command{
 }
 
 var configPasswordCommand = &cobra.Command{
-	Use:   "password `name` [`key` `value`]+",
+	Use:   "password name [key value]+",
 	Short: `Update password in an existing remote.`,
 	Long: strings.ReplaceAll(`
 Update an existing remote's password. The password

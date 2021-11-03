@@ -3,6 +3,8 @@ title: "Authors"
 description: "Rclone Authors and Contributors"
 ---
 
+# Authors and contributors
+
 Authors
 -------
 
@@ -282,7 +284,7 @@ put them back in again.` >}}
   * Chaitanya Bankanhal <bchaitanya15@gmail.com>
   * Michał Matczuk <michal@scylladb.com>
   * Macavirus <macavirus@zoho.com>
-  * Abhinav Sharma <abhi18av@users.noreply.github.com>
+  * Abhinav Sharma <abhi18av@outlook.com>
   * ginvine <34869051+ginvine@users.noreply.github.com>
   * Patrick Wang <mail6543210@yahoo.com.tw>
   * Cenk Alti <cenkalti@gmail.com>
@@ -314,7 +316,7 @@ put them back in again.` >}}
   * Barry Muldrey <barry@muldrey.net>
   * Sebastian Brandt <sebastian.brandt@friday.de>
   * Marco Molteni <marco.molteni@mailbox.org>
-  * Ankur Gupta <ankur0493@gmail.com> <7876747+ankur0493@users.noreply.github.com>
+  * Ankur Gupta <7876747+ankur0493@users.noreply.github.com>
   * Maciej Zimnoch <maciej@scylladb.com>
   * anuar45 <serdaliyev.anuar@gmail.com>
   * Fernando <ferferga@users.noreply.github.com>
@@ -460,7 +462,6 @@ put them back in again.` >}}
   * Alexey Tabakman <samosad.ru@gmail.com>
   * David Sze <sze.david@gmail.com>
   * cynthia kwok <cynthia.m.kwok@gmail.com>
-  * Ankur Gupta <agupta@egnyte.com>
   * Miron Veryanskiy <MironVeryanskiy@gmail.com>
   * K265 <k.265@qq.com>
   * Vesnyx <Vesnyx@users.noreply.github.com>
@@ -511,3 +512,28 @@ put them back in again.` >}}
   * Michael Hanselmann <public@hansmi.ch>
   * Chuan Zh <zhchuan7@gmail.com>
   * Antoine GIRARD <antoine.girard@sapk.fr>
+  * Justin Winokur (Jwink3101) <Jwink3101@users.noreply.github.com>
+  * Mariano Absatz (git) <scm@baby.com.ar>
+  * Greg Sadetsky <lepetitg@gmail.com>
+  * yedamo <logindaveye@gmail.com>
+  * hota <lindwurm.q@gmail.com>
+  * vinibali <vinibali1@gmail.com>
+  * Ken Enrique Morel <ken.morel.santana@gmail.com>
+  * Justin Hellings <justin.hellings@gmail.com>
+  * Parth Shukla <pparth@pparth.net>
+  * wzl <wangzl31@outlook.com>
+  * HNGamingUK <connor@earnshawhome.co.uk>
+  * Jonta <359397+Jonta@users.noreply.github.com>
+  * YenForYang <YenForYang@users.noreply.github.com>
+  * Joda Stößer <stoesser@yay-digital.de> <services+github@simjo.st>
+  * Logeshwaran <waranlogesh@gmail.com>
+  * Rajat Goel <rajat@dropbox.com>
+  * r0kk3rz <r0kk3rz@gmail.com>
+  * Matthew Sevey <mjsevey@gmail.com>
+  * Filip Rysavy <fil@siasky.net>
+  * Ian Levesque <ian@ianlevesque.org>
+  * Thomas Stachl <thomas@stachl.me>
+  * Dmitry Bogatov <git#v1@kaction.cc>
+  * thomae <4493560+thomae@users.noreply.github.com>
+  * trevyn <trevyn-git@protonmail.com>
+  * David Liu <david.yx.liu@oracle.com>

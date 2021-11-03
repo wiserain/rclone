@@ -860,14 +860,69 @@ func syncFprintf(w io.Writer, format string, a ...interface{}) {
 	}
 }
 
+// SizeString make string representation of size for output
+//
+// Optional human-readable format including a binary suffix
+func SizeString(size int64, humanReadable bool) string {
+	if humanReadable {
+		if size < 0 {
+			return "-" + fs.SizeSuffix(-size).String()
+		}
+		return fs.SizeSuffix(size).String()
+	}
+	return strconv.FormatInt(size, 10)
+}
+
+// SizeStringField make string representation of size for output in fixed width field
+//
+// Optional human-readable format including a binary suffix
+// Argument rawWidth is used to format field with of raw value. When humanReadable
+// option the width is hard coded to 9, since SizeSuffix strings have precision 3
+// and longest value will be "999.999Ei". This way the width can be optimized
+// depending to the humanReadable option. To always use a longer width the return
+// value can always be fed into another format string with a specific field with.
+func SizeStringField(size int64, humanReadable bool, rawWidth int) string {
+	str := SizeString(size, humanReadable)
+	if humanReadable {
+		return fmt.Sprintf("%9s", str)
+	}
+	return fmt.Sprintf("%[2]*[1]s", str, rawWidth)
+}
+
+// CountString make string representation of count for output
+//
+// Optional human-readable format including a decimal suffix
+func CountString(count int64, humanReadable bool) string {
+	if humanReadable {
+		if count < 0 {
+			return "-" + fs.CountSuffix(-count).String()
+		}
+		return fs.CountSuffix(count).String()
+	}
+	return strconv.FormatInt(count, 10)
+}
+
+// CountStringField make string representation of count for output in fixed width field
+//
+// Similar to SizeStringField, but human readable with decimal prefix and field width 8
+// since there is no 'i' in the decimal prefix symbols (e.g. "999.999E")
+func CountStringField(count int64, humanReadable bool, rawWidth int) string {
+	str := CountString(count, humanReadable)
+	if humanReadable {
+		return fmt.Sprintf("%8s", str)
+	}
+	return fmt.Sprintf("%[2]*[1]s", str, rawWidth)
+}
+
 // List the Fs to the supplied writer
 //
 // Shows size and path - obeys includes and excludes
 //
 // Lists in parallel which may get them out of order
 func List(ctx context.Context, f fs.Fs, w io.Writer) error {
+	ci := fs.GetConfig(ctx)
 	return ListFn(ctx, f, func(o fs.Object) {
-		syncFprintf(w, "%9d %s\n", o.Size(), o.Remote())
+		syncFprintf(w, "%s %s\n", SizeStringField(o.Size(), ci.HumanReadable, 9), o.Remote())
 	})
 }
 
@@ -877,13 +932,14 @@ func List(ctx context.Context, f fs.Fs, w io.Writer) error {
 //
 // Lists in parallel which may get them out of order
 func ListLong(ctx context.Context, f fs.Fs, w io.Writer) error {
+	ci := fs.GetConfig(ctx)
 	return ListFn(ctx, f, func(o fs.Object) {
 		tr := accounting.Stats(ctx).NewCheckingTransfer(o)
 		defer func() {
 			tr.Done(ctx, nil)
 		}()
 		modTime := o.ModTime(ctx)
-		syncFprintf(w, "%9d %s %s\n", o.Size(), modTime.Local().Format("2006-01-02 15:04:05.000000000"), o.Remote())
+		syncFprintf(w, "%s %s %s\n", SizeStringField(o.Size(), ci.HumanReadable, 9), modTime.Local().Format("2006-01-02 15:04:05.000000000"), o.Remote())
 	})
 }
 
@@ -944,9 +1000,10 @@ func hashSum(ctx context.Context, ht hash.Type, downloadFlag bool, o fs.Object) 
 
 		sum, err = o.Hash(ctx, ht)
 		if err == hash.ErrUnsupported {
-			return "UNSUPPORTED", errors.Wrap(err, "Hash unsupported")
-		} else if err != nil {
-			return "ERROR", errors.Wrapf(err, "Failed to get hash %v from backed: %v", ht, err)
+			return "", errors.Wrap(err, "Hash unsupported")
+		}
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to get hash %v from backend: %v", ht, err)
 		}
 	}
 
@@ -957,6 +1014,10 @@ func hashSum(ctx context.Context, ht hash.Type, downloadFlag bool, o fs.Object) 
 // Updated to handle both standard hex encoding and base64
 // Updated to perform multiple hashes concurrently
 func HashLister(ctx context.Context, ht hash.Type, outputBase64 bool, downloadFlag bool, f fs.Fs, w io.Writer) error {
+	width := hash.Width(ht)
+	if outputBase64 {
+		width = base64.URLEncoding.EncodedLen(width / 2)
+	}
 	concurrencyControl := make(chan struct{}, fs.GetConfig(ctx).Transfers)
 	var wg sync.WaitGroup
 	err := ListFn(ctx, f, func(o fs.Object) {
@@ -968,18 +1029,15 @@ func HashLister(ctx context.Context, ht hash.Type, outputBase64 bool, downloadFl
 				wg.Done()
 			}()
 			sum, err := hashSum(ctx, ht, downloadFlag, o)
-			if outputBase64 && err == nil {
+			if err != nil {
+				fs.Errorf(o, "%v", fs.CountError(err))
+				return
+			}
+			if outputBase64 {
 				hexBytes, _ := hex.DecodeString(sum)
 				sum = base64.URLEncoding.EncodeToString(hexBytes)
-				width := base64.URLEncoding.EncodedLen(hash.Width(ht) / 2)
-				syncFprintf(w, "%*s  %s\n", width, sum, o.Remote())
-			} else {
-				syncFprintf(w, "%*s  %s\n", hash.Width(ht), sum, o.Remote())
 			}
-			if err != nil {
-				err = fs.CountError(err)
-				fs.Errorf(o, "%v", err)
-			}
+			syncFprintf(w, "%*s  %s\n", width, sum, o.Remote())
 		}()
 	})
 	wg.Wait()
@@ -1012,10 +1070,11 @@ func ConfigMaxDepth(ctx context.Context, recursive bool) int {
 
 // ListDir lists the directories/buckets/containers in the Fs to the supplied writer
 func ListDir(ctx context.Context, f fs.Fs, w io.Writer) error {
+	ci := fs.GetConfig(ctx)
 	return walk.ListR(ctx, f, "", false, ConfigMaxDepth(ctx, false), walk.ListDirs, func(entries fs.DirEntries) error {
 		entries.ForDir(func(dir fs.Directory) {
 			if dir != nil {
-				syncFprintf(w, "%12d %13s %9d %s\n", dir.Size(), dir.ModTime(ctx).Local().Format("2006-01-02 15:04:05"), dir.Items(), dir.Remote())
+				syncFprintf(w, "%s %13s %s %s\n", SizeStringField(dir.Size(), ci.HumanReadable, 12), dir.ModTime(ctx).Local().Format("2006-01-02 15:04:05"), CountStringField(dir.Items(), ci.HumanReadable, 9), dir.Remote())
 			}
 		})
 		return nil
@@ -1043,7 +1102,7 @@ func TryRmdir(ctx context.Context, f fs.Fs, dir string) error {
 	if SkipDestructive(ctx, fs.LogDirName(f, dir), "remove directory") {
 		return nil
 	}
-	fs.Debugf(fs.LogDirName(f, dir), "Removing directory")
+	fs.Infof(fs.LogDirName(f, dir), "Removing directory")
 	return f.Rmdir(ctx, dir)
 }
 
@@ -1811,7 +1870,11 @@ func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName str
 	} else {
 		tr := accounting.Stats(ctx).NewCheckingTransfer(srcObj)
 		if !cp {
-			err = DeleteFile(ctx, srcObj)
+			if ci.IgnoreExisting {
+				fs.Debugf(srcObj, "Not removing source file as destination file exists and --ignore-existing is set")
+			} else {
+				err = DeleteFile(ctx, srcObj)
+			}
 		}
 		tr.Done(ctx, err)
 	}
@@ -1840,6 +1903,24 @@ func SetTier(ctx context.Context, fsrc fs.Fs, tier string) error {
 		if err != nil {
 			fs.Errorf(fsrc, "Failed to do SetTier, %v", err)
 		}
+	})
+}
+
+// TouchDir touches every file in f with time t
+func TouchDir(ctx context.Context, f fs.Fs, t time.Time, recursive bool) error {
+	return walk.ListR(ctx, f, "", false, ConfigMaxDepth(ctx, recursive), walk.ListObjects, func(entries fs.DirEntries) error {
+		entries.ForObject(func(o fs.Object) {
+			if !SkipDestructive(ctx, o, "touch") {
+				fs.Debugf(f, "Touching %q", o.Remote())
+				err := o.SetModTime(ctx, t)
+				if err != nil {
+					err = errors.Wrap(err, "failed to touch")
+					err = fs.CountError(err)
+					fs.Errorf(o, "%v", err)
+				}
+			}
+		})
+		return nil
 	})
 }
 

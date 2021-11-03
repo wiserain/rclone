@@ -65,7 +65,7 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "url",
-			Help:     "URL of the Enterprise File Fabric to connect to",
+			Help:     "URL of the Enterprise File Fabric to connect to.",
 			Required: true,
 			Examples: []fs.OptionExample{{
 				Value: "https://storagemadeeasy.com",
@@ -79,14 +79,15 @@ func init() {
 			}},
 		}, {
 			Name: "root_folder_id",
-			Help: `ID of the root folder
+			Help: `ID of the root folder.
+
 Leave blank normally.
 
 Fill in to make rclone start with directory of a given ID.
 `,
 		}, {
 			Name: "permanent_token",
-			Help: `Permanent Authentication Token
+			Help: `Permanent Authentication Token.
 
 A Permanent Authentication Token can be created in the Enterprise File
 Fabric, on the users Dashboard under Security, there is an entry
@@ -99,7 +100,7 @@ For more info see: https://docs.storagemadeeasy.com/organisationcloud/api-tokens
 `,
 		}, {
 			Name: "token",
-			Help: `Session Token
+			Help: `Session Token.
 
 This is a session token which rclone caches in the config file. It is
 usually valid for 1 hour.
@@ -109,14 +110,14 @@ Don't set this value - rclone will set it automatically.
 			Advanced: true,
 		}, {
 			Name: "token_expiry",
-			Help: `Token expiry time
+			Help: `Token expiry time.
 
 Don't set this value - rclone will set it automatically.
 `,
 			Advanced: true,
 		}, {
 			Name: "version",
-			Help: `Version read from the file fabric
+			Help: `Version read from the file fabric.
 
 Don't set this value - rclone will set it automatically.
 `,
@@ -222,13 +223,14 @@ var retryStatusCodes = []struct {
 		// delete in that folder. Please try again later or use
 		// another name. (error_background)
 		code:  "error_background",
-		sleep: 6 * time.Second,
+		sleep: 1 * time.Second,
 	},
 }
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error, status api.OKError) (bool, error) {
+// try should be the number of the tries so far, counting up from 1
+func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error, status api.OKError, try int) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
@@ -244,9 +246,10 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error, st
 			for _, retryCode := range retryStatusCodes {
 				if code == retryCode.code {
 					if retryCode.sleep > 0 {
-						// make this thread only sleep extra time
-						fs.Debugf(f, "Sleeping for %v to wait for %q error to clear", retryCode.sleep, retryCode.code)
-						time.Sleep(retryCode.sleep)
+						// make this thread only sleep exponentially increasing extra time
+						sleepTime := retryCode.sleep << (try - 1)
+						fs.Debugf(f, "Sleeping for %v to wait for %q error to clear", sleepTime, retryCode.code)
+						time.Sleep(sleepTime)
 					}
 					return true, err
 				}
@@ -400,11 +403,13 @@ func (f *Fs) rpc(ctx context.Context, function string, p params, result api.OKEr
 		ContentType: "application/x-www-form-urlencoded",
 		Options:     options,
 	}
+	try := 0
 	err = f.pacer.Call(func() (bool, error) {
+		try++
 		// Refresh the body each retry
 		opts.Body = strings.NewReader(data.Encode())
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, result)
-		return f.shouldRetry(ctx, resp, err, result)
+		return f.shouldRetry(ctx, resp, err, result, try)
 	})
 	if err != nil {
 		return resp, err
@@ -839,7 +844,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 }
 
 // Wait for the the background task to complete if necessary
-func (f *Fs) waitForBackgroundTask(ctx context.Context, taskID string) (err error) {
+func (f *Fs) waitForBackgroundTask(ctx context.Context, taskID api.String) (err error) {
 	if taskID == "" || taskID == "0" {
 		// No task to wait for
 		return nil
@@ -1089,7 +1094,7 @@ func (o *Object) Size() int64 {
 // setMetaData sets the metadata from info
 func (o *Object) setMetaData(info *api.Item) (err error) {
 	if info.Type != api.ItemTypeFile {
-		return errors.Wrapf(fs.ErrorNotAFile, "%q is %q", o.remote, info.Type)
+		return fs.ErrorIsDir
 	}
 	o.hasMetaData = true
 	o.size = info.Size
@@ -1278,9 +1283,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		var contentLength = size
 		opts.ContentLength = &contentLength // NB CallJSON scribbles on this which is naughty
 	}
+	try := 0
 	err = o.fs.pacer.CallNoRetry(func() (bool, error) {
+		try++
 		resp, err := o.fs.srv.CallJSON(ctx, &opts, nil, &uploader)
-		return o.fs.shouldRetry(ctx, resp, err, nil)
+		return o.fs.shouldRetry(ctx, resp, err, nil, try)
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to upload")

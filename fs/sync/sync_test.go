@@ -1342,6 +1342,65 @@ func TestMoveWithoutDeleteEmptySrcDirs(t *testing.T) {
 	fstest.CheckItems(t, r.Fremote, file1, file2)
 }
 
+func TestMoveWithIgnoreExisting(t *testing.T) {
+	ctx := context.Background()
+	ctx, ci := fs.AddConfig(ctx)
+	r := fstest.NewRun(t)
+	defer r.Finalise()
+	file1 := r.WriteFile("existing", "potato", t1)
+	file2 := r.WriteFile("existing-b", "tomato", t1)
+
+	ci.IgnoreExisting = true
+
+	accounting.GlobalStats().ResetCounters()
+	err := MoveDir(ctx, r.Fremote, r.Flocal, false, false)
+	require.NoError(t, err)
+	fstest.CheckListingWithPrecision(
+		t,
+		r.Flocal,
+		[]fstest.Item{},
+		[]string{},
+		fs.GetModifyWindow(ctx, r.Flocal),
+	)
+	fstest.CheckListingWithPrecision(
+		t,
+		r.Fremote,
+		[]fstest.Item{
+			file1,
+			file2,
+		},
+		[]string{},
+		fs.GetModifyWindow(ctx, r.Fremote),
+	)
+
+	// Recreate first file with modified content
+	file1b := r.WriteFile("existing", "newpotatoes", t2)
+	accounting.GlobalStats().ResetCounters()
+	err = MoveDir(ctx, r.Fremote, r.Flocal, false, false)
+	require.NoError(t, err)
+	// Source items should still exist in modified state
+	fstest.CheckListingWithPrecision(
+		t,
+		r.Flocal,
+		[]fstest.Item{
+			file1b,
+		},
+		[]string{},
+		fs.GetModifyWindow(ctx, r.Flocal),
+	)
+	// Dest items should not have changed
+	fstest.CheckListingWithPrecision(
+		t,
+		r.Fremote,
+		[]fstest.Item{
+			file1,
+			file2,
+		},
+		[]string{},
+		fs.GetModifyWindow(ctx, r.Fremote),
+	)
+}
+
 // Test a server-side move if possible, or the backup path if not
 func TestServerSideMove(t *testing.T) {
 	ctx := context.Background()
@@ -2032,6 +2091,9 @@ func testSyncConcurrent(t *testing.T, subtest string) {
 	fstest.CheckItems(t, r.Fremote, itemsBefore...)
 	stats.ResetErrors()
 	err := Sync(ctx, r.Fremote, r.Flocal, false)
+	if err == fs.ErrorCantUploadEmptyFiles {
+		t.Skipf("Skip test because remote cannot upload empty files")
+	}
 	assert.NoError(t, err, "Sync must not return a error")
 	assert.False(t, stats.Errored(), "Low level errors must not have happened")
 	fstest.CheckItems(t, r.Fremote, itemsAfter...)

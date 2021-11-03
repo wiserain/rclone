@@ -86,7 +86,7 @@ func init() {
 			Advanced: true,
 		}, {
 			Name:     "trashed_only",
-			Help:     "Only show files that are in the trash.\nThis will show trashed files in their original directory structure.",
+			Help:     "Only show files that are in the trash.\n\nThis will show trashed files in their original directory structure.",
 			Default:  false,
 			Advanced: true,
 		}, {
@@ -122,15 +122,15 @@ func init() {
 func Config(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
 	switch config.State {
 	case "":
-		return fs.ConfigChooseFixed("auth_type_done", "config_type", `Authentication type`, []fs.OptionExample{{
+		return fs.ConfigChooseFixed("auth_type_done", "config_type", `Authentication type.`, []fs.OptionExample{{
 			Value: "standard",
-			Help:  "Standard authentication - use this if you're a normal Jottacloud user.",
+			Help:  "Standard authentication.\nUse this if you're a normal Jottacloud user.",
 		}, {
 			Value: "legacy",
-			Help:  "Legacy authentication - this is only required for certain whitelabel versions of Jottacloud and not recommended for normal users.",
+			Help:  "Legacy authentication.\nThis is only required for certain whitelabel versions of Jottacloud and not recommended for normal users.",
 		}, {
 			Value: "telia",
-			Help:  "Telia Cloud authentication - use this if you are using Telia Cloud.",
+			Help:  "Telia Cloud authentication.\nUse this if you are using Telia Cloud.",
 		}})
 	case "auth_type_done":
 		// Jump to next state according to config chosen
@@ -599,7 +599,9 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Jo
 	if err != nil {
 		return nil, errors.Wrap(err, "read metadata failed")
 	}
-	if result.XMLName.Local != "file" {
+	if result.XMLName.Local == "folder" {
+		return nil, fs.ErrorIsDir
+	} else if result.XMLName.Local != "file" {
 		return nil, fs.ErrorNotAFile
 	}
 	return &result, nil
@@ -762,7 +764,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	// Renew the token in the background
 	f.tokenRenewer = oauthutil.NewRenew(f.String(), ts, func() error {
 		_, err := f.readMetaDataForPath(ctx, "")
-		if err == fs.ErrorNotAFile {
+		if err == fs.ErrorNotAFile || err == fs.ErrorIsDir {
 			err = nil
 		}
 		return err
@@ -784,7 +786,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		}
 		_, err := f.NewObject(context.TODO(), remote)
 		if err != nil {
-			if errors.Cause(err) == fs.ErrorObjectNotFound || errors.Cause(err) == fs.ErrorNotAFile {
+			if uErr := errors.Cause(err); uErr == fs.ErrorObjectNotFound || uErr == fs.ErrorNotAFile || uErr == fs.ErrorIsDir {
 				// File doesn't exist so return old f
 				f.root = root
 				return f, nil
@@ -807,8 +809,10 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Jot
 	}
 	var err error
 	if info != nil {
-		// Set info
-		err = o.setMetaData(info)
+		if !f.validFile(info) {
+			return nil, fs.ErrorObjectNotFound
+		}
+		err = o.setMetaData(info) // sets the info
 	} else {
 		err = o.readMetaData(ctx, false) // reads info and meta, returning an error
 	}
@@ -880,37 +884,27 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 		return nil, errors.Wrap(err, "couldn't list files")
 	}
 
-	if bool(result.Deleted) && !f.opt.TrashedOnly {
+	if !f.validFolder(&result) {
 		return nil, fs.ErrorDirNotFound
 	}
 
 	for i := range result.Folders {
 		item := &result.Folders[i]
-		if !f.opt.TrashedOnly && bool(item.Deleted) {
-			continue
+		if f.validFolder(item) {
+			remote := path.Join(dir, f.opt.Enc.ToStandardName(item.Name))
+			d := fs.NewDir(remote, time.Time(item.ModifiedAt))
+			entries = append(entries, d)
 		}
-		remote := path.Join(dir, f.opt.Enc.ToStandardName(item.Name))
-		d := fs.NewDir(remote, time.Time(item.ModifiedAt))
-		entries = append(entries, d)
 	}
 
 	for i := range result.Files {
 		item := &result.Files[i]
-		if f.opt.TrashedOnly {
-			if !item.Deleted || item.State != "COMPLETED" {
-				continue
-			}
-		} else {
-			if item.Deleted || item.State != "COMPLETED" {
-				continue
+		if f.validFile(item) {
+			remote := path.Join(dir, f.opt.Enc.ToStandardName(item.Name))
+			if o, err := f.newObjectWithInfo(ctx, remote, item); err == nil {
+				entries = append(entries, o)
 			}
 		}
-		remote := path.Join(dir, f.opt.Enc.ToStandardName(item.Name))
-		o, err := f.newObjectWithInfo(ctx, remote, item)
-		if err != nil {
-			continue
-		}
-		entries = append(entries, o)
 	}
 	return entries, nil
 }
@@ -927,7 +921,7 @@ func (f *Fs) listFileDir(ctx context.Context, remoteStartPath string, startFolde
 	startPathLength := len(startPath)
 	for i := range startFolder.Folders {
 		folder := &startFolder.Folders[i]
-		if folder.Deleted {
+		if !f.validFolder(folder) {
 			return nil
 		}
 		folderPath := f.opt.Enc.ToStandardPath(path.Join(folder.Path, folder.Name))
@@ -945,17 +939,16 @@ func (f *Fs) listFileDir(ctx context.Context, remoteStartPath string, startFolde
 		}
 		for i := range folder.Files {
 			file := &folder.Files[i]
-			if file.Deleted || file.State != "COMPLETED" {
-				continue
-			}
-			remoteFile := path.Join(remoteDir, f.opt.Enc.ToStandardName(file.Name))
-			o, err := f.newObjectWithInfo(ctx, remoteFile, file)
-			if err != nil {
-				return err
-			}
-			err = fn(o)
-			if err != nil {
-				return err
+			if f.validFile(file) {
+				remoteFile := path.Join(remoteDir, f.opt.Enc.ToStandardName(file.Name))
+				o, err := f.newObjectWithInfo(ctx, remoteFile, file)
+				if err != nil {
+					return err
+				}
+				err = fn(o)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1268,15 +1261,23 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 		return "", errors.Wrap(err, "couldn't create public link")
 	}
 	if unlink {
-		if result.PublicSharePath != "" {
-			return "", errors.Errorf("couldn't remove public link - %q", result.PublicSharePath)
+		if result.PublicURI != "" {
+			return "", errors.Errorf("couldn't remove public link - %q", result.PublicURI)
 		}
 		return "", nil
 	}
-	if result.PublicSharePath == "" {
-		return "", errors.New("couldn't create public link - no link path received")
+	if result.PublicURI == "" {
+		return "", errors.New("couldn't create public link - no uri received")
 	}
-	return joinPath(baseURL, result.PublicSharePath), nil
+	if result.PublicSharePath != "" {
+		webLink := joinPath(baseURL, result.PublicSharePath)
+		fs.Debugf(nil, "Web link: %s", webLink)
+	} else {
+		fs.Debugf(nil, "No web link received")
+	}
+	directLink := joinPath(baseURL, fmt.Sprintf("opin/io/downloadPublic/%s/%s", f.user, result.PublicURI))
+	fs.Debugf(nil, "Direct link: %s", directLink)
+	return directLink, nil
 }
 
 // About gets quota information
@@ -1294,6 +1295,21 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 		usage.Free = fs.NewUsageValue(info.Capacity - info.Usage)
 	}
 	return usage, nil
+}
+
+// UserInfo fetches info about the current user
+func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err error) {
+	cust, err := getCustomerInfo(ctx, f.apiSrv)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"Username":         cust.Username,
+		"Email":            cust.Email,
+		"Name":             cust.Name,
+		"AccountType":      cust.AccountType,
+		"SubscriptionType": cust.SubscriptionType,
+	}, nil
 }
 
 // CleanUp empties the trash
@@ -1366,6 +1382,25 @@ func (o *Object) MimeType(ctx context.Context) string {
 	return o.mimeType
 }
 
+// validFile checks if info indicates file is valid
+func (f *Fs) validFile(info *api.JottaFile) bool {
+	if info.State != "COMPLETED" {
+		return false // File is incomplete or corrupt
+	}
+	if !info.Deleted {
+		return !f.opt.TrashedOnly // Regular file; return false if TrashedOnly, else true
+	}
+	return f.opt.TrashedOnly // Deleted file; return true if TrashedOnly, else false
+}
+
+// validFolder checks if info indicates folder is valid
+func (f *Fs) validFolder(info *api.JottaFolder) bool {
+	// Returns true if folder is not deleted.
+	// If TrashedOnly option then always returns true, because a folder not
+	// in trash must be traversed to get to files/subfolders that are.
+	return !bool(info.Deleted) || f.opt.TrashedOnly
+}
+
 // setMetaData sets the metadata from info
 func (o *Object) setMetaData(info *api.JottaFile) (err error) {
 	o.hasMetaData = true
@@ -1385,7 +1420,7 @@ func (o *Object) readMetaData(ctx context.Context, force bool) (err error) {
 	if err != nil {
 		return err
 	}
-	if bool(info.Deleted) && !o.fs.opt.TrashedOnly {
+	if !o.fs.validFile(info) {
 		return fs.ErrorObjectNotFound
 	}
 	return o.setMetaData(info)
@@ -1406,7 +1441,50 @@ func (o *Object) ModTime(ctx context.Context) time.Time {
 
 // SetModTime sets the modification time of the local fs object
 func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
-	return fs.ErrorCantSetModTime
+	// make sure metadata is available, we need its current size and md5
+	err := o.readMetaData(ctx, false)
+	if err != nil {
+		fs.Logf(o, "Failed to read metadata: %v", err)
+		return err
+	}
+
+	// prepare allocate request with existing metadata but changed timestamps
+	var resp *http.Response
+	var options []fs.OpenOption
+	opts := rest.Opts{
+		Method:       "POST",
+		Path:         "files/v1/allocate",
+		Options:      options,
+		ExtraHeaders: make(map[string]string),
+	}
+	fileDate := api.Time(modTime).APIString()
+	var request = api.AllocateFileRequest{
+		Bytes:    o.size,
+		Created:  fileDate,
+		Modified: fileDate,
+		Md5:      o.md5,
+		Path:     path.Join(o.fs.opt.Mountpoint, o.fs.opt.Enc.FromStandardPath(path.Join(o.fs.root, o.remote))),
+	}
+
+	// send it
+	var response api.AllocateFileResponse
+	err = o.fs.pacer.Call(func() (bool, error) {
+		resp, err = o.fs.apiSrv.CallJSON(ctx, &opts, &request, &response)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return err
+	}
+
+	// check response
+	if response.State != "COMPLETED" {
+		// could be the file was modified (size/md5 changed) between readMetaData and the allocate request
+		return errors.New("metadata did not match")
+	}
+
+	// update local metadata
+	o.modTime = modTime
+	return nil
 }
 
 // Storable returns a boolean showing whether this object storable
@@ -1639,6 +1717,7 @@ var (
 	_ fs.ListRer      = (*Fs)(nil)
 	_ fs.PublicLinker = (*Fs)(nil)
 	_ fs.Abouter      = (*Fs)(nil)
+	_ fs.UserInfoer   = (*Fs)(nil)
 	_ fs.CleanUpper   = (*Fs)(nil)
 	_ fs.Object       = (*Object)(nil)
 	_ fs.MimeTyper    = (*Object)(nil)

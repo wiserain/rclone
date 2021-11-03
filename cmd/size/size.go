@@ -18,7 +18,7 @@ var jsonOutput bool
 func init() {
 	cmd.Root.AddCommand(commandDefinition)
 	cmdFlags := commandDefinition.Flags()
-	flags.BoolVarP(cmdFlags, &jsonOutput, "json", "", false, "format output as JSON")
+	flags.BoolVarP(cmdFlags, &jsonOutput, "json", "", false, "Format output as JSON")
 }
 
 var commandDefinition = &cobra.Command{
@@ -42,10 +42,8 @@ var commandDefinition = &cobra.Command{
 			if jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode(results)
 			}
-
-			fmt.Printf("Total objects: %d\n", results.Count)
-			fmt.Printf("Total size: %s (%d bytes)\n", fs.SizeSuffix(results.Bytes).ByteUnit(), results.Bytes)
-
+			fmt.Printf("Total objects: %s (%d)\n", fs.CountSuffix(results.Count), results.Count)
+			fmt.Printf("Total size: %s (%d Byte)\n", fs.SizeSuffix(results.Bytes).ByteUnit(), results.Bytes)
 			return nil
 		})
 	},

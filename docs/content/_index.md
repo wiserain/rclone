@@ -44,8 +44,9 @@ using local disk.
 
 Virtual backends wrap local and cloud file systems to apply
 [encryption](/crypt/), 
-[compression](/compress/)
-[chunking](/chunker/) and
+[compression](/compress/),
+[chunking](/chunker/),
+[hashing](/hasher/) and
 [joining](/union/).
 
 Rclone [mounts](/commands/rclone_mount/) any local, cloud or
@@ -137,7 +138,7 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="OVH" home="https://www.ovh.co.uk/public-cloud/storage/object-storage/" config="/swift/" >}}
 {{< provider name="OpenDrive" home="https://www.opendrive.com/" config="/opendrive/" >}}
 {{< provider name="OpenStack Swift" home="https://docs.openstack.org/swift/latest/" config="/swift/" >}}
-{{< provider name="Oracle Cloud Storage" home="https://cloud.oracle.com/storage-opc" config="/swift/" >}}
+{{< provider name="Oracle Cloud Storage" home="https://cloud.oracle.com/object-storage/buckets" config="/swift/" >}}
 {{< provider name="ownCloud" home="https://owncloud.org/" config="/webdav/#owncloud" >}}
 {{< provider name="pCloud" home="https://www.pcloud.com/" config="/pcloud/" >}}
 {{< provider name="premiumize.me" home="https://premiumize.me/" config="/premiumizeme/" >}}
@@ -149,6 +150,7 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="Seafile" home="https://www.seafile.com/" config="/seafile/" >}}
 {{< provider name="SeaweedFS" home="https://github.com/chrislusf/seaweedfs/" config="/s3/#seaweedfs" >}}
 {{< provider name="SFTP" home="https://en.wikipedia.org/wiki/SSH_File_Transfer_Protocol" config="/sftp/" >}}
+{{< provider name="Sia" home="https://sia.tech/" config="/sia/" >}}
 {{< provider name="StackPath" home="https://www.stackpath.com/products/object-storage/" config="/s3/#stackpath" >}}
 {{< provider name="SugarSync" home="https://sugarsync.com/" config="/sugarsync/" >}}
 {{< provider name="Tardigrade" home="https://tardigrade.io/" config="/tardigrade/" >}}

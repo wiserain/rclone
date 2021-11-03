@@ -43,12 +43,12 @@ var Opt = DefaultOpt
 // AddFlags adds flags for the sftp
 func AddFlags(flagSet *pflag.FlagSet, Opt *Options) {
 	rc.AddOption("sftp", &Opt)
-	flags.StringVarP(flagSet, &Opt.ListenAddr, "addr", "", Opt.ListenAddr, "IPaddress:Port or :Port to bind server to.")
+	flags.StringVarP(flagSet, &Opt.ListenAddr, "addr", "", Opt.ListenAddr, "IPaddress:Port or :Port to bind server to")
 	flags.StringArrayVarP(flagSet, &Opt.HostKeys, "key", "", Opt.HostKeys, "SSH private host key file (Can be multi-valued, leave blank to auto generate)")
 	flags.StringVarP(flagSet, &Opt.AuthorizedKeys, "authorized-keys", "", Opt.AuthorizedKeys, "Authorized keys file")
-	flags.StringVarP(flagSet, &Opt.User, "user", "", Opt.User, "User name for authentication.")
-	flags.StringVarP(flagSet, &Opt.Pass, "pass", "", Opt.Pass, "Password for authentication.")
-	flags.BoolVarP(flagSet, &Opt.NoAuth, "no-auth", "", Opt.NoAuth, "Allow connections with no authentication if set.")
+	flags.StringVarP(flagSet, &Opt.User, "user", "", Opt.User, "User name for authentication")
+	flags.StringVarP(flagSet, &Opt.Pass, "pass", "", Opt.Pass, "Password for authentication")
+	flags.BoolVarP(flagSet, &Opt.NoAuth, "no-auth", "", Opt.NoAuth, "Allow connections with no authentication if set")
 	flags.BoolVarP(flagSet, &Opt.Stdio, "stdio", "", Opt.Stdio, "Run an sftp server on run stdin/stdout")
 }
 
@@ -84,8 +84,10 @@ that it can provide md5sum/sha1sum/df information for the rclone sftp
 backend.  This means that is can support SHA1SUMs, MD5SUMs and the
 about command when paired with the rclone sftp backend.
 
-If you don't supply a --key then rclone will generate one and cache it
-for later use.
+If you don't supply a host --key then rclone will generate rsa, ecdsa
+and ed25519 variants, and cache them for later use in rclone's cache
+directory (see "rclone help flags cache-dir") in the "serve-sftp"
+directory.
 
 By default the server binds to localhost:2022 - if you want it to be
 reachable externally then supply "--addr :2022" for example.

@@ -32,29 +32,29 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "endpoint",
-			Help:     "The Koofr API endpoint to use",
+			Help:     "The Koofr API endpoint to use.",
 			Default:  "https://app.koofr.net",
 			Required: true,
 			Advanced: true,
 		}, {
 			Name:     "mountid",
-			Help:     "Mount ID of the mount to use. If omitted, the primary mount is used.",
+			Help:     "Mount ID of the mount to use.\n\nIf omitted, the primary mount is used.",
 			Required: false,
 			Default:  "",
 			Advanced: true,
 		}, {
 			Name:     "setmtime",
-			Help:     "Does the backend support setting modification time. Set this to false if you use a mount ID that points to a Dropbox or Amazon Drive backend.",
+			Help:     "Does the backend support setting modification time.\n\nSet this to false if you use a mount ID that points to a Dropbox or Amazon Drive backend.",
 			Default:  true,
 			Required: true,
 			Advanced: true,
 		}, {
 			Name:     "user",
-			Help:     "Your Koofr user name",
+			Help:     "Your Koofr user name.",
 			Required: true,
 		}, {
 			Name:       "password",
-			Help:       "Your Koofr password for rclone (generate one at https://app.koofr.net/app/admin/preferences/password)",
+			Help:       "Your Koofr password for rclone (generate one at https://app.koofr.net/app/admin/preferences/password).",
 			IsPassword: true,
 			Required:   true,
 		}, {
@@ -344,7 +344,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (obj fs.Object, err e
 		return nil, translateErrorsObject(err)
 	}
 	if info.Type == "dir" {
-		return nil, fs.ErrorNotAFile
+		return nil, fs.ErrorIsDir
 	}
 	return &Object{
 		fs:     f,
@@ -608,5 +608,25 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 	if err != nil {
 		return "", translateErrorsDir(err)
 	}
-	return linkData.ShortURL, nil
+
+	// URL returned by API looks like following:
+	//
+	// https://app.koofr.net/links/35d9fb92-74a3-4930-b4ed-57f123bfb1a6
+	//
+	// Direct url looks like following:
+	//
+	// https://app.koofr.net/content/links/39a6cc01-3b23-477a-8059-c0fb3b0f15de/files/get?path=%2F
+	//
+	// I am not sure about meaning of "path" parameter; in my expriments
+	// it is always "%2F", and omitting it or putting any other value
+	// results in 404.
+	//
+	// There is one more quirk: direct link to file in / returns that file,
+	// direct link to file somewhere else in hierarchy returns zip archive
+	// with one member.
+	link := linkData.URL
+	link = strings.ReplaceAll(link, "/links", "/content/links")
+	link += "/files/get?path=%2F"
+
+	return link, nil
 }

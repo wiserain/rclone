@@ -51,7 +51,7 @@ const (
 	ConfigEncoding = "encoding"
 
 	// ConfigEncodingHelp is the help for ConfigEncoding
-	ConfigEncodingHelp = "This sets the encoding for the backend.\n\nSee: the [encoding section in the overview](/overview/#encoding) for more info."
+	ConfigEncodingHelp = "This sets the encoding for the backend.\n\nSee the [encoding section in the overview](/overview/#encoding) for more info."
 
 	// ConfigAuthorize indicates that we just want "rclone authorize"
 	ConfigAuthorize = "config_authorize"
@@ -102,17 +102,13 @@ type Storage interface {
 
 // Global
 var (
-	// CacheDir points to the cache directory.  Users of this
-	// should make a subdirectory and use MkdirAll() to create it
-	// and any parents.
-	CacheDir = makeCacheDir()
-
 	// Password can be used to configure the random password generator
 	Password = random.Password
 )
 
 var (
 	configPath string
+	cacheDir   string
 	data       Storage
 	dataLoaded bool
 )
@@ -122,6 +118,7 @@ func init() {
 	fs.ConfigFileGet = FileGetFlag
 	fs.ConfigFileSet = SetValueAndSave
 	configPath = makeConfigPath()
+	cacheDir = makeCacheDir() // Has fallback to tempDir, so set that first
 	data = newDefaultStorage()
 }
 
@@ -275,7 +272,7 @@ func makeConfigPath() string {
 			return configFile
 		}
 		var mkdirErr error
-		if mkdirErr = os.MkdirAll(configDir, os.ModePerm); mkdirErr == nil {
+		if mkdirErr = file.MkdirAll(configDir, os.ModePerm); mkdirErr == nil {
 			return configFile
 		}
 		// Problem: Try a fallback location. If we did find a home directory then
@@ -711,4 +708,48 @@ func makeCacheDir() (dir string) {
 		dir = os.TempDir()
 	}
 	return filepath.Join(dir, "rclone")
+}
+
+// GetCacheDir returns the default directory for cache
+//
+// The directory is neither guaranteed to exist nor have accessible permissions.
+// Users of this should make a subdirectory and use MkdirAll() to create it
+// and any parents.
+func GetCacheDir() string {
+	return cacheDir
+}
+
+// SetCacheDir sets new default directory for cache
+func SetCacheDir(path string) (err error) {
+	cacheDir, err = filepath.Abs(path)
+	return
+}
+
+// SetTempDir sets new default directory to use for temporary files.
+//
+// Assuming golang's os.TempDir is used to get the directory:
+// "On Unix systems, it returns $TMPDIR if non-empty, else /tmp. On Windows,
+// it uses GetTempPath, returning the first non-empty value from %TMP%, %TEMP%,
+// %USERPROFILE%, or the Windows directory."
+//
+// To override the default we therefore set environment variable TMPDIR
+// on Unix systems, and both TMP and TEMP on Windows (they are almost exclusively
+// aliases for the same path, and programs may refer to to either of them).
+// This should make all libraries and forked processes use the same.
+func SetTempDir(path string) (err error) {
+	var tempDir string
+	if tempDir, err = filepath.Abs(path); err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		if err = os.Setenv("TMP", tempDir); err != nil {
+			return err
+		}
+		if err = os.Setenv("TEMP", tempDir); err != nil {
+			return err
+		}
+	} else {
+		return os.Setenv("TMPDIR", tempDir)
+	}
+	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -293,6 +294,9 @@ func TestInternalCachedWrittenContentMatches(t *testing.T) {
 }
 
 func TestInternalDoubleWrittenContentMatches(t *testing.T) {
+	if runtime.GOOS == "windows" && runtime.GOARCH == "386" {
+		t.Skip("Skip test on windows/386")
+	}
 	id := fmt.Sprintf("tidwcm%v", time.Now().Unix())
 	rootFs, boltDb := runInstance.newCacheFs(t, remoteName, id, false, true, nil, nil)
 	defer runInstance.cleanupFs(t, rootFs, boltDb)
@@ -681,6 +685,9 @@ func TestInternalCacheWrites(t *testing.T) {
 }
 
 func TestInternalMaxChunkSizeRespected(t *testing.T) {
+	if runtime.GOOS == "windows" && runtime.GOARCH == "386" {
+		t.Skip("Skip test on windows/386")
+	}
 	id := fmt.Sprintf("timcsr%v", time.Now().Unix())
 	rootFs, boltDb := runInstance.newCacheFs(t, remoteName, id, false, true, nil, map[string]string{"workers": "1"})
 	defer runInstance.cleanupFs(t, rootFs, boltDb)
@@ -919,9 +926,9 @@ func (r *run) newCacheFs(t *testing.T, remote, id string, needRemote, purge bool
 		}
 	}
 	runInstance.rootIsCrypt = rootIsCrypt
-	runInstance.dbPath = filepath.Join(config.CacheDir, "cache-backend", cacheRemote+".db")
-	runInstance.chunkPath = filepath.Join(config.CacheDir, "cache-backend", cacheRemote)
-	runInstance.vfsCachePath = filepath.Join(config.CacheDir, "vfs", remote)
+	runInstance.dbPath = filepath.Join(config.GetCacheDir(), "cache-backend", cacheRemote+".db")
+	runInstance.chunkPath = filepath.Join(config.GetCacheDir(), "cache-backend", cacheRemote)
+	runInstance.vfsCachePath = filepath.Join(config.GetCacheDir(), "vfs", remote)
 	boltDb, err := cache.GetPersistent(runInstance.dbPath, runInstance.chunkPath, &cache.Features{PurgeDb: true})
 	require.NoError(t, err)
 

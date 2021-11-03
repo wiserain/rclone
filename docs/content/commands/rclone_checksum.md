@@ -20,6 +20,8 @@ If you supply the `--download` flag, it will download the data from remote
 and calculate the contents hash on the fly.  This can be useful for remotes
 that don't support hashes or if you really want to check all the data.
 
+Note that hash values in the SUM file are treated as case insensitive.
+
 If you supply the `--one-way` flag, it will only check that files in
 the source match the files in the destination, not the other way
 around. This means that extra files in the destination that are not in
@@ -51,7 +53,7 @@ rclone checksum <hash> sumfile src:path [flags]
 ```
       --combined string         Make a combined report of changes to this file
       --differ string           Report all non-matching files to this file
-      --download                Check by hashing the contents.
+      --download                Check by hashing the contents
       --error string            Report all files with errors (hashing or reading) to this file
   -h, --help                    help for checksum
       --match string            Report all matching files to this file

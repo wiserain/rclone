@@ -56,28 +56,24 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "host",
-			Help:     "SSH host to connect to",
+			Help:     "SSH host to connect to.\n\nE.g. \"example.com\".",
 			Required: true,
-			Examples: []fs.OptionExample{{
-				Value: "example.com",
-				Help:  "Connect to example.com",
-			}},
 		}, {
 			Name: "user",
-			Help: "SSH username, leave blank for current username, " + currentUser,
+			Help: "SSH username, leave blank for current username, " + currentUser + ".",
 		}, {
 			Name: "port",
-			Help: "SSH port, leave blank to use default (22)",
+			Help: "SSH port, leave blank to use default (22).",
 		}, {
 			Name:       "pass",
 			Help:       "SSH password, leave blank to use ssh-agent.",
 			IsPassword: true,
 		}, {
 			Name: "key_pem",
-			Help: "Raw PEM-encoded private key, If specified, will override key_file parameter.",
+			Help: "Raw PEM-encoded private key.\n\nIf specified, will override key_file parameter.",
 		}, {
 			Name: "key_file",
-			Help: "Path to PEM-encoded private key file, leave blank or set key-use-agent to use ssh-agent." + env.ShellExpandHelp,
+			Help: "Path to PEM-encoded private key file.\n\nLeave blank or set key-use-agent to use ssh-agent." + env.ShellExpandHelp,
 		}, {
 			Name: "key_file_pass",
 			Help: `The passphrase to decrypt the PEM-encoded private key file.
@@ -98,7 +94,7 @@ Set this value to enable server host key validation.` + env.ShellExpandHelp,
 			Advanced: true,
 			Examples: []fs.OptionExample{{
 				Value: "~/.ssh/known_hosts",
-				Help:  "Use OpenSSH's known_hosts file",
+				Help:  "Use OpenSSH's known_hosts file.",
 			}},
 		}, {
 			Name: "key_use_agent",
@@ -135,7 +131,7 @@ Those algorithms are insecure and may allow plaintext data to be recovered by an
 		}, {
 			Name:    "disable_hashcheck",
 			Default: false,
-			Help:    "Disable the execution of SSH commands to determine if remote file hashing is available.\nLeave blank or set to false to enable hashing (recommended), set to true to disable hashing.",
+			Help:    "Disable the execution of SSH commands to determine if remote file hashing is available.\n\nLeave blank or set to false to enable hashing (recommended), set to true to disable hashing.",
 		}, {
 			Name:    "ask_password",
 			Default: false,
@@ -170,12 +166,12 @@ Home directory can be found in a shared folder called "home"
 		}, {
 			Name:     "md5sum_command",
 			Default:  "",
-			Help:     "The command used to read md5 hashes. Leave blank for autodetect.",
+			Help:     "The command used to read md5 hashes.\n\nLeave blank for autodetect.",
 			Advanced: true,
 		}, {
 			Name:     "sha1sum_command",
 			Default:  "",
-			Help:     "The command used to read sha1 hashes. Leave blank for autodetect.",
+			Help:     "The command used to read sha1 hashes.\n\nLeave blank for autodetect.",
 			Advanced: true,
 		}, {
 			Name:     "skip_links",
@@ -197,7 +193,7 @@ The subsystem option is ignored when server_command is defined.`,
 		}, {
 			Name:    "use_fstat",
 			Default: false,
-			Help: `If set use fstat instead of stat
+			Help: `If set use fstat instead of stat.
 
 Some servers limit the amount of open files and calling Stat after opening
 the file will throw an error from the server. Setting this flag will call
@@ -211,7 +207,7 @@ any given time.
 		}, {
 			Name:    "disable_concurrent_reads",
 			Default: false,
-			Help: `If set don't use concurrent reads
+			Help: `If set don't use concurrent reads.
 
 Normally concurrent reads are safe to use and not using them will
 degrade performance, so this option is disabled by default.
@@ -230,7 +226,7 @@ If concurrent reads are disabled, the use_fstat option is ignored.
 		}, {
 			Name:    "disable_concurrent_writes",
 			Default: false,
-			Help: `If set don't use concurrent writes
+			Help: `If set don't use concurrent writes.
 
 Normally rclone uses concurrent writes to upload files. This improves
 the performance greatly, especially for distant servers.
@@ -241,7 +237,7 @@ This option disables concurrent writes should that be necessary.
 		}, {
 			Name:    "idle_timeout",
 			Default: fs.Duration(60 * time.Second),
-			Help: `Max time before closing idle connections
+			Help: `Max time before closing idle connections.
 
 If no connections have been returned to the connection pool in the time
 given, rclone will empty the connection pool.
@@ -300,7 +296,7 @@ type Fs struct {
 	drain        *time.Timer // used to drain the pool when we stop using the connections
 	pacer        *fs.Pacer   // pacer for operations
 	savedpswd    string
-	transfers    int32 // count in use references
+	sessions     int32 // count in use sessions
 }
 
 // Object is a remote SFTP file that has been stat'd (so it exists, but is not necessarily open for reading)
@@ -363,21 +359,21 @@ func (c *conn) closed() error {
 	return nil
 }
 
-// Show that we are doing an upload or download
+// Show that we are using an ssh session
 //
-// Call removeTransfer() when done
-func (f *Fs) addTransfer() {
-	atomic.AddInt32(&f.transfers, 1)
+// Call removeSession() when done
+func (f *Fs) addSession() {
+	atomic.AddInt32(&f.sessions, 1)
 }
 
-// Show the upload or download done
-func (f *Fs) removeTransfer() {
-	atomic.AddInt32(&f.transfers, -1)
+// Show the ssh session is no longer in use
+func (f *Fs) removeSession() {
+	atomic.AddInt32(&f.sessions, -1)
 }
 
-// getTransfers shows whether there are any transfers in progress
-func (f *Fs) getTransfers() int32 {
-	return atomic.LoadInt32(&f.transfers)
+// getSessions shows whether there are any sessions in use
+func (f *Fs) getSessions() int32 {
+	return atomic.LoadInt32(&f.sessions)
 }
 
 // Open a new connection to the SFTP server.
@@ -506,8 +502,8 @@ func (f *Fs) putSftpConnection(pc **conn, err error) {
 func (f *Fs) drainPool(ctx context.Context) (err error) {
 	f.poolMu.Lock()
 	defer f.poolMu.Unlock()
-	if transfers := f.getTransfers(); transfers != 0 {
-		fs.Debugf(f, "Not closing %d unused connections as %d transfers in progress", len(f.pool), transfers)
+	if sessions := f.getSessions(); sessions != 0 {
+		fs.Debugf(f, "Not closing %d unused connections as %d sessions active", len(f.pool), sessions)
 		if f.opt.IdleTimeout > 0 {
 			f.drain.Reset(time.Duration(f.opt.IdleTimeout)) // nudge on the pool emptying timer
 		}
@@ -784,7 +780,7 @@ func NewFsWithConnection(ctx context.Context, f *Fs, name string, root string, m
 		}
 		_, err := f.NewObject(ctx, remote)
 		if err != nil {
-			if err == fs.ErrorObjectNotFound || errors.Cause(err) == fs.ErrorNotAFile {
+			if err == fs.ErrorObjectNotFound || err == fs.ErrorIsDir {
 				// File doesn't exist so return old f
 				f.root = root
 				f.absRoot = oldAbsRoot
@@ -1093,6 +1089,9 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 
 // run runds cmd on the remote end returning standard output
 func (f *Fs) run(ctx context.Context, cmd string) ([]byte, error) {
+	f.addSession() // Show session in use
+	defer f.removeSession()
+
 	c, err := f.getSftpConnection(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "run: get SFTP connection")
@@ -1231,6 +1230,8 @@ func (o *Object) Remote() string {
 // Hash returns the selected checksum of the file
 // If no checksum is available it returns ""
 func (o *Object) Hash(ctx context.Context, r hash.Type) (string, error) {
+	o.fs.addSession() // Show session in use
+	defer o.fs.removeSession()
 	if o.fs.opt.DisableHashCheck {
 		return "", nil
 	}
@@ -1383,7 +1384,7 @@ func (o *Object) stat(ctx context.Context) error {
 		return errors.Wrap(err, "stat failed")
 	}
 	if info.IsDir() {
-		return errors.Wrapf(fs.ErrorNotAFile, "%q", o.remote)
+		return fs.ErrorIsDir
 	}
 	o.setMetadata(info)
 	return nil
@@ -1434,7 +1435,7 @@ func (f *Fs) newObjectReader(sftpFile *sftp.File) *objectReader {
 		done:       make(chan struct{}),
 	}
 	// Show connection in use
-	f.addTransfer()
+	f.addSession()
 
 	go func() {
 		// Use sftpFile.WriteTo to pump data so that it gets a
@@ -1465,7 +1466,7 @@ func (file *objectReader) Close() (err error) {
 	// Wait for the background process to finish
 	<-file.done
 	// Show connection no longer in use
-	file.f.removeTransfer()
+	file.f.removeSession()
 	return err
 }
 
@@ -1518,8 +1519,8 @@ func (sr *sizeReader) Size() int64 {
 
 // Update a remote sftp file using the data <in> and ModTime from <src>
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	o.fs.addTransfer() // Show transfer in progress
-	defer o.fs.removeTransfer()
+	o.fs.addSession() // Show session in use
+	defer o.fs.removeSession()
 	// Clear the hash cache since we are about to update the object
 	o.md5sum = nil
 	o.sha1sum = nil

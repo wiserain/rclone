@@ -1,7 +1,7 @@
 // Package azureblob provides an interface to the Microsoft Azure blob object storage system
 
-//go:build !plan9 && !solaris && !js && go1.14
-// +build !plan9,!solaris,!js,go1.14
+//go:build !plan9 && !solaris && !js
+// +build !plan9,!solaris,!js
 
 package azureblob
 
@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +75,7 @@ func init() {
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name: "account",
-			Help: "Storage Account Name (leave blank to use SAS URL or Emulator)",
+			Help: "Storage Account Name.\n\nLeave blank to use SAS URL or Emulator.",
 		}, {
 			Name: "service_principal_file",
 			Help: `Path to file containing credentials for use with a service principal.
@@ -90,13 +91,13 @@ See ["Create an Azure service principal"](https://docs.microsoft.com/en-us/cli/a
 `,
 		}, {
 			Name: "key",
-			Help: "Storage Account Key (leave blank to use SAS URL or Emulator)",
+			Help: "Storage Account Key.\n\nLeave blank to use SAS URL or Emulator.",
 		}, {
 			Name: "sas_url",
-			Help: "SAS URL for container level access only\n(leave blank if using account/key or Emulator)",
+			Help: "SAS URL for container level access only.\n\nLeave blank if using account/key or Emulator.",
 		}, {
 			Name: "use_msi",
-			Help: `Use a managed service identity to authenticate (only works in Azure)
+			Help: `Use a managed service identity to authenticate (only works in Azure).
 
 When true, use a [managed service identity](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/)
 to authenticate to Azure Storage instead of a SAS token or account key.
@@ -109,27 +110,27 @@ msi_client_id, or msi_mi_res_id parameters.`,
 			Default: false,
 		}, {
 			Name:     "msi_object_id",
-			Help:     "Object ID of the user-assigned MSI to use, if any. Leave blank if msi_client_id or msi_mi_res_id specified.",
+			Help:     "Object ID of the user-assigned MSI to use, if any.\n\nLeave blank if msi_client_id or msi_mi_res_id specified.",
 			Advanced: true,
 		}, {
 			Name:     "msi_client_id",
-			Help:     "Object ID of the user-assigned MSI to use, if any. Leave blank if msi_object_id or msi_mi_res_id specified.",
+			Help:     "Object ID of the user-assigned MSI to use, if any.\n\nLeave blank if msi_object_id or msi_mi_res_id specified.",
 			Advanced: true,
 		}, {
 			Name:     "msi_mi_res_id",
-			Help:     "Azure resource ID of the user-assigned MSI to use, if any. Leave blank if msi_client_id or msi_object_id specified.",
+			Help:     "Azure resource ID of the user-assigned MSI to use, if any.\n\nLeave blank if msi_client_id or msi_object_id specified.",
 			Advanced: true,
 		}, {
 			Name:    "use_emulator",
-			Help:    "Uses local storage emulator if provided as 'true' (leave blank if using real azure storage endpoint)",
+			Help:    "Uses local storage emulator if provided as 'true'.\n\nLeave blank if using real azure storage endpoint.",
 			Default: false,
 		}, {
 			Name:     "endpoint",
-			Help:     "Endpoint for the service\nLeave blank normally.",
+			Help:     "Endpoint for the service.\n\nLeave blank normally.",
 			Advanced: true,
 		}, {
 			Name:     "upload_cutoff",
-			Help:     "Cutoff for switching to chunked upload (<= 256 MiB). (Deprecated)",
+			Help:     "Cutoff for switching to chunked upload (<= 256 MiB) (deprecated).",
 			Advanced: true,
 		}, {
 			Name: "chunk_size",
@@ -200,6 +201,7 @@ to start uploading.`,
 			Default:  memoryPoolFlushTime,
 			Advanced: true,
 			Help: `How often internal memory buffer pools will be flushed.
+
 Uploads which requires additional buffers (f.e multipart) will use memory pool for allocations.
 This option controls how often unused buffers will be removed from the pool.`,
 		}, {
@@ -219,12 +221,12 @@ This option controls how often unused buffers will be removed from the pool.`,
 				encoder.EncodeRightPeriod),
 		}, {
 			Name:    "public_access",
-			Help:    "Public access level of a container: blob, container.",
+			Help:    "Public access level of a container: blob or container.",
 			Default: string(azblob.PublicAccessNone),
 			Examples: []fs.OptionExample{
 				{
 					Value: string(azblob.PublicAccessNone),
-					Help:  "The container and its blobs can be accessed only with an authorized request. It's a default value",
+					Help:  "The container and its blobs can be accessed only with an authorized request.\nIt's a default value.",
 				}, {
 					Value: string(azblob.PublicAccessBlob),
 					Help:  "Blob data within this container can be read via anonymous request.",
@@ -233,6 +235,11 @@ This option controls how often unused buffers will be removed from the pool.`,
 					Help:  "Allow full public read access for container and blob data.",
 				},
 			},
+			Advanced: true,
+		}, {
+			Name:     "no_head_object",
+			Help:     `If set, do not do HEAD before GET when getting objects.`,
+			Default:  false,
 			Advanced: true,
 		}},
 	})
@@ -259,6 +266,7 @@ type Options struct {
 	MemoryPoolUseMmap    bool                 `config:"memory_pool_use_mmap"`
 	Enc                  encoder.MultiEncoder `config:"encoding"`
 	PublicAccess         string               `config:"public_access"`
+	NoHeadObject         bool                 `config:"no_head_object"`
 }
 
 // Fs represents a remote azure server
@@ -757,7 +765,7 @@ func (f *Fs) newObjectWithInfo(remote string, info *azblob.BlobItemInternal) (fs
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	} else if !o.fs.opt.NoHeadObject {
 		err := o.readMetaData() // reads info and headers, returning an error
 		if err != nil {
 			return nil, err
@@ -1367,6 +1375,39 @@ func (o *Object) decodeMetaDataFromPropertiesResponse(info *azblob.BlobGetProper
 	return nil
 }
 
+func (o *Object) decodeMetaDataFromDownloadResponse(info *azblob.DownloadResponse) (err error) {
+	metadata := info.NewMetadata()
+	size := info.ContentLength()
+	if isDirectoryMarker(size, metadata, o.remote) {
+		return fs.ErrorNotAFile
+	}
+	// NOTE - Client library always returns MD5 as base64 decoded string, Object needs to maintain
+	// this as base64 encoded string.
+	o.md5 = base64.StdEncoding.EncodeToString(info.ContentMD5())
+	o.mimeType = info.ContentType()
+	o.size = size
+	o.modTime = info.LastModified()
+	o.accessTier = o.AccessTier()
+	o.setMetadata(metadata)
+
+	// If it was a Range request, the size is wrong, so correct it
+	if contentRange := info.ContentRange(); contentRange != "" {
+		slash := strings.IndexRune(contentRange, '/')
+		if slash >= 0 {
+			i, err := strconv.ParseInt(contentRange[slash+1:], 10, 64)
+			if err == nil {
+				o.size = i
+			} else {
+				fs.Debugf(o, "Failed to find parse integer from in %q: %v", contentRange, err)
+			}
+		} else {
+			fs.Debugf(o, "Failed to find length in %q", contentRange)
+		}
+	}
+
+	return nil
+}
+
 func (o *Object) decodeMetaDataFromBlob(info *azblob.BlobItemInternal) (err error) {
 	metadata := info.Metadata
 	size := *info.Properties.ContentLength
@@ -1496,6 +1537,10 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open for download")
+	}
+	err = o.decodeMetaDataFromDownloadResponse(downloadResponse)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to decode metadata for download")
 	}
 	in = downloadResponse.Body(azblob.RetryReaderOptions{})
 	return in, nil

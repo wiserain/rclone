@@ -3,6 +3,15 @@ title: "Documentation"
 description: "Rclone Usage"
 ---
 
+# Usage
+
+Rclone is a command line program to manage files on cloud storage.
+After [download](/downloads/) and [install](/install), continue
+here to learn how to use it: Initial [configuration](#configure),
+what the [basic syntax](#basic-syntax) looks like, describes the
+various [subcommands](#subcommands), the various [options](#options),
+and more.
+
 Configure
 ---------
 
@@ -35,10 +44,11 @@ See the following for detailed instructions for
   * [Google Cloud Storage](/googlecloudstorage/)
   * [Google Drive](/drive/)
   * [Google Photos](/googlephotos/)
+  * [Hasher](/hasher/) - to handle checksums for other remotes
   * [HDFS](/hdfs/)
   * [HTTP](/http/)
   * [Hubic](/hubic/)
-  * [Jottacloud / GetSky.no](/jottacloud/)
+  * [Jottacloud](/jottacloud/)
   * [Koofr](/koofr/)
   * [Mail.ru Cloud](/mailru/)
   * [Mega](/mega/)
@@ -53,6 +63,7 @@ See the following for detailed instructions for
   * [QingStor](/qingstor/)
   * [Seafile](/seafile/)
   * [SFTP](/sftp/)
+  * [Sia](/sia/)
   * [SugarSync](/sugarsync/)
   * [Tardigrade](/tardigrade/)
   * [Union](/union/)
@@ -62,7 +73,7 @@ See the following for detailed instructions for
   * [Zoho WorkDrive](/zoho/)
   * [The local filesystem](/local/)
 
-Usage
+Basic syntax
 -----
 
 Rclone syncs a directory tree from one storage system to another.
@@ -319,8 +330,9 @@ Will get their own names
 
 ### Valid remote names
 
- - Remote names may only contain 0-9, A-Z ,a-z ,_ , - and space.
- - Remote names may not start with -.
+Remote names are case sensitive, and must adhere to the following rules:
+ - May only contain `0`-`9`, `A`-`Z`, `a`-`z`, `_`, `-` and space.
+ - May not start with `-` or space.
 
 Quoting and the shell
 ---------------------
@@ -427,9 +439,9 @@ possibly signed sequence of decimal numbers, each with optional
 fraction and a unit suffix, such as "300ms", "-1.5h" or "2h45m". Valid
 time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
 
-Options which use SIZE use KiByte (multiples of 1024 bytes) by default.
-However, a suffix of `B` for Byte, `K` for KiByte, `M` for MiByte,
-`G` for GiByte, `T` for TiByte and `P` for PiByte may be used. These are
+Options which use SIZE use KiB (multiples of 1024 bytes) by default.
+However, a suffix of `B` for Byte, `K` for KiB, `M` for MiB,
+`G` for GiB, `T` for TiB and `P` for PiB may be used. These are
 the binary units, e.g. 1, 2\*\*10, 2\*\*20, 2\*\*30 respectively.
 
 ### --backup-dir=DIR ###
@@ -473,9 +485,9 @@ This option controls the bandwidth limit. For example
 
     --bwlimit 10M
     
-would mean limit the upload and download bandwidth to 10 MiByte/s.
+would mean limit the upload and download bandwidth to 10 MiB/s.
 **NB** this is **bytes** per second not **bits** per second. To use a
-single limit, specify the desired bandwidth in KiByte/s, or use a
+single limit, specify the desired bandwidth in KiB/s, or use a
 suffix B|K|M|G|T|P. The default is `0` which means to not limit bandwidth.
 
 The upload and download bandwidth can be specified seperately, as
@@ -483,13 +495,13 @@ The upload and download bandwidth can be specified seperately, as
 
     --bwlimit 10M:100k
 
-would mean limit the upload bandwidth to 10 MiByte/s and the download
-bandwidth to 100 KiByte/s. Either limit can be "off" meaning no limit, so
+would mean limit the upload bandwidth to 10 MiB/s and the download
+bandwidth to 100 KiB/s. Either limit can be "off" meaning no limit, so
 to just limit the upload bandwidth you would use
 
     --bwlimit 10M:off
 
-this would limit the upload bandwidth to 10 MiByte/s but the download
+this would limit the upload bandwidth to 10 MiB/s but the download
 bandwidth would be unlimited.
 
 When specified as above the bandwidth limits last for the duration of
@@ -511,19 +523,19 @@ working hours could be:
 
 `--bwlimit "08:00,512k 12:00,10M 13:00,512k 18:00,30M 23:00,off"`
 
-In this example, the transfer bandwidth will be set to 512 KiByte/s
-at 8am every day. At noon, it will rise to 10 MiByte/s, and drop back
-to 512 KiByte/sec at 1pm. At 6pm, the bandwidth limit will be set to
-30 MiByte/s, and at 11pm it will be completely disabled (full speed).
+In this example, the transfer bandwidth will be set to 512 KiB/s
+at 8am every day. At noon, it will rise to 10 MiB/s, and drop back
+to 512 KiB/sec at 1pm. At 6pm, the bandwidth limit will be set to
+30 MiB/s, and at 11pm it will be completely disabled (full speed).
 Anything between 11pm and 8am will remain unlimited.
 
 An example of timetable with `WEEKDAY` could be:
 
 `--bwlimit "Mon-00:00,512 Fri-23:59,10M Sat-10:00,1M Sun-20:00,off"`
 
-It means that, the transfer bandwidth will be set to 512 KiByte/s on
-Monday. It will rise to 10 MiByte/s before the end of Friday. At 10:00
-on Saturday it will be set to 1 MiByte/s. From 20:00 on Sunday it will
+It means that, the transfer bandwidth will be set to 512 KiB/s on
+Monday. It will rise to 10 MiB/s before the end of Friday. At 10:00
+on Saturday it will be set to 1 MiB/s. From 20:00 on Sunday it will
 be unlimited.
 
 Timeslots without `WEEKDAY` are extended to the whole week. So this
@@ -542,7 +554,7 @@ being the non HTTP backends, `ftp`, `sftp` and `tardigrade`).
 Note that the units are **Byte/s**, not **bit/s**. Typically
 connections are measured in bit/s - to convert divide by 8. For
 example, let's say you have a 10 Mbit/s connection and you wish rclone
-to use half of it - 5 Mbit/s. This is 5/8 = 0.625 MiByte/s so you would
+to use half of it - 5 Mbit/s. This is 5/8 = 0.625 MiB/s so you would
 use a `--bwlimit 0.625M` parameter for rclone.
 
 On Unix systems (Linux, macOS, …) the bandwidth limiter can be toggled by
@@ -563,7 +575,7 @@ change the bwlimit dynamically:
 This option controls per file bandwidth limit. For the options see the
 `--bwlimit` flag.
 
-For example use this to allow no transfers to be faster than 1 MiByte/s
+For example use this to allow no transfers to be faster than 1 MiB/s
 
     --bwlimit-file 1M
 
@@ -585,6 +597,23 @@ Set to `0` to disable the buffering for the minimum memory usage.
 
 Note that the memory allocation of the buffers is influenced by the
 [--use-mmap](#use-mmap) flag.
+
+### --cache-dir=DIR ###
+
+Specify the directory rclone will use for caching, to override
+the default.
+
+Default value is depending on operating system:
+- Windows `%LocalAppData%\rclone`, if `LocalAppData` is defined.
+- macOS `$HOME/Library/Caches/rclone` if `HOME` is defined.
+- Unix `$XDG_CACHE_HOME/rclone` if `XDG_CACHE_HOME` is defined, else `$HOME/.cache/rclone` if `HOME` is defined.
+- Fallback (on all OS) to `$TMPDIR/rclone`, where `TMPDIR` is the value from [--temp-dir](#temp-dir-dir).
+
+You can use the [config paths](/commands/rclone_config_paths/)
+command to see the current value.
+
+Cache directory is heavily used by the [VFS File Caching](/commands/rclone_mount/#vfs-file-caching)
+mount feature, but also by [serve](/commands/rclone_serve/), [GUI](/gui) and other parts of rclone.
 
 ### --check-first ###
 
@@ -886,6 +915,39 @@ rclone sync -i ~/src s3:test/dst --header-upload "Content-Disposition: attachmen
 See the GitHub issue [here](https://github.com/rclone/rclone/issues/59) for
 currently supported backends.
 
+### --human-readable ###
+
+Rclone commands output values for sizes (e.g. number of bytes) and
+counts (e.g. number of files) either as *raw* numbers, or
+in *human-readable* format.
+
+In human-readable format the values are scaled to larger units, indicated with
+a suffix shown after the value, and rounded to three decimals. Rclone consistently
+uses binary units (powers of 2) for sizes and decimal units (powers of 10) for counts.
+The unit prefix for size is according to IEC standard notation, e.g. `Ki` for kibi.
+Used with byte unit, `1 KiB` means 1024 Byte. In list type of output, only the
+unit prefix appended to the value (e.g. `9.762Ki`), while in more textual output
+the full unit is shown (e.g. `9.762 KiB`). For counts the SI standard notation is
+used, e.g. prefix `k` for kilo. Used with file counts, `1k` means 1000 files.
+
+The various [list](commands/rclone_ls/) commands output raw numbers by default.
+Option `--human-readable` will make them output values in human-readable format
+instead (with the short unit prefix).
+
+The [about](commands/rclone_about/) command outputs human-readable by default,
+with a command-specific option `--full` to output the raw numbers instead.
+
+Command [size](commands/rclone_size/) outputs both human-readable and raw numbers
+in the same output.
+
+The [tree](commands/rclone_tree/) command also considers `--human-readable`, but
+it will not use the exact same notation as the other commands: It rounds to one
+decimal, and uses single letter suffix, e.g. `K` instead of `Ki`. The reason for
+this is that it relies on an external library.
+
+The interactive command [ncdu](commands/rclone_ncdu/) shows human-readable by
+default, and responds to key `u` for toggling human-readable format.
+
 ### --ignore-case-sync ###
 
 Using this option will cause rclone to ignore the case of the files 
@@ -909,6 +971,10 @@ that exist on the destination, no matter the content of these files.
 While this isn't a generally recommended option, it can be useful
 in cases where your files change due to encryption. However, it cannot
 correct partial transfers in case a transfer was interrupted.
+
+When performing a `move`/`moveto` command, this flag will leave skipped
+files in the source location unchanged when a file with the same name
+exists on the destination.
 
 ### --ignore-size ###
 
@@ -1010,7 +1076,7 @@ have a signal to rotate logs.
 
 ### --log-format LIST ###
 
-Comma separated list of log format options. `date`, `time`, `microseconds`, `longfile`, `shortfile`, `UTC`.  The default is "`date`,`time`". 
+Comma separated list of log format options. Accepted options are `date`, `time`, `microseconds`, `pid`, `longfile`, `shortfile`, `UTC`. Any other keywords will be silently ignored. `pid` will tag log messages with process identifier which useful with `rclone mount --daemon`. Other accepted options are explained in the [go documentation](https://pkg.go.dev/log#pkg-constants). The default log format is "`date`,`time`".
 
 ### --log-level LEVEL ###
 
@@ -1539,6 +1605,22 @@ This can be useful for running rclone in a script or `rclone mount`.
 If using `--syslog` this sets the syslog facility (e.g. `KERN`, `USER`).
 See `man syslog` for a list of possible facilities.  The default
 facility is `DAEMON`.
+
+### --temp-dir=DIR ###
+
+Specify the directory rclone will use for temporary files, to override
+the default. Make sure the directory exists and have accessible permissions.
+
+By default the operating system's temp directory will be used:
+- On Unix systems, `$TMPDIR` if non-empty, else `/tmp`.
+- On Windows, the first non-empty value from `%TMP%`, `%TEMP%`, `%USERPROFILE%`, or the Windows directory.
+
+When overriding the default with this option, the specified path will be
+set as value of environment variable `TMPDIR` on Unix systems
+and `TMP` and `TEMP` on Windows.
+
+You can use the [config paths](/commands/rclone_config_paths/)
+command to see the current value.
 
 ### --tpslimit float ###
 
@@ -2155,7 +2237,7 @@ file (using unix ways of setting environment variables):
 $ export RCLONE_CONFIG_MYS3_TYPE=s3
 $ export RCLONE_CONFIG_MYS3_ACCESS_KEY_ID=XXX
 $ export RCLONE_CONFIG_MYS3_SECRET_ACCESS_KEY=XXX
-$ rclone lsd MYS3:
+$ rclone lsd mys3:
           -1 2016-09-21 12:54:21        -1 my-bucket
 $ rclone listremotes | grep mys3
 mys3:
@@ -2163,6 +2245,20 @@ mys3:
 
 Note that if you want to create a remote using environment variables
 you must create the `..._TYPE` variable as above.
+
+Note that the name of a remote created using environment variable is
+case insensitive, in contrast to regular remotes stored in config
+file as documented [above](#valid-remote-names).
+You must write the name in uppercase in the environment variable, but
+as seen from example above it will be listed and can be accessed in
+lowercase, while you can also refer to the same remote in uppercase:
+```
+$ rclone lsd mys3:
+          -1 2016-09-21 12:54:21        -1 my-bucket
+$ rclone lsd MYS3:
+          -1 2016-09-21 12:54:21        -1 my-bucket
+```
+
 
 Note that you can only set the options of the immediate backend, 
 so RCLONE_CONFIG_MYS3CRYPT_ACCESS_KEY_ID has no effect, if myS3Crypt is 
