@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ncw/swift/v2"
-	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -381,7 +381,7 @@ func swiftConnection(ctx context.Context, opt *Options, name string) (*swift.Con
 	if opt.EnvAuth {
 		err := c.ApplyEnvironment()
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to read environment variables")
+			return nil, fmt.Errorf("failed to read environment variables: %w", err)
 		}
 	}
 	StorageUrl, AuthToken := c.StorageUrl, c.AuthToken // nolint
@@ -423,7 +423,7 @@ func swiftConnection(ctx context.Context, opt *Options, name string) (*swift.Con
 func checkUploadChunkSize(cs fs.SizeSuffix) error {
 	const minChunkSize = fs.SizeSuffixBase
 	if cs < minChunkSize {
-		return errors.Errorf("%s is less than %s", cs, minChunkSize)
+		return fmt.Errorf("%s is less than %s", cs, minChunkSize)
 	}
 	return nil
 }
@@ -499,7 +499,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	err = checkUploadChunkSize(opt.ChunkSize)
 	if err != nil {
-		return nil, errors.Wrap(err, "swift: chunk size")
+		return nil, fmt.Errorf("swift: chunk size: %w", err)
 	}
 
 	c, err := swiftConnection(ctx, opt, name)
@@ -670,7 +670,7 @@ func (f *Fs) listContainers(ctx context.Context) (entries fs.DirEntries, err err
 		return shouldRetry(ctx, err)
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "container listing failed")
+		return nil, fmt.Errorf("container listing failed: %w", err)
 	}
 	for _, container := range containers {
 		f.cache.MarkOK(container.Name)
@@ -754,22 +754,34 @@ func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) (
 }
 
 // About gets quota information
-func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
-	var containers []swift.Container
-	var err error
-	err = f.pacer.Call(func() (bool, error) {
-		containers, err = f.c.ContainersAll(ctx, nil)
-		return shouldRetry(ctx, err)
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "container listing failed")
-	}
+func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 	var total, objects int64
-	for _, c := range containers {
-		total += c.Bytes
-		objects += c.Count
+	if f.rootContainer != "" {
+		var container swift.Container
+		err = f.pacer.Call(func() (bool, error) {
+			container, _, err = f.c.Container(ctx, f.rootContainer)
+			return shouldRetry(ctx, err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("container info failed: %w", err)
+		}
+		total = container.Bytes
+		objects = container.Count
+	} else {
+		var containers []swift.Container
+		err = f.pacer.Call(func() (bool, error) {
+			containers, err = f.c.ContainersAll(ctx, nil)
+			return shouldRetry(ctx, err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("container listing failed: %w", err)
+		}
+		for _, c := range containers {
+			total += c.Bytes
+			objects += c.Count
+		}
 	}
-	usage := &fs.Usage{
+	usage = &fs.Usage{
 		Used:    fs.NewUsageValue(total),   // bytes in use
 		Objects: fs.NewUsageValue(objects), // objects in use
 	}

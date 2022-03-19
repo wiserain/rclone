@@ -27,7 +27,7 @@ For an anonymous FTP server, use `anonymous` as username and your email
 address as password.
 
 ```
-No remotes found - make a new one
+No remotes found, make a new one?
 n) New remote
 r) Rename remote
 c) Copy remote
@@ -51,11 +51,11 @@ Choose a number from below, or type in your own value
  1 / Connect to ftp.example.com
    \ "ftp.example.com"
 host> ftp.example.com
-FTP username, leave blank for current username, $USER
-Enter a string value. Press Enter for the default ("").
+FTP username
+Enter a string value. Press Enter for the default ("$USER").
 user> 
-FTP port, leave blank to use default (21)
-Enter a string value. Press Enter for the default ("").
+FTP port number
+Enter a signed integer. Press Enter for the default (21).
 port> 
 FTP password
 y) Yes type in my own password
@@ -146,28 +146,34 @@ FTP host to connect to.
 
 E.g. "ftp.example.com".
 
+Properties:
+
 - Config:      host
 - Env Var:     RCLONE_FTP_HOST
 - Type:        string
-- Default:     ""
+- Required:    true
 
 #### --ftp-user
 
-FTP username, leave blank for current username, $USER.
+FTP username.
+
+Properties:
 
 - Config:      user
 - Env Var:     RCLONE_FTP_USER
 - Type:        string
-- Default:     ""
+- Default:     "$USER"
 
 #### --ftp-port
 
-FTP port, leave blank to use default (21).
+FTP port number.
+
+Properties:
 
 - Config:      port
 - Env Var:     RCLONE_FTP_PORT
-- Type:        string
-- Default:     ""
+- Type:        int
+- Default:     21
 
 #### --ftp-pass
 
@@ -175,10 +181,12 @@ FTP password.
 
 **NB** Input to this must be obscured - see [rclone obscure](/commands/rclone_obscure/).
 
+Properties:
+
 - Config:      pass
 - Env Var:     RCLONE_FTP_PASS
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --ftp-tls
 
@@ -188,6 +196,8 @@ When using implicit FTP over TLS the client connects using TLS
 right from the start which breaks compatibility with
 non-TLS-aware servers. This is usually served over port 990 rather
 than port 21. Cannot be used in combination with explicit FTP.
+
+Properties:
 
 - Config:      tls
 - Env Var:     RCLONE_FTP_TLS
@@ -202,6 +212,8 @@ When using explicit FTP over TLS the client explicitly requests
 security from the server in order to upgrade a plain text connection
 to an encrypted one. Cannot be used in combination with implicit FTP.
 
+Properties:
+
 - Config:      explicit_tls
 - Env Var:     RCLONE_FTP_EXPLICIT_TLS
 - Type:        bool
@@ -215,6 +227,8 @@ Here are the advanced options specific to ftp (FTP Connection).
 
 Maximum number of FTP simultaneous connections, 0 for unlimited.
 
+Properties:
+
 - Config:      concurrency
 - Env Var:     RCLONE_FTP_CONCURRENCY
 - Type:        int
@@ -223,6 +237,8 @@ Maximum number of FTP simultaneous connections, 0 for unlimited.
 #### --ftp-no-check-certificate
 
 Do not verify the TLS certificate of the server.
+
+Properties:
 
 - Config:      no_check_certificate
 - Env Var:     RCLONE_FTP_NO_CHECK_CERTIFICATE
@@ -233,6 +249,8 @@ Do not verify the TLS certificate of the server.
 
 Disable using EPSV even if server advertises support.
 
+Properties:
+
 - Config:      disable_epsv
 - Env Var:     RCLONE_FTP_DISABLE_EPSV
 - Type:        bool
@@ -242,6 +260,8 @@ Disable using EPSV even if server advertises support.
 
 Disable using MLSD even if server advertises support.
 
+Properties:
+
 - Config:      disable_mlsd
 - Env Var:     RCLONE_FTP_DISABLE_MLSD
 - Type:        bool
@@ -250,6 +270,8 @@ Disable using MLSD even if server advertises support.
 #### --ftp-writing-mdtm
 
 Use MDTM to set modification time (VsFtpd quirk)
+
+Properties:
 
 - Config:      writing_mdtm
 - Env Var:     RCLONE_FTP_WRITING_MDTM
@@ -266,6 +288,8 @@ given, rclone will empty the connection pool.
 Set to 0 to keep connections indefinitely.
 
 
+Properties:
+
 - Config:      idle_timeout
 - Env Var:     RCLONE_FTP_IDLE_TIMEOUT
 - Type:        Duration
@@ -274,6 +298,8 @@ Set to 0 to keep connections indefinitely.
 #### --ftp-close-timeout
 
 Maximum time to wait for a response to close.
+
+Properties:
 
 - Config:      close_timeout
 - Env Var:     RCLONE_FTP_CLOSE_TIMEOUT
@@ -288,6 +314,8 @@ TLS cache allows to resume TLS sessions and reuse PSK between connections.
 Increase if default size is not enough resulting in TLS resumption errors.
 Enabled by default. Use 0 to disable.
 
+Properties:
+
 - Config:      tls_cache_size
 - Env Var:     RCLONE_FTP_TLS_CACHE_SIZE
 - Type:        int
@@ -296,6 +324,8 @@ Enabled by default. Use 0 to disable.
 #### --ftp-disable-tls13
 
 Disable TLS 1.3 (workaround for FTP servers with buggy TLS)
+
+Properties:
 
 - Config:      disable_tls13
 - Env Var:     RCLONE_FTP_DISABLE_TLS13
@@ -306,16 +336,34 @@ Disable TLS 1.3 (workaround for FTP servers with buggy TLS)
 
 Maximum time to wait for data connection closing status.
 
+Properties:
+
 - Config:      shut_timeout
 - Env Var:     RCLONE_FTP_SHUT_TIMEOUT
 - Type:        Duration
 - Default:     1m0s
 
+#### --ftp-ask-password
+
+Allow asking for FTP password when needed.
+
+If this is set and no password is supplied then rclone will ask for a password
+
+
+Properties:
+
+- Config:      ask_password
+- Env Var:     RCLONE_FTP_ASK_PASSWORD
+- Type:        bool
+- Default:     false
+
 #### --ftp-encoding
 
-This sets the encoding for the backend.
+The encoding for the backend.
 
 See the [encoding section in the overview](/overview/#encoding) for more info.
+
+Properties:
 
 - Config:      encoding
 - Env Var:     RCLONE_FTP_ENCODING

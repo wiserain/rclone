@@ -4,11 +4,11 @@
 package data
 
 import (
+	"fmt"
 	"html/template"
 	"io/ioutil"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 
 	"github.com/rclone/rclone/fs"
@@ -16,7 +16,10 @@ import (
 )
 
 // Help describes the options for the serve package
-var Help = `--template allows a user to specify a custom markup template for http
+var Help = `
+#### Template
+
+--template allows a user to specify a custom markup template for http
 and webdav serve functions.  The server exports the following markup
 to be used within the template to server pages:
 
@@ -61,14 +64,14 @@ func GetTemplate(tmpl string) (tpl *template.Template, err error) {
 	if tmpl == "" {
 		templateFile, err := Assets.Open("index.html")
 		if err != nil {
-			return nil, errors.Wrap(err, "get template open")
+			return nil, fmt.Errorf("get template open: %w", err)
 		}
 
 		defer fs.CheckClose(templateFile, &err)
 
 		templateBytes, err := ioutil.ReadAll(templateFile)
 		if err != nil {
-			return nil, errors.Wrap(err, "get template read")
+			return nil, fmt.Errorf("get template read: %w", err)
 		}
 
 		templateString = string(templateBytes)
@@ -76,7 +79,7 @@ func GetTemplate(tmpl string) (tpl *template.Template, err error) {
 	} else {
 		templateFile, err := ioutil.ReadFile(tmpl)
 		if err != nil {
-			return nil, errors.Wrap(err, "get template open")
+			return nil, fmt.Errorf("get template open: %w", err)
 		}
 
 		templateString = string(templateFile)
@@ -87,7 +90,7 @@ func GetTemplate(tmpl string) (tpl *template.Template, err error) {
 	}
 	tpl, err = template.New("index").Funcs(funcMap).Parse(templateString)
 	if err != nil {
-		return nil, errors.Wrap(err, "get template parse")
+		return nil, fmt.Errorf("get template parse: %w", err)
 	}
 
 	return

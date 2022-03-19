@@ -2,6 +2,7 @@ package fichier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -42,18 +42,15 @@ func init() {
 		}, {
 			Help:     "If you want to download a shared folder, add this parameter.",
 			Name:     "shared_folder",
-			Required: false,
 			Advanced: true,
 		}, {
 			Help:       "If you want to download a shared file that is password protected, add this parameter.",
 			Name:       "file_password",
-			Required:   false,
 			Advanced:   true,
 			IsPassword: true,
 		}, {
 			Help:       "If you want to list the files in a shared folder that is password protected, add this parameter.",
 			Name:       "folder_password",
-			Required:   false,
 			Advanced:   true,
 			IsPassword: true,
 		}, {
@@ -454,10 +451,10 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	if currentDirectoryID == directoryID {
 		resp, err := f.renameFile(ctx, srcObj.file.URL, leaf)
 		if err != nil {
-			return nil, errors.Wrap(err, "couldn't rename file")
+			return nil, fmt.Errorf("couldn't rename file: %w", err)
 		}
 		if resp.Status != "OK" {
-			return nil, errors.Errorf("couldn't rename file: %s", resp.Message)
+			return nil, fmt.Errorf("couldn't rename file: %s", resp.Message)
 		}
 		url = resp.URLs[0].URL
 	} else {
@@ -467,10 +464,10 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		}
 		resp, err := f.moveFile(ctx, srcObj.file.URL, folderID, leaf)
 		if err != nil {
-			return nil, errors.Wrap(err, "couldn't move file")
+			return nil, fmt.Errorf("couldn't move file: %w", err)
 		}
 		if resp.Status != "OK" {
-			return nil, errors.Errorf("couldn't move file: %s", resp.Message)
+			return nil, fmt.Errorf("couldn't move file: %s", resp.Message)
 		}
 		url = resp.URLs[0]
 	}
@@ -503,10 +500,10 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	resp, err := f.copyFile(ctx, srcObj.file.URL, folderID, leaf)
 	if err != nil {
-		return nil, errors.Wrap(err, "couldn't move file")
+		return nil, fmt.Errorf("couldn't move file: %w", err)
 	}
 	if resp.Status != "OK" {
-		return nil, errors.Errorf("couldn't move file: %s", resp.Message)
+		return nil, fmt.Errorf("couldn't move file: %s", resp.Message)
 	}
 
 	file, err := f.readFileInfo(ctx, resp.URLs[0].ToURL)
@@ -515,6 +512,32 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	dstObj.setMetaData(*file)
 	return dstObj, nil
+}
+
+// About gets quota information
+func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
+	opts := rest.Opts{
+		Method:      "POST",
+		Path:        "/user/info.cgi",
+		ContentType: "application/json",
+	}
+	var accountInfo AccountInfo
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.rest.CallJSON(ctx, &opts, nil, &accountInfo)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read user info: %w", err)
+	}
+
+	// FIXME max upload size would be useful to use in Update
+	usage = &fs.Usage{
+		Used:  fs.NewUsageValue(accountInfo.ColdStorage),                                    // bytes in use
+		Total: fs.NewUsageValue(accountInfo.AvailableColdStorage),                           // bytes total
+		Free:  fs.NewUsageValue(accountInfo.AvailableColdStorage - accountInfo.ColdStorage), // bytes free
+	}
+	return usage, nil
 }
 
 // PublicLink adds a "readable by anyone with link" permission on the given file or folder.

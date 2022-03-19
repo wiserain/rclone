@@ -1,8 +1,9 @@
-[<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/)
+[<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-light-mode-only)
+[<img src="https://rclone.org/img/logo_on_dark__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-dark-mode-only)
 
 [Website](https://rclone.org) |
 [Documentation](https://rclone.org/docs/) |
-[Download](https://rclone.org/downloads/) | 
+[Download](https://rclone.org/downloads/) |
 [Contributing](CONTRIBUTING.md) |
 [Changelog](https://rclone.org/changelog/) |
 [Installation](https://rclone.org/install/) |
@@ -10,16 +11,17 @@
 
 [![Build Status](https://github.com/rclone/rclone/workflows/build/badge.svg)](https://github.com/rclone/rclone/actions?query=workflow%3Abuild)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rclone/rclone)](https://goreportcard.com/report/github.com/rclone/rclone)
-[![GoDoc](https://godoc.org/github.com/rclone/rclone?status.svg)](https://godoc.org/github.com/rclone/rclone) 
+[![GoDoc](https://godoc.org/github.com/rclone/rclone?status.svg)](https://godoc.org/github.com/rclone/rclone)
 [![Docker Pulls](https://img.shields.io/docker/pulls/rclone/rclone)](https://hub.docker.com/r/rclone/rclone)
 
 # Rclone
 
-Rclone *("rsync for cloud storage")* is a command line program to sync files and directories to and from different cloud storage providers.
+Rclone *("rsync for cloud storage")* is a command-line program to sync files and directories to and from different cloud storage providers.
 
 ## Storage providers
 
   * 1Fichier [:page_facing_up:](https://rclone.org/fichier/)
+  * Akamai Netstorage [:page_facing_up:](https://rclone.org/netstorage/)
   * Alibaba Cloud (Aliyun) Object Storage System (OSS) [:page_facing_up:](https://rclone.org/s3/#alibaba-oss)
   * Amazon Drive [:page_facing_up:](https://rclone.org/amazonclouddrive/) ([See note](https://rclone.org/amazonclouddrive/#status))
   * Amazon S3 [:page_facing_up:](https://rclone.org/s3/)
@@ -28,6 +30,7 @@ Rclone *("rsync for cloud storage")* is a command line program to sync files and
   * Ceph [:page_facing_up:](https://rclone.org/s3/#ceph)
   * Citrix ShareFile [:page_facing_up:](https://rclone.org/sharefile/)
   * DigitalOcean Spaces [:page_facing_up:](https://rclone.org/s3/#digitalocean-spaces)
+  * Digi Storage [:page_facing_up:](https://rclone.org/koofr/#digi-storage)
   * Dreamhost [:page_facing_up:](https://rclone.org/s3/#dreamhost)
   * Dropbox [:page_facing_up:](https://rclone.org/dropbox/)
   * Enterprise File Fabric [:page_facing_up:](https://rclone.org/filefabric/)
@@ -59,20 +62,21 @@ Rclone *("rsync for cloud storage")* is a command line program to sync files and
   * put.io [:page_facing_up:](https://rclone.org/putio/)
   * QingStor [:page_facing_up:](https://rclone.org/qingstor/)
   * Rackspace Cloud Files [:page_facing_up:](https://rclone.org/swift/)
+  * RackCorp Object Storage [:page_facing_up:](https://rclone.org/s3/#RackCorp)
   * Scaleway [:page_facing_up:](https://rclone.org/s3/#scaleway)
   * Seafile [:page_facing_up:](https://rclone.org/seafile/)
   * SeaweedFS [:page_facing_up:](https://rclone.org/s3/#seaweedfs)
   * SFTP [:page_facing_up:](https://rclone.org/sftp/)
   * StackPath [:page_facing_up:](https://rclone.org/s3/#stackpath)
+  * Storj [:page_facing_up:](https://rclone.org/storj/)
   * SugarSync [:page_facing_up:](https://rclone.org/sugarsync/)
-  * Tardigrade [:page_facing_up:](https://rclone.org/tardigrade/)
   * Tencent Cloud Object Storage (COS) [:page_facing_up:](https://rclone.org/s3/#tencent-cos)
   * Wasabi [:page_facing_up:](https://rclone.org/s3/#wasabi)
   * WebDAV [:page_facing_up:](https://rclone.org/webdav/)
   * Yandex Disk [:page_facing_up:](https://rclone.org/yandex/)
   * Zoho WorkDrive [:page_facing_up:](https://rclone.org/zoho/)
   * The local filesystem [:page_facing_up:](https://rclone.org/local/)
-  
+
 Please see [the full list of all storage providers and their features](https://rclone.org/overview/)
 
 ## Features

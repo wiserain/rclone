@@ -23,7 +23,7 @@ Here is an example of how to make a remote called `remote`.  First run:
 This will guide you through an interactive setup process:
 
 ```
-No remotes found - make a new one
+No remotes found, make a new one?
 n) New remote
 s) Set configuration password
 q) Quit config
@@ -115,9 +115,11 @@ Here are the advanced options specific to putio (Put.io).
 
 #### --putio-encoding
 
-This sets the encoding for the backend.
+The encoding for the backend.
 
 See the [encoding section in the overview](/overview/#encoding) for more info.
+
+Properties:
 
 - Config:      encoding
 - Env Var:     RCLONE_PUTIO_ENCODING

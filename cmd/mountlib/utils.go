@@ -1,11 +1,11 @@
 package mountlib
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 )
 
@@ -42,7 +42,7 @@ func (m *MountPoint) CheckOverlap() error {
 	mountpointAbs := absPath(m.MountPoint)
 	if strings.HasPrefix(rootAbs, mountpointAbs) || strings.HasPrefix(mountpointAbs, rootAbs) {
 		const msg = "mount point %q and directory to be mounted %q mustn't overlap"
-		return errors.Errorf(msg, m.MountPoint, m.Fs.Root())
+		return fmt.Errorf(msg, m.MountPoint, m.Fs.Root())
 	}
 	return nil
 }
@@ -87,7 +87,7 @@ func (m *MountPoint) CheckAllowings() error {
 // SetVolumeName with sensible default
 func (m *MountPoint) SetVolumeName(vol string) {
 	if vol == "" {
-		vol = m.Fs.Name() + ":" + m.Fs.Root()
+		vol = fs.ConfigString(m.Fs)
 	}
 	m.MountOpt.SetVolumeName(vol)
 }
@@ -101,4 +101,12 @@ func (o *Options) SetVolumeName(vol string) {
 		vol = vol[:32]
 	}
 	o.VolumeName = vol
+}
+
+// SetDeviceName with sensible default
+func (m *MountPoint) SetDeviceName(dev string) {
+	if dev == "" {
+		dev = fs.ConfigString(m.Fs)
+	}
+	m.MountOpt.DeviceName = dev
 }

@@ -19,8 +19,8 @@ notoc: true
 
 ## About rclone {#about}
 
-Rclone is a command line program to manage files on cloud storage. It
-is a feature rich alternative to cloud vendors' web storage
+Rclone is a command-line program to manage files on cloud storage. It
+is a feature-rich alternative to cloud vendors' web storage
 interfaces. [Over 40 cloud storage products](#providers) support
 rclone including S3 object stores, business & consumer file storage
 services, as well as standard transfer protocols.
@@ -43,7 +43,7 @@ bandwidth use and transfers from one provider to another without
 using local disk.
 
 Virtual backends wrap local and cloud file systems to apply
-[encryption](/crypt/), 
+[encryption](/crypt/),
 [compression](/compress/),
 [chunking](/chunker/),
 [hashing](/hasher/) and
@@ -58,13 +58,13 @@ macOS, linux and FreeBSD, and also serves these over
 [FTP](/commands/rclone_serve_ftp/) and
 [DLNA](/commands/rclone_serve_dlna/).
 
-Rclone is mature, open source software originally inspired by rsync
+Rclone is mature, open-source software originally inspired by rsync
 and written in [Go](https://golang.org). The friendly support
-community are familiar with varied use cases. Official Ubuntu, Debian,
+community is familiar with varied use cases. Official Ubuntu, Debian,
 Fedora, Brew and Chocolatey repos. include rclone. For the latest
 version [downloading from rclone.org](/downloads/) is recommended.
 
-Rclone is widely used on Linux, Windows and Mac. Third party
+Rclone is widely used on Linux, Windows and Mac. Third-party
 developers create innovative backup, restore, GUI and business
 process solutions using the rclone command line or API.
 
@@ -77,7 +77,7 @@ Rclone helps you:
 - Backup (and encrypt) files to cloud storage
 - Restore (and decrypt) files from cloud storage
 - Mirror cloud data to other cloud services or locally
-- Migrate data to cloud, or between cloud storage vendors
+- Migrate data to the cloud, or between cloud storage vendors
 - Mount multiple, encrypted, cached or diverse cloud storage as a disk
 - Analyse and account for data held on cloud storage using [lsf](/commands/rclone_lsf/), [ljson](/commands/rclone_lsjson/), [size](/commands/rclone_size/), [ncdu](/commands/rclone_ncdu/)
 - [Union](/union/) file systems together to present multiple local and/or cloud file systems as one
@@ -105,6 +105,7 @@ WebDAV or S3, that work out of the box.)
 
 {{< provider_list >}}
 {{< provider name="1Fichier" home="https://1fichier.com/" config="/fichier/" start="true">}}
+{{< provider name="Akamai Netstorage" home="https://www.akamai.com/us/en/products/media-delivery/netstorage.jsp" config="/netstorage/" >}}
 {{< provider name="Alibaba Cloud (Aliyun) Object Storage System (OSS)" home="https://www.alibabacloud.com/product/oss/" config="/s3/#alibaba-oss" >}}
 {{< provider name="Amazon Drive" home="https://www.amazon.com/clouddrive" config="/amazonclouddrive/" note="#status">}}
 {{< provider name="Amazon S3" home="https://aws.amazon.com/s3/" config="/s3/" >}}
@@ -114,6 +115,7 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="Citrix ShareFile" home="http://sharefile.com/" config="/sharefile/" >}}
 {{< provider name="C14" home="https://www.online.net/en/storage/c14-cold-storage" config="/sftp/#c14" >}}
 {{< provider name="DigitalOcean Spaces" home="https://www.digitalocean.com/products/object-storage/" config="/s3/#digitalocean-spaces" >}}
+{{< provider name="Digi Storage" home="https://storage.rcs-rds.ro/" config="/koofr/#digi-storage" >}}
 {{< provider name="Dreamhost" home="https://www.dreamhost.com/cloud/storage/" config="/s3/#dreamhost" >}}
 {{< provider name="Dropbox" home="https://www.dropbox.com/" config="/dropbox/" >}}
 {{< provider name="Enterprise File Fabric" home="https://storagemadeeasy.com/about/" config="/filefabric/" >}}
@@ -148,12 +150,13 @@ WebDAV or S3, that work out of the box.)
 {{< provider name="rsync.net" home="https://rsync.net/products/rclone.html" config="/sftp/#rsync-net" >}}
 {{< provider name="Scaleway" home="https://www.scaleway.com/object-storage/" config="/s3/#scaleway" >}}
 {{< provider name="Seafile" home="https://www.seafile.com/" config="/seafile/" >}}
+{{< provider name="Seagate Lyve Cloud" home="https://www.seagate.com/gb/en/services/cloud/storage/" config="/s3/#lyve" >}}
 {{< provider name="SeaweedFS" home="https://github.com/chrislusf/seaweedfs/" config="/s3/#seaweedfs" >}}
 {{< provider name="SFTP" home="https://en.wikipedia.org/wiki/SSH_File_Transfer_Protocol" config="/sftp/" >}}
 {{< provider name="Sia" home="https://sia.tech/" config="/sia/" >}}
 {{< provider name="StackPath" home="https://www.stackpath.com/products/object-storage/" config="/s3/#stackpath" >}}
+{{< provider name="Storj" home="https://storj.io/" config="/storj/" >}}
 {{< provider name="SugarSync" home="https://sugarsync.com/" config="/sugarsync/" >}}
-{{< provider name="Tardigrade" home="https://tardigrade.io/" config="/tardigrade/" >}}
 {{< provider name="Tencent Cloud Object Storage (COS)" home="https://intl.cloud.tencent.com/product/cos" config="/s3/#tencent-cos" >}}
 {{< provider name="Uptobox" home="https://uptobox.com" config="/uptobox/" >}}
 {{< provider name="Wasabi" home="https://wasabi.com/" config="/s3/#wasabi" >}}

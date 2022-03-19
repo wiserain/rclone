@@ -139,6 +139,9 @@ backends:
  - backend:  "memory"
    remote:   ":memory:"
    fastlist: true
+ - backend:  "netstorage"
+   remote:   "TestnStorage:"
+   fastlist: true
  - backend:  "onedrive"
    remote:   "TestOneDrive:"
    fastlist: false
@@ -264,7 +267,7 @@ backends:
    fastlist: true
  - backend:  "pcloud"
    remote:   "TestPcloud:"
-   fastlist: false
+   fastlist: true
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:
@@ -304,6 +307,9 @@ backends:
  - backend:  "koofr"
    remote:   "TestKoofr:"
    fastlist: false
+ - backend:  "koofr"
+   remote:   "TestDigiStorage:"
+   fastlist: false
  - backend:  "premiumizeme"
    remote:   "TestPremiumizeMe:"
    fastlist: false
@@ -335,8 +341,8 @@ backends:
  - backend:  "sia"
    remote:   "TestSia:"
    fastlist: false
- - backend:  "tardigrade"
-   remote:   "TestTardigrade:"
+ - backend:  "storj"
+   remote:   "TestStorj:"
    fastlist: true
  - backend:  "zoho"
    remote:   "TestZoho:"

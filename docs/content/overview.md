@@ -17,6 +17,7 @@ Here is an overview of the major features of each cloud storage system.
 | Name                         | Hash        | ModTime | Case Insensitive | Duplicate Files | MIME Type |
 | ---------------------------- |:-----------:|:-------:|:----------------:|:---------------:|:---------:|
 | 1Fichier                     | Whirlpool   | No      | No               | Yes             | R         |
+| Akamai Netstorage            | MD5, SHA256 | Yes     | No               | No              | R         |
 | Amazon Drive                 | MD5         | No      | Yes              | No              | R         |
 | Amazon S3 (or S3 compatible) | MD5         | Yes     | No               | No              | R/W       |
 | Backblaze B2                 | SHA1        | Yes     | No               | No              | R/W       |
@@ -48,7 +49,7 @@ Here is an overview of the major features of each cloud storage system.
 | SFTP                         | MD5, SHA1 ² | Yes     | Depends          | No              | -         |
 | Sia                          | -           | No      | No               | No              | -         |
 | SugarSync                    | -           | No      | No               | No              | -         |
-| Tardigrade                   | -           | Yes     | No               | No              | -         |
+| Storj                        | -           | Yes     | No               | No              | -         |
 | Uptobox                      | -           | No      | No               | Yes             | -         |
 | WebDAV                       | MD5, SHA1 ³ | Yes ⁴   | Depends          | No              | -         |
 | Yandex Disk                  | MD5         | Yes     | No               | No              | R         |
@@ -406,7 +407,7 @@ remote itself may assign the MIME type.
 ## Optional Features ##
 
 All rclone remotes support a base command set. Other features depend
-upon backend specific capabilities.
+upon backend-specific capabilities.
 
 | Name                         | Purge | Copy | Move | DirMove | CleanUp | ListR | StreamUpload | LinkSharing  | About | EmptyDir |
 | ---------------------------- |:-----:|:----:|:----:|:-------:|:-------:|:-----:|:------------:|:------------:|:-----:|:--------:|
@@ -422,13 +423,13 @@ upon backend specific capabilities.
 | Google Cloud Storage         | Yes   | Yes  | No   | No      | No      | Yes   | Yes          | No           | No    | No       |
 | Google Drive                 | Yes   | Yes  | Yes  | Yes     | Yes     | Yes   | Yes          | Yes          | Yes   | Yes      |
 | Google Photos                | No    | No   | No   | No      | No      | No    | No           | No           | No    | No       |
-| HDFS                         | Yes   | No   | No   | No      | No      | No    | Yes          | No           | Yes   | Yes      |
+| HDFS                         | Yes   | No   | Yes  | Yes     | No      | No    | Yes          | No           | Yes   | Yes      |
 | HTTP                         | No    | No   | No   | No      | No      | No    | No           | No           | No    | Yes      |
 | Hubic                        | Yes † | Yes  | No   | No      | No      | Yes   | Yes          | No           | Yes   | No       |
 | Jottacloud                   | Yes   | Yes  | Yes  | Yes     | Yes     | Yes   | No           | Yes          | Yes   | Yes      |
 | Mail.ru Cloud                | Yes   | Yes  | Yes  | Yes     | Yes     | No    | No           | Yes          | Yes   | Yes      |
 | Mega                         | Yes   | No   | Yes  | Yes     | Yes     | No    | No           | Yes          | Yes   | Yes      |
-| Memory                       | No    | Yes  | No   | No      | No      | Yes   | Yes          | No           | No    | No       | 
+| Memory                       | No    | Yes  | No   | No      | No      | Yes   | Yes          | No           | No    | No       |
 | Microsoft Azure Blob Storage | Yes   | Yes  | No   | No      | No      | Yes   | Yes          | No           | No    | No       |
 | Microsoft OneDrive           | Yes   | Yes  | Yes  | Yes     | Yes     | No    | No           | Yes          | Yes   | Yes      |
 | OpenDrive                    | Yes   | Yes  | Yes  | Yes     | No      | No    | No           | No           | No    | Yes      |
@@ -440,7 +441,7 @@ upon backend specific capabilities.
 | Seafile                      | Yes   | Yes  | Yes  | Yes     | Yes     | Yes   | Yes          | Yes          | Yes   | Yes      |
 | SFTP                         | No    | No   | Yes  | Yes     | No      | No    | Yes          | No           | Yes   | Yes      |
 | SugarSync                    | Yes   | Yes  | Yes  | Yes     | No      | No    | Yes          | Yes          | No    | Yes      |
-| Tardigrade                   | Yes † | No   | No   | No      | No      | Yes   | Yes          | No           | No    | No       |
+| Storj                        | Yes † | No   | Yes  | No      | No      | Yes   | Yes          | No           | No    | No       |
 | Uptobox                      | No    | Yes  | Yes  | Yes     | No      | No    | No           | No           | No    | No       |
 | WebDAV                       | Yes   | Yes  | Yes  | Yes     | No      | No    | Yes ‡        | No           | Yes   | Yes      |
 | Yandex Disk                  | Yes   | Yes  | Yes  | Yes     | Yes     | No    | Yes          | Yes          | Yes   | Yes      |
@@ -452,7 +453,7 @@ upon backend specific capabilities.
 This deletes a directory quicker than just deleting all the files in
 the directory.
 
-† Note Swift, Hubic, and Tardigrade implement this in order to delete
+† Note Swift, Hubic, and Storj implement this in order to delete
 directory markers but they don't actually have a quicker way of deleting
 files other than deleting them individually.
 
@@ -529,4 +530,4 @@ See [rclone about command](https://rclone.org/commands/rclone_about/)
 ### EmptyDir ###
 
 The remote supports empty directories. See [Limitations](/bugs/#limitations)
- for details. Most Object/Bucket based remotes do not support this.
+ for details. Most Object/Bucket-based remotes do not support this.

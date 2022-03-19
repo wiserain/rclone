@@ -24,6 +24,7 @@ docs = [
     "overview.md",
     "flags.md",
     "docker.md",
+    "bisync.md",
 
     # Keep these alphabetical by full name
     "fichier.md",
@@ -52,6 +53,7 @@ docs = [
     "mailru.md",
     "mega.md",
     "memory.md",
+    "netstorage.md",
     "azureblob.md",
     "onedrive.md",
     "opendrive.md",
@@ -63,8 +65,9 @@ docs = [
     "putio.md",
     "seafile.md",
     "sftp.md",
+    "storj.md",
     "sugarsync.md",
-    "tardigrade.md",
+    "tardigrade.md",            # stub only to redirect to storj.md
     "uptobox.md",
     "union.md",
     "webdav.md",

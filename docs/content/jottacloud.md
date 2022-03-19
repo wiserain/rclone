@@ -41,8 +41,8 @@ Note that the web interface may refer to this token as a JottaCli token.
 
 ### Legacy authentication
 
-If you are using one of the whitelabel versions (e.g. from Elkjøp or Tele2) you may not have the option
-to generate a CLI token. In this case you'll have to use the legacy authentication. To to this select
+If you are using one of the whitelabel versions (e.g. from Elkjøp) you may not have the option
+to generate a CLI token. In this case you'll have to use the legacy authentication. To do this select
 yes when the setup asks for legacy authentication and enter your username and password.
 The rest of the setup is identical to the default setup.
 
@@ -53,6 +53,13 @@ additionally uses a separate authentication flow where the username is generated
 rclone to use Telia Cloud, choose Telia Cloud authentication in the setup. The rest of the setup is
 identical to the default setup.
 
+### Tele2 Cloud authentication
+
+As Tele2-Com Hem merger was completed this authentication can be used for former Com Hem Cloud and
+Tele2 Cloud customers as no support for creating a CLI token exists, and additionally uses a separate
+authentication flow where the username is generated internally. To setup rclone to use Tele2 Cloud,
+choose Tele2 Cloud authentication in the setup. The rest of the setup is identical to the default setup.
+
 ## Configuration
 
 Here is an example of how to make a remote called `remote` with the default setup.  First run:
@@ -62,7 +69,7 @@ Here is an example of how to make a remote called `remote` with the default setu
 This will guide you through an interactive setup process:
 
 ```
-No remotes found - make a new one
+No remotes found, make a new one?
 n) New remote
 s) Set configuration password
 q) Quit config
@@ -107,7 +114,7 @@ Choose a number from below, or type in an existing value
  1 > Archive
  2 > Links
  3 > Sync
- 
+
 Mountpoints> 1
 --------------------
 [jotta]
@@ -141,9 +148,11 @@ To copy a local directory to an Jottacloud directory called backup
 The official Jottacloud client registers a device for each computer you install it on,
 and then creates a mountpoint for each folder you select for Backup.
 The web interface uses a special device called Jotta for the Archive and Sync mountpoints.
-In most cases you'll want to use the Jotta/Archive device/mountpoint, however if you want to access
-files uploaded by any of the official clients rclone provides the option to select other devices
-and mountpoints during config.
+
+With rclone you'll want to use the Jotta/Archive device/mountpoint in most cases, however if you
+want to access files uploaded by any of the official clients rclone provides the option to select
+other devices and mountpoints during config. Note that uploading files is currently not supported
+to other devices than Jotta.
 
 The built-in Jotta device may also contain several other mountpoints, such as: Latest, Links, Shared and Trash.
 These are special mountpoints with a different internal representation than the "regular" mountpoints.
@@ -160,6 +169,9 @@ Note that the implementation in Jottacloud always uses only a single
 API request to get the entire list, so for large folders this could
 lead to long wait time before the first results are shown.
 
+Note also that with rclone version 1.58 and newer information about
+[MIME types](/overview/#mime-type) are not available when using `--fast-list`.
+
 ### Modified time and hashes
 
 Jottacloud allows modification times to be set on objects accurate to 1
@@ -171,9 +183,10 @@ flag.
 
 Note that Jottacloud requires the MD5 hash before upload so if the
 source does not have an MD5 checksum then the file will be cached
-temporarily on disk (wherever the `TMPDIR` environment variable points
-to) before it is uploaded. Small files will be cached in memory - see
-the [--jottacloud-md5-memory-limit](#jottacloud-md5-memory-limit) flag.
+temporarily on disk (in location given by
+[--temp-dir](/docs/#temp-dir-dir)) before it is uploaded.
+Small files will be cached in memory - see the
+[--jottacloud-md5-memory-limit](#jottacloud-md5-memory-limit) flag.
 When uploading from local disk the source checksum is always available,
 so this does not apply. Starting with rclone version 1.52 the same is
 true for crypted remotes (in older versions the crypt backend would not
@@ -200,7 +213,7 @@ as they can't be used in XML strings.
 
 ### Deleting files
 
-By default rclone will send all files to the trash when deleting files. They will be permanently
+By default, rclone will send all files to the trash when deleting files. They will be permanently
 deleted automatically after 30 days. You may bypass the trash and permanently delete files immediately
 by using the [--jottacloud-hard-delete](#jottacloud-hard-delete) flag, or set the equivalent environment variable.
 Emptying the trash is supported by the [cleanup](/commands/rclone_cleanup/) command.
@@ -228,6 +241,8 @@ Here are the advanced options specific to jottacloud (Jottacloud).
 
 Files bigger than this will be cached on disk to calculate the MD5 if required.
 
+Properties:
+
 - Config:      md5_memory_limit
 - Env Var:     RCLONE_JOTTACLOUD_MD5_MEMORY_LIMIT
 - Type:        SizeSuffix
@@ -239,6 +254,8 @@ Only show files that are in the trash.
 
 This will show trashed files in their original directory structure.
 
+Properties:
+
 - Config:      trashed_only
 - Env Var:     RCLONE_JOTTACLOUD_TRASHED_ONLY
 - Type:        bool
@@ -247,6 +264,8 @@ This will show trashed files in their original directory structure.
 #### --jottacloud-hard-delete
 
 Delete files permanently rather than putting them into the trash.
+
+Properties:
 
 - Config:      hard_delete
 - Env Var:     RCLONE_JOTTACLOUD_HARD_DELETE
@@ -257,6 +276,8 @@ Delete files permanently rather than putting them into the trash.
 
 Files bigger than this can be resumed if the upload fail's.
 
+Properties:
+
 - Config:      upload_resume_limit
 - Env Var:     RCLONE_JOTTACLOUD_UPLOAD_RESUME_LIMIT
 - Type:        SizeSuffix
@@ -266,6 +287,8 @@ Files bigger than this can be resumed if the upload fail's.
 
 Avoid server side versioning by deleting files and recreating files instead of overwriting them.
 
+Properties:
+
 - Config:      no_versions
 - Env Var:     RCLONE_JOTTACLOUD_NO_VERSIONS
 - Type:        bool
@@ -273,9 +296,11 @@ Avoid server side versioning by deleting files and recreating files instead of o
 
 #### --jottacloud-encoding
 
-This sets the encoding for the backend.
+The encoding for the backend.
 
 See the [encoding section in the overview](/overview/#encoding) for more info.
+
+Properties:
 
 - Config:      encoding
 - Env Var:     RCLONE_JOTTACLOUD_ENCODING

@@ -77,7 +77,7 @@ func TestTouchUpdateTimestamp(t *testing.T) {
 	srcFileName := "a"
 	content := "aaa"
 	file1 := r.WriteObject(context.Background(), srcFileName, content, t1)
-	fstest.CheckItems(t, r.Fremote, file1)
+	r.CheckRemoteItems(t, file1)
 
 	timeAsArgument = "121212"
 	err := Touch(context.Background(), r.Fremote, "a")
@@ -92,7 +92,7 @@ func TestTouchUpdateTimestampWithCFlag(t *testing.T) {
 	srcFileName := "a"
 	content := "aaa"
 	file1 := r.WriteObject(context.Background(), srcFileName, content, t1)
-	fstest.CheckItems(t, r.Fremote, file1)
+	r.CheckRemoteItems(t, file1)
 
 	notCreateNewFile = true
 	timeAsArgument = "121212"
@@ -111,6 +111,15 @@ func TestTouchCreateMultipleDirAndFile(t *testing.T) {
 	require.NoError(t, err)
 	file1 := fstest.NewItem("a/b/c.txt", "", t1)
 	fstest.CheckListingWithPrecision(t, r.Fremote, []fstest.Item{file1}, []string{"a", "a/b"}, fs.ModTimeNotSupported)
+}
+
+func TestTouchEmptyName(t *testing.T) {
+	r := fstest.NewRun(t)
+	defer r.Finalise()
+
+	err := Touch(context.Background(), r.Fremote, "")
+	require.NoError(t, err)
+	fstest.CheckListingWithPrecision(t, r.Fremote, []fstest.Item{}, []string{}, fs.ModTimeNotSupported)
 }
 
 func TestTouchEmptyDir(t *testing.T) {

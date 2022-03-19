@@ -2,6 +2,7 @@ package mountlib
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -21,7 +22,6 @@ import (
 	"github.com/rclone/rclone/vfs/vfsflags"
 
 	sysdnotify "github.com/iguanesolutions/go-systemd/v5/notify"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -40,6 +40,7 @@ type Options struct {
 	ExtraOptions       []string
 	ExtraFlags         []string
 	AttrTimeout        time.Duration // how long the kernel caches attribute for
+	DeviceName         string
 	VolumeName         string
 	NoAppleDouble      bool
 	NoAppleXattr       bool
@@ -125,6 +126,7 @@ func AddFlags(flagSet *pflag.FlagSet) {
 	flags.BoolVarP(flagSet, &Opt.AsyncRead, "async-read", "", Opt.AsyncRead, "Use asynchronous reads (not supported on Windows)")
 	flags.FVarP(flagSet, &Opt.MaxReadAhead, "max-read-ahead", "", "The number of bytes that can be prefetched for sequential reads (not supported on Windows)")
 	flags.BoolVarP(flagSet, &Opt.WritebackCache, "write-back-cache", "", Opt.WritebackCache, "Makes kernel buffer writes before sending them to rclone (without this, writethrough caching is used) (not supported on Windows)")
+	flags.StringVarP(flagSet, &Opt.DeviceName, "devname", "", Opt.DeviceName, "Set the device name - default is remote:path")
 	// Windows and OSX
 	flags.StringVarP(flagSet, &Opt.VolumeName, "volname", "", Opt.VolumeName, "Set the volume name (supported on Windows and OSX only)")
 	// OSX only
@@ -235,6 +237,7 @@ func (m *MountPoint) Mount() (daemon *os.Process, err error) {
 		return nil, err
 	}
 	m.SetVolumeName(m.MountOpt.VolumeName)
+	m.SetDeviceName(m.MountOpt.DeviceName)
 
 	// Start background task if --daemon is specified
 	if m.MountOpt.Daemon {
@@ -248,7 +251,7 @@ func (m *MountPoint) Mount() (daemon *os.Process, err error) {
 
 	m.ErrChan, m.UnmountFn, err = m.MountFn(m.VFS, m.MountPoint, &m.MountOpt)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to mount FUSE fs")
+		return nil, fmt.Errorf("failed to mount FUSE fs: %w", err)
 	}
 	return nil, nil
 }
@@ -277,7 +280,7 @@ func (m *MountPoint) Wait() error {
 
 	// Notify systemd
 	if err := sysdnotify.Ready(); err != nil {
-		return errors.Wrap(err, "failed to notify systemd")
+		return fmt.Errorf("failed to notify systemd: %w", err)
 	}
 
 	// Reload VFS cache on SIGHUP
@@ -305,7 +308,7 @@ func (m *MountPoint) Wait() error {
 	finalise()
 
 	if err != nil {
-		return errors.Wrap(err, "failed to umount FUSE fs")
+		return fmt.Errorf("failed to umount FUSE fs: %w", err)
 	}
 	return nil
 }

@@ -36,7 +36,7 @@ which pass through it.
 
 Since rclone doesn't currently have its own Amazon Drive credentials
 so you will either need to have your own `client_id` and
-`client_secret` with Amazon Drive, or use a third party oauth proxy
+`client_secret` with Amazon Drive, or use a third-party oauth proxy
 in which case you will need to enter `client_id`, `client_secret`,
 `auth_url` and `token_url`.
 
@@ -53,7 +53,7 @@ Here is an example of how to make a remote called `remote`.  First run:
 This will guide you through an interactive setup process:
 
 ```
-No remotes found - make a new one
+No remotes found, make a new one?
 n) New remote
 r) Rename remote
 c) Copy remote
@@ -148,7 +148,7 @@ as they can't be used in JSON strings.
 Any files you delete with rclone will end up in the trash.  Amazon
 don't provide an API to permanently delete files, nor to empty the
 trash, so you will have to do that with one of Amazon's apps or via
-the Amazon Drive website. As of November 17, 2016, files are 
+the Amazon Drive website. As of November 17, 2016, files are
 automatically deleted by Amazon from the trash after 30 days.
 
 ### Using with non `.com` Amazon accounts
@@ -168,10 +168,12 @@ OAuth Client Id.
 
 Leave blank normally.
 
+Properties:
+
 - Config:      client_id
 - Env Var:     RCLONE_ACD_CLIENT_ID
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --acd-client-secret
 
@@ -179,10 +181,12 @@ OAuth Client Secret.
 
 Leave blank normally.
 
+Properties:
+
 - Config:      client_secret
 - Env Var:     RCLONE_ACD_CLIENT_SECRET
 - Type:        string
-- Default:     ""
+- Required:    false
 
 ### Advanced options
 
@@ -192,10 +196,12 @@ Here are the advanced options specific to amazon cloud drive (Amazon Drive).
 
 OAuth Access Token as a JSON blob.
 
+Properties:
+
 - Config:      token
 - Env Var:     RCLONE_ACD_TOKEN
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --acd-auth-url
 
@@ -203,10 +209,12 @@ Auth server URL.
 
 Leave blank to use the provider defaults.
 
+Properties:
+
 - Config:      auth_url
 - Env Var:     RCLONE_ACD_AUTH_URL
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --acd-token-url
 
@@ -214,19 +222,23 @@ Token server url.
 
 Leave blank to use the provider defaults.
 
+Properties:
+
 - Config:      token_url
 - Env Var:     RCLONE_ACD_TOKEN_URL
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --acd-checkpoint
 
 Checkpoint for internal polling (debug).
 
+Properties:
+
 - Config:      checkpoint
 - Env Var:     RCLONE_ACD_CHECKPOINT
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --acd-upload-wait-per-gb
 
@@ -252,6 +264,8 @@ of big files for a range of file sizes.
 Upload with the "-v" flag to see more info about what rclone is doing
 in this situation.
 
+Properties:
+
 - Config:      upload_wait_per_gb
 - Env Var:     RCLONE_ACD_UPLOAD_WAIT_PER_GB
 - Type:        Duration
@@ -270,6 +284,8 @@ To download files above this threshold, rclone requests a "tempLink"
 which downloads the file through a temporary URL directly from the
 underlying S3 storage.
 
+Properties:
+
 - Config:      templink_threshold
 - Env Var:     RCLONE_ACD_TEMPLINK_THRESHOLD
 - Type:        SizeSuffix
@@ -277,9 +293,11 @@ underlying S3 storage.
 
 #### --acd-encoding
 
-This sets the encoding for the backend.
+The encoding for the backend.
 
 See the [encoding section in the overview](/overview/#encoding) for more info.
+
+Properties:
 
 - Config:      encoding
 - Env Var:     RCLONE_ACD_ENCODING

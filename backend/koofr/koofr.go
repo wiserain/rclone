@@ -28,33 +28,57 @@ import (
 func init() {
 	fs.Register(&fs.RegInfo{
 		Name:        "koofr",
-		Description: "Koofr",
+		Description: "Koofr, Digi Storage and other Koofr-compatible storage providers",
 		NewFs:       NewFs,
 		Options: []fs.Option{{
+			Name: fs.ConfigProvider,
+			Help: "Choose your storage provider.",
+			// NOTE if you add a new provider here, then add it in the
+			// setProviderDefaults() function and update options accordingly
+			Examples: []fs.OptionExample{{
+				Value: "koofr",
+				Help:  "Koofr, https://app.koofr.net/",
+			}, {
+				Value: "digistorage",
+				Help:  "Digi Storage, https://storage.rcs-rds.ro/",
+			}, {
+				Value: "other",
+				Help:  "Any other Koofr API compatible storage service",
+			}},
+		}, {
 			Name:     "endpoint",
 			Help:     "The Koofr API endpoint to use.",
-			Default:  "https://app.koofr.net",
+			Provider: "other",
 			Required: true,
-			Advanced: true,
 		}, {
 			Name:     "mountid",
 			Help:     "Mount ID of the mount to use.\n\nIf omitted, the primary mount is used.",
-			Required: false,
-			Default:  "",
 			Advanced: true,
 		}, {
 			Name:     "setmtime",
 			Help:     "Does the backend support setting modification time.\n\nSet this to false if you use a mount ID that points to a Dropbox or Amazon Drive backend.",
 			Default:  true,
-			Required: true,
 			Advanced: true,
 		}, {
 			Name:     "user",
-			Help:     "Your Koofr user name.",
+			Help:     "Your user name.",
 			Required: true,
 		}, {
 			Name:       "password",
-			Help:       "Your Koofr password for rclone (generate one at https://app.koofr.net/app/admin/preferences/password).",
+			Help:       "Your password for rclone (generate one at https://app.koofr.net/app/admin/preferences/password).",
+			Provider:   "koofr",
+			IsPassword: true,
+			Required:   true,
+		}, {
+			Name:       "password",
+			Help:       "Your password for rclone (generate one at https://storage.rcs-rds.ro/app/admin/preferences/password).",
+			Provider:   "digistorage",
+			IsPassword: true,
+			Required:   true,
+		}, {
+			Name:       "password",
+			Help:       "Your password for rclone (generate one at your service's settings page).",
+			Provider:   "other",
 			IsPassword: true,
 			Required:   true,
 		}, {
@@ -71,6 +95,7 @@ func init() {
 
 // Options represent the configuration of the Koofr backend
 type Options struct {
+	Provider string               `config:"provider"`
 	Endpoint string               `config:"endpoint"`
 	MountID  string               `config:"mountid"`
 	User     string               `config:"user"`
@@ -255,13 +280,38 @@ func (f *Fs) fullPath(part string) string {
 	return f.opt.Enc.FromStandardPath(path.Join("/", f.root, part))
 }
 
-// NewFs constructs a new filesystem given a root path and configuration options
+func setProviderDefaults(opt *Options) {
+	// handle old, provider-less configs
+	if opt.Provider == "" {
+		if opt.Endpoint == "" || strings.HasPrefix(opt.Endpoint, "https://app.koofr.net") {
+			opt.Provider = "koofr"
+		} else if strings.HasPrefix(opt.Endpoint, "https://storage.rcs-rds.ro") {
+			opt.Provider = "digistorage"
+		} else {
+			opt.Provider = "other"
+		}
+	}
+	// now assign an endpoint
+	if opt.Provider == "koofr" {
+		opt.Endpoint = "https://app.koofr.net"
+	} else if opt.Provider == "digistorage" {
+		opt.Endpoint = "https://storage.rcs-rds.ro"
+	}
+}
+
+// NewFs constructs a new filesystem given a root path and rclone configuration options
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (ff fs.Fs, err error) {
 	opt := new(Options)
 	err = configstruct.Set(m, opt)
 	if err != nil {
 		return nil, err
 	}
+	setProviderDefaults(opt)
+	return NewFsFromOptions(ctx, name, root, opt)
+}
+
+// NewFsFromOptions constructs a new filesystem given a root path and internal configuration options
+func NewFsFromOptions(ctx context.Context, name, root string, opt *Options) (ff fs.Fs, err error) {
 	pass, err := obscure.Reveal(opt.Password)
 	if err != nil {
 		return nil, err

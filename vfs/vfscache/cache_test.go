@@ -603,7 +603,7 @@ func TestCacheRename(t *testing.T) {
 	assertPathNotExist(t, osPathMeta)
 	assert.False(t, c.Exists("sub/newPotato"))
 
-	// non existent file - is ignored
+	// non-existent file - is ignored
 	assert.NoError(t, c.Rename("nonexist", "nonexist2", nil))
 }
 
@@ -700,4 +700,16 @@ func TestCacheDump(t *testing.T) {
 
 	out = c.Dump()
 	assert.Equal(t, "Cache{\n}\n", out)
+}
+
+func TestCacheStats(t *testing.T) {
+	_, c, cleanup := newTestCache(t)
+	defer cleanup()
+
+	out := c.Stats()
+	assert.Equal(t, int64(0), out["bytesUsed"])
+	assert.Equal(t, 0, out["erroredFiles"])
+	assert.Equal(t, 0, out["files"])
+	assert.Equal(t, 0, out["uploadsInProgress"])
+	assert.Equal(t, 0, out["uploadsQueued"])
 }

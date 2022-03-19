@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/operations"
@@ -199,10 +199,10 @@ func (op *kvPut) Do(ctx context.Context, b kv.Bucket) (err error) {
 		r.Hashes[hashType] = hashVal
 	}
 	if data, err = r.encode(op.key); err != nil {
-		return errors.Wrap(err, "marshal failed")
+		return fmt.Errorf("marshal failed: %w", err)
 	}
 	if err = b.Put([]byte(op.key), data); err != nil {
-		return errors.Wrap(err, "put failed")
+		return fmt.Errorf("put failed: %w", err)
 	}
 	return err
 }
@@ -294,7 +294,7 @@ func (f *Fs) dumpLine(r *hashRecord, path string, include bool, err error) strin
 		if hashVal == "" || err != nil {
 			hashVal = "-"
 		}
-		hashVal = fmt.Sprintf("%-*s", hash.Width(hashType), hashVal)
+		hashVal = fmt.Sprintf("%-*s", hash.Width(hashType, false), hashVal)
 		hashes = append(hashes, hashName+":"+hashVal)
 	}
 	hashesStr := strings.Join(hashes, " ")

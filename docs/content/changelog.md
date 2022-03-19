@@ -5,6 +5,138 @@ description: "Rclone Changelog"
 
 # Changelog
 
+## v1.58.0 - 2022-03-18
+
+[See commits](https://github.com/rclone/rclone/compare/v1.57.0...v1.58.0)
+
+* New backends
+    * [Akamai Netstorage](/netstorage) (Nil Alexandrov)
+    * [Seagate Lyve](/s3/#lyve), [SeaweedFS](/s3/#seaweedfs), [Storj](/s3/#storj), [RackCorp](/s3/#RackCorp) via s3 backend
+    * [Storj](/storj/) (renamed from Tardigrade - your old config files will continue working)
+* New commands
+    * [bisync](/bisync/) - experimental bidirectional cloud sync (Ivan Andreev, Chris Nelson)
+* New Features
+    * build
+        * Add `windows/arm64` build (`rclone mount` not supported yet) (Nick Craig-Wood)
+        * Raise minimum go version to go1.15 (Nick Craig-Wood)
+    * config: Allow dot in remote names and improve config editing (albertony)
+    * dedupe: Add quit as a choice in interactive mode (albertony)
+    * dlna: Change icons to the newest ones. (Alain Nussbaumer)
+    * filter: Add [`{{ regexp }}` syntax](/filtering/#regexp) to pattern matches (Nick Craig-Wood)
+    * fshttp: Add prometheus metrics for HTTP status code (Michał Matczuk)
+    * hashsum: Support creating hash from data received on stdin (albertony)
+    * librclone
+        * Allow empty string or null input instead of empty json object (albertony)
+        * Add support for mount commands (albertony)
+    * operations: Add server-side moves to stats (Ole Frost)
+    * rc: Allow user to disable authentication for web gui (negative0)
+    * tree: Remove obsolete `--human` replaced by global `--human-readable` (albertony)
+    * version: Report correct friendly-name for newer Windows 10/11 versions (albertony)
+* Bug Fixes
+    * build
+        * Fix ARM architecture version in .deb packages after nfpm change (Nick Craig-Wood)
+        * Hard fork `github.com/jlaffaye/ftp` to fix `go get github.com/rclone/rclone` (Nick Craig-Wood)
+    * oauthutil: Fix crash when webrowser requests `/robots.txt` (Nick Craig-Wood)
+    * operations: Fix goroutine leak in case of copy retry (Ankur Gupta)
+    * rc:
+        * Fix `operations/publiclink` default for `expires` parameter (Nick Craig-Wood)
+        * Fix missing computation of `transferQueueSize` when summing up statistics group (Carlo Mion)
+        * Fix missing `StatsInfo` fields in the computation of the group sum (Carlo Mion)
+    * sync: Fix `--max-duration` so it doesn't retry when the duration is exceeded (Nick Craig-Wood)
+    * touch: Fix issue where a directory is created instead of a file (albertony)
+* Mount
+    * Add `--devname` to set the device name sent to FUSE for mount display (Nick Craig-Wood)
+* VFS
+    * Add `vfs/stats` remote control to show statistics (Nick Craig-Wood)
+    * Fix `failed to _ensure cache internal error: downloaders is nil error` (Nick Craig-Wood)
+    * Fix handling of special characters in file names (Bumsu Hyeon)
+* Local
+    * Fix hash invalidation which caused errors with local crypt mount (Nick Craig-Wood)
+* Crypt
+    * Add `base64` and `base32768` filename encoding options (Max Sum, Sinan Tan)
+* Azure Blob
+    * Implement `--azureblob-upload-concurrency` parameter to speed uploads (Nick Craig-Wood)
+    * Remove 100MB upper limit on `chunk_size` as it is no longer needed (Nick Craig-Wood)
+    * Raise `--azureblob-upload-concurrency` to 16 by default (Nick Craig-Wood)
+    * Fix crash with SAS URL and no container (Nick Craig-Wood)
+* Compress
+    * Fix crash if metadata upload failed (Nick Craig-Wood)
+    * Fix memory leak (Nick Craig-Wood)
+* Drive
+    * Added `--drive-copy-shortcut-content` (Abhiraj)
+    * Disable OAuth OOB flow (copy a token) due to Google deprecation (Nick Craig-Wood)
+        * See [the deprecation note](https://developers.googleblog.com/2022/02/making-oauth-flows-safer.html#disallowed-oob).
+    * Add `--drive-skip-dangling-shortcuts` flag (Nick Craig-Wood)
+    * When using a link type `--drive-export-formats` shows all doc types (Nick Craig-Wood)
+* Dropbox
+    * Speed up directory listings by specifying 1000 items in a chunk (Nick Craig-Wood)
+    * Save an API request when at the root (Nick Craig-Wood)
+* Fichier
+    * Implemented About functionality (Gourav T)
+* FTP
+    * Add `--ftp-ask-password` to prompt for password when needed (Borna Butkovic)
+* Google Cloud Storage
+    * Add missing regions (Nick Craig-Wood)
+    * Disable OAuth OOB flow (copy a token) due to Google deprecation (Nick Craig-Wood)
+        * See [the deprecation note](https://developers.googleblog.com/2022/02/making-oauth-flows-safer.html#disallowed-oob).
+* Googlephotos
+    * Disable OAuth OOB flow (copy a token) due to Google deprecation (Nick Craig-Wood)
+        * See [the deprecation note](https://developers.googleblog.com/2022/02/making-oauth-flows-safer.html#disallowed-oob).
+* Hasher
+    * Fix crash on object not found (Nick Craig-Wood)
+* Hdfs
+    * Add file (Move) and directory move (DirMove) support (Andy Jackson)
+* HTTP
+    * Improved recognition of URL pointing to a single file (albertony)
+* Jottacloud
+    * Change API used by recursive list (ListR) (Kim)
+    * Add support for Tele2 Cloud (Fredric Arklid)
+* Koofr
+    * Add Digistorage service as a Koofr provider. (jaKa)
+* Mailru
+    * Fix int32 overflow on arm32 (Ivan Andreev)
+* Onedrive
+    * Add config option for oauth scope `Sites.Read.All` (Charlie Jiang)
+    * Minor optimization of quickxorhash (Isaac Levy)
+    * Add `--onedrive-root-folder-id` flag (Nick Craig-Wood)
+    * Do not retry on `400 pathIsTooLong` error (ctrl-q)
+* Pcloud
+    * Add support for recursive list (ListR) (Niels van de Weem)
+    * Fix pre-1970 time stamps (Nick Craig-Wood)
+* S3
+    * Use `ListObjectsV2` for faster listings (Felix Bünemann)
+        * Fallback to `ListObject` v1 on unsupported providers (Nick Craig-Wood)
+    * Use the `ETag` on multipart transfers to verify the transfer was OK (Nick Craig-Wood)
+        * Add `--s3-use-multipart-etag` provider quirk to disable this on unsupported providers (Nick Craig-Wood)
+    * New Providers
+        * RackCorp object storage (bbabich)
+        * Seagate Lyve Cloud storage (Nick Craig-Wood)
+        * SeaweedFS (Chris Lu)
+        * Storj Shared gateways (Márton Elek, Nick Craig-Wood)
+    * Add Wasabi AP Northeast 2 endpoint info (lindwurm)
+    * Add `GLACIER_IR` storage class (Yunhai Luo)
+    * Document `Content-MD5` workaround for object-lock enabled buckets (Paulo Martins)
+    * Fix multipart upload with `--no-head` flag (Nick Craig-Wood)
+    * Simplify content length processing in s3 with download url (Logeshwaran Murugesan)
+* SFTP
+    * Add rclone to list of supported `md5sum`/`sha1sum` commands to look for (albertony)
+    * Refactor so we only have one way of running remote commands (Nick Craig-Wood)
+    * Fix timeout on hashing large files by sending keepalives (Nick Craig-Wood)
+    * Fix unecessary seeking when uploading and downloading files (Nick Craig-Wood)
+    * Update docs on how to create `known_hosts` file (Nick Craig-Wood)
+* Storj
+    * Rename tardigrade backend to storj backend (Nick Craig-Wood)
+    * Implement server side Move for files (Nick Craig-Wood)
+    * Update docs to explain differences between s3 and this backend (Elek, Márton)
+* Swift
+    * Fix About so it shows info about the current container only (Nick Craig-Wood)
+* Union
+    * Fix treatment of remotes with `//` in (Nick Craig-Wood)
+    * Fix deadlock when one part of a multi-upload fails (Nick Craig-Wood)
+    * Fix eplus policy returned nil (Vitor Arruda)
+* Yandex
+    * Add permanent deletion support (deinferno)
+
 ## v1.57.0 - 2021-11-01
 
 [See commits](https://github.com/rclone/rclone/compare/v1.56.0...v1.57.0)
@@ -376,7 +508,7 @@ description: "Rclone Changelog"
 * New Features
     * [Connection strings](/docs/#connection-strings)
         * Config parameters can now be passed as part of the remote name as a connection string.
-        * For example to do the equivalent of `--drive-shared-with-me` use `drive,shared_with_me:`
+        * For example, to do the equivalent of `--drive-shared-with-me` use `drive,shared_with_me:`
         * Make sure we don't save on the fly remote config to the config file (Nick Craig-Wood)
         * Make sure backends with additional config have a different name for caching (Nick Craig-Wood)
         * This work was sponsored by CERN, through the [CS3MESH4EOSC Project](https://cs3mesh4eosc.eu/).
@@ -629,7 +761,7 @@ description: "Rclone Changelog"
     * And thanks to these people for many doc fixes too numerous to list
         * Ameer Dawood, Antoine GIRARD, Bob Bagwill, Christopher Stewart
         * CokeMine, David, Dov Murik, Durval Menezes, Evan Harris, gtorelly
-        * Ilyess Bachiri, Janne Johansson, Kerry Su, Marcin Zelent, 
+        * Ilyess Bachiri, Janne Johansson, Kerry Su, Marcin Zelent,
         * Martin Michlmayr, Milly, Sơn Trần-Nguyễn
 * Mount
     * Update systemd status with cache stats (Hekmon)
@@ -1174,7 +1306,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * [Union](/union/) re-write to have multiple writable remotes (Max Sum)
     * [Seafile](/seafile) for Seafile server (Fred @creativeprojects)
 * New commands
-    * backend: command for backend specific commands (see backends) (Nick Craig-Wood)
+    * backend: command for backend-specific commands (see backends) (Nick Craig-Wood)
     * cachestats: Deprecate in favour of `rclone backend stats cache:` (Nick Craig-Wood)
     * dbhashsum: Deprecate in favour of `rclone hashsum DropboxHash` (Nick Craig-Wood)
 * New Features
@@ -1211,7 +1343,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * lsjson: Add `--hash-type` parameter and use it in lsf to speed up hashing (Nick Craig-Wood)
     * rc
         * Add `-o`/`--opt` and `-a`/`--arg` for more structured input (Nick Craig-Wood)
-        * Implement `backend/command` for running backend specific commands remotely (Nick Craig-Wood)
+        * Implement `backend/command` for running backend-specific commands remotely (Nick Craig-Wood)
         * Add `mount/mount` command for starting `rclone mount` via the API (Chaitanya)
     * rcd: Add Prometheus metrics support (Gary Kim)
     * serve http
@@ -1638,7 +1770,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * Add flag `--vfs-case-insensitive` for windows/macOS mounts (Ivan Andreev)
     * Make objects of unknown size readable through the VFS (Nick Craig-Wood)
     * Move writeback of dirty data out of close() method into its own method (FlushWrites) and remove close() call from Flush() (Brett Dutro)
-    * Stop empty dirs disappearing when renamed on bucket based remotes (Nick Craig-Wood)
+    * Stop empty dirs disappearing when renamed on bucket-based remotes (Nick Craig-Wood)
     * Stop change notify polling clearing so much of the directory cache (Nick Craig-Wood)
 * Azure Blob
     * Disable logging to the Windows event log (Nick Craig-Wood)
@@ -1791,7 +1923,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * rcd: Fix permissions problems on cache directory with web gui download (Nick Craig-Wood)
 * Mount
     * Default `--daemon-timout` to 15 minutes on macOS and FreeBSD (Nick Craig-Wood)
-    * Update docs to show mounting from root OK for bucket based (Nick Craig-Wood)
+    * Update docs to show mounting from root OK for bucket-based (Nick Craig-Wood)
     * Remove nonseekable flag from write files (Nick Craig-Wood)
 * VFS
     * Make write without cache more efficient (Nick Craig-Wood)
@@ -1858,7 +1990,7 @@ all the docs and Edward Barker for helping re-write the front page.
         * controlled with `--multi-thread-cutoff` and `--multi-thread-streams`
     * Use rclone.conf from rclone executable directory to enable portable use (albertony)
     * Allow sync of a file and a directory with the same name (forgems)
-        * this is common on bucket based remotes, e.g. s3, gcs
+        * this is common on bucket-based remotes, e.g. s3, gcs
     * Add `--ignore-case-sync` for forced case insensitivity (garry415)
     * Implement `--stats-one-line-date` and `--stats-one-line-date-format` (Peter Berbec)
     * Log an ERROR for all commands which exit with non-zero status (Nick Craig-Wood)
@@ -1872,7 +2004,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * lsjson
         * Added EncryptedPath to output (calisro)
         * Support showing the Tier of the object (Nick Craig-Wood)
-        * Add IsBucket field for bucket based remote listing of the root (Nick Craig-Wood)
+        * Add IsBucket field for bucket-based remote listing of the root (Nick Craig-Wood)
     * rc
         * Add `--loopback` flag to run commands directly without a server (Nick Craig-Wood)
         * Add operations/fsinfo: Return information about the remote (Nick Craig-Wood)
@@ -1888,7 +2020,7 @@ all the docs and Edward Barker for helping re-write the front page.
     * Make move and copy individual files obey `--backup-dir` (Nick Craig-Wood)
     * If `--ignore-checksum` is in effect, don't calculate checksum (Nick Craig-Wood)
     * moveto: Fix case-insensitive same remote move (Gary Kim)
-    * rc: Fix serving bucket based objects with `--rc-serve` (Nick Craig-Wood)
+    * rc: Fix serving bucket-based objects with `--rc-serve` (Nick Craig-Wood)
     * serve webdav: Fix serveDir not being updated with changes from webdav (Gary Kim)
 * Mount
     * Fix poll interval documentation (Animosity022)
@@ -2573,7 +2705,7 @@ Point release to fix hubic and azureblob backends.
     * Always forget parent dir for notifications
     * Integrate with Plex websocket
     * Add rc cache/stats (seuffert)
-    * Add info log on notification 
+    * Add info log on notification
 * Box
     * Fix failure reading large directories - parse file/directory size as float
 * Dropbox
@@ -2754,7 +2886,7 @@ Point release to fix hubic and azureblob backends.
     * Fix following of symlinks
     * Fix reading config file outside of Fs setup
     * Fix reading $USER in username fallback not $HOME
-    * Fix running under crontab - Use correct OS way of reading username 
+    * Fix running under crontab - Use correct OS way of reading username
 * Swift
     * Fix refresh of authentication token
         * in v1.39 a bug was introduced which ignored new tokens - this fixes it
@@ -2917,7 +3049,7 @@ Point release to fix hubic and azureblob backends.
     * HTTP - thanks to Vasiliy Tolstov
 * New commands
     * rclone ncdu - for exploring a remote with a text based user interface.
-    * rclone lsjson - for listing with a machine readable output
+    * rclone lsjson - for listing with a machine-readable output
     * rclone dbhashsum - to show Dropbox style hashes of files (local or Dropbox)
 * New Features
     * Implement --fast-list flag
@@ -3181,7 +3313,7 @@ Point release to fix hubic and azureblob backends.
     * Unix: implement `-x`/`--one-file-system` to stay on a single file system
         * thanks Durval Menezes and Luiz Carlos Rumbelsperger Viana
     * Windows: ignore the symlink bit on files
-    * Windows: Ignore directory based junction points
+    * Windows: Ignore directory-based junction points
 * B2
     * Make sure each upload has at least one upload slot - fixes strange upload stats
     * Fix uploads when using crypt
@@ -3284,7 +3416,7 @@ Point release to fix hubic and azureblob backends.
     * Retry more errors
     * Add --ignore-size flag - for uploading images to onedrive
     * Log -v output to stdout by default
-    * Display the transfer stats in more human readable form
+    * Display the transfer stats in more human-readable form
     * Make 0 size files specifiable with `--max-size 0b`
     * Add `b` suffix so we can specify bytes in --bwlimit, --min-size, etc.
     * Use "password:" instead of "password>" prompt - thanks Klaus Post and Leigh Klotz

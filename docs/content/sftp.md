@@ -38,7 +38,7 @@ Here is an example of making an SFTP configuration.  First run
 This will guide you through an interactive setup process.
 
 ```
-No remotes found - make a new one
+No remotes found, make a new one?
 n) New remote
 s) Set configuration password
 q) Quit config
@@ -56,9 +56,11 @@ Choose a number from below, or type in your own value
  1 / Connect to example.com
    \ "example.com"
 host> example.com
-SSH username, leave blank for current username, $USER
+SSH username
+Enter a string value. Press Enter for the default ("$USER").
 user> sftpuser
-SSH port, leave blank to use default (22)
+SSH port number
+Enter a signed integer. Press Enter for the default (22).
 port>
 SSH password, leave blank to use ssh-agent.
 y) Yes type in my own password
@@ -185,7 +187,7 @@ Host key matching, using standard `known_hosts` files can be turned on by
 enabling the `known_hosts_file` option.  This can point to the file maintained
 by `OpenSSH` or can point to a unique file.
 
-e.g.
+e.g. using the OpenSSH `known_hosts` file:
 
 ```
 [remote]
@@ -196,15 +198,18 @@ pass =
 known_hosts_file = ~/.ssh/known_hosts
 ````
 
+Alternatively you can create your own known hosts file like this:
+
+```
+ssh-keyscan -t dsa,rsa,ecdsa,ed25519 example.com >> known_hosts
+```
+
 There are some limitations:
 
 * `rclone` will not _manage_ this file for you.  If the key is missing or
 wrong then the connection will be refused.
 * If the server is set up for a certificate host key then the entry in
 the `known_hosts` file _must_ be the `@cert-authority` entry for the CA
-* Unlike `OpenSSH`, the libraries used by `rclone` do not permit (at time
-of writing) multiple host keys to be listed for a server.  Only the first
-entry is used.
 
 If the host key provided by the server does not match the one in the
 file (or is missing) then the connection will be aborted and an error
@@ -262,28 +267,34 @@ SSH host to connect to.
 
 E.g. "example.com".
 
+Properties:
+
 - Config:      host
 - Env Var:     RCLONE_SFTP_HOST
 - Type:        string
-- Default:     ""
+- Required:    true
 
 #### --sftp-user
 
-SSH username, leave blank for current username, $USER.
+SSH username.
+
+Properties:
 
 - Config:      user
 - Env Var:     RCLONE_SFTP_USER
 - Type:        string
-- Default:     ""
+- Default:     "$USER"
 
 #### --sftp-port
 
-SSH port, leave blank to use default (22).
+SSH port number.
+
+Properties:
 
 - Config:      port
 - Env Var:     RCLONE_SFTP_PORT
-- Type:        string
-- Default:     ""
+- Type:        int
+- Default:     22
 
 #### --sftp-pass
 
@@ -291,10 +302,12 @@ SSH password, leave blank to use ssh-agent.
 
 **NB** Input to this must be obscured - see [rclone obscure](/commands/rclone_obscure/).
 
+Properties:
+
 - Config:      pass
 - Env Var:     RCLONE_SFTP_PASS
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-key-pem
 
@@ -302,10 +315,12 @@ Raw PEM-encoded private key.
 
 If specified, will override key_file parameter.
 
+Properties:
+
 - Config:      key_pem
 - Env Var:     RCLONE_SFTP_KEY_PEM
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-key-file
 
@@ -315,10 +330,12 @@ Leave blank or set key-use-agent to use ssh-agent.
 
 Leading `~` will be expanded in the file name as will environment variables such as `${RCLONE_CONFIG_DIR}`.
 
+Properties:
+
 - Config:      key_file
 - Env Var:     RCLONE_SFTP_KEY_FILE
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-key-file-pass
 
@@ -329,10 +346,12 @@ in the new OpenSSH format can't be used.
 
 **NB** Input to this must be obscured - see [rclone obscure](/commands/rclone_obscure/).
 
+Properties:
+
 - Config:      key_file_pass
 - Env Var:     RCLONE_SFTP_KEY_FILE_PASS
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-pubkey-file
 
@@ -342,10 +361,12 @@ Set this if you have a signed certificate you want to use for authentication.
 
 Leading `~` will be expanded in the file name as will environment variables such as `${RCLONE_CONFIG_DIR}`.
 
+Properties:
+
 - Config:      pubkey_file
 - Env Var:     RCLONE_SFTP_PUBKEY_FILE
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-key-use-agent
 
@@ -354,6 +375,8 @@ When set forces the usage of the ssh-agent.
 When key-file is also set, the ".pub" file of the specified key-file is read and only the associated key is
 requested from the ssh-agent. This allows to avoid `Too many authentication failures for *username*` errors
 when the ssh-agent contains many keys.
+
+Properties:
 
 - Config:      key_use_agent
 - Env Var:     RCLONE_SFTP_KEY_USE_AGENT
@@ -375,6 +398,8 @@ This enables the use of the following insecure ciphers and key exchange methods:
 
 Those algorithms are insecure and may allow plaintext data to be recovered by an attacker.
 
+Properties:
+
 - Config:      use_insecure_cipher
 - Env Var:     RCLONE_SFTP_USE_INSECURE_CIPHER
 - Type:        bool
@@ -390,6 +415,8 @@ Those algorithms are insecure and may allow plaintext data to be recovered by an
 Disable the execution of SSH commands to determine if remote file hashing is available.
 
 Leave blank or set to false to enable hashing (recommended), set to true to disable hashing.
+
+Properties:
 
 - Config:      disable_hashcheck
 - Env Var:     RCLONE_SFTP_DISABLE_HASHCHECK
@@ -408,10 +435,12 @@ Set this value to enable server host key validation.
 
 Leading `~` will be expanded in the file name as will environment variables such as `${RCLONE_CONFIG_DIR}`.
 
+Properties:
+
 - Config:      known_hosts_file
 - Env Var:     RCLONE_SFTP_KNOWN_HOSTS_FILE
 - Type:        string
-- Default:     ""
+- Required:    false
 - Examples:
     - "~/.ssh/known_hosts"
         - Use OpenSSH's known_hosts file.
@@ -424,6 +453,8 @@ If this is set and no password is supplied then rclone will:
 - ask for a password
 - not contact the ssh agent
 
+
+Properties:
 
 - Config:      ask_password
 - Env Var:     RCLONE_SFTP_ASK_PASSWORD
@@ -439,20 +470,24 @@ different. This issue affects among others Synology NAS boxes.
 
 Shared folders can be found in directories representing volumes
 
-    rclone sync /home/local/directory remote:/directory --ssh-path-override /volume2/directory
+    rclone sync /home/local/directory remote:/directory --sftp-path-override /volume2/directory
 
 Home directory can be found in a shared folder called "home"
 
-    rclone sync /home/local/directory remote:/home/directory --ssh-path-override /volume1/homes/USER/directory
+    rclone sync /home/local/directory remote:/home/directory --sftp-path-override /volume1/homes/USER/directory
+
+Properties:
 
 - Config:      path_override
 - Env Var:     RCLONE_SFTP_PATH_OVERRIDE
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-set-modtime
 
 Set the modified time on the remote if set.
+
+Properties:
 
 - Config:      set_modtime
 - Env Var:     RCLONE_SFTP_SET_MODTIME
@@ -465,10 +500,12 @@ The command used to read md5 hashes.
 
 Leave blank for autodetect.
 
+Properties:
+
 - Config:      md5sum_command
 - Env Var:     RCLONE_SFTP_MD5SUM_COMMAND
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-sha1sum-command
 
@@ -476,14 +513,18 @@ The command used to read sha1 hashes.
 
 Leave blank for autodetect.
 
+Properties:
+
 - Config:      sha1sum_command
 - Env Var:     RCLONE_SFTP_SHA1SUM_COMMAND
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-skip-links
 
 Set to skip any symlinks and any other non regular files.
+
+Properties:
 
 - Config:      skip_links
 - Env Var:     RCLONE_SFTP_SKIP_LINKS
@@ -493,6 +534,8 @@ Set to skip any symlinks and any other non regular files.
 #### --sftp-subsystem
 
 Specifies the SSH2 subsystem on the remote host.
+
+Properties:
 
 - Config:      subsystem
 - Env Var:     RCLONE_SFTP_SUBSYSTEM
@@ -505,10 +548,12 @@ Specifies the path or command to run a sftp server on the remote host.
 
 The subsystem option is ignored when server_command is defined.
 
+Properties:
+
 - Config:      server_command
 - Env Var:     RCLONE_SFTP_SERVER_COMMAND
 - Type:        string
-- Default:     ""
+- Required:    false
 
 #### --sftp-use-fstat
 
@@ -522,6 +567,8 @@ It has been found that this helps with IBM Sterling SFTP servers which have
 "extractability" level set to 1 which means only 1 file can be opened at
 any given time.
 
+
+Properties:
 
 - Config:      use_fstat
 - Env Var:     RCLONE_SFTP_USE_FSTAT
@@ -546,6 +593,8 @@ Then you may need to enable this flag.
 If concurrent reads are disabled, the use_fstat option is ignored.
 
 
+Properties:
+
 - Config:      disable_concurrent_reads
 - Env Var:     RCLONE_SFTP_DISABLE_CONCURRENT_READS
 - Type:        bool
@@ -561,6 +610,8 @@ the performance greatly, especially for distant servers.
 This option disables concurrent writes should that be necessary.
 
 
+Properties:
+
 - Config:      disable_concurrent_writes
 - Env Var:     RCLONE_SFTP_DISABLE_CONCURRENT_WRITES
 - Type:        bool
@@ -575,6 +626,8 @@ given, rclone will empty the connection pool.
 
 Set to 0 to keep connections indefinitely.
 
+
+Properties:
 
 - Config:      idle_timeout
 - Env Var:     RCLONE_SFTP_IDLE_TIMEOUT
@@ -620,7 +673,7 @@ issue](https://github.com/pkg/sftp/issues/156) is fixed.
 Note that since SFTP isn't HTTP based the following flags don't work
 with it: `--dump-headers`, `--dump-bodies`, `--dump-auth`
 
-Note that `--timeout` isn't supported (but `--contimeout` is).
+Note that `--timeout` and `--contimeout` are both supported.
 
 
 ## C14 {#c14}
