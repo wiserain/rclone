@@ -17,7 +17,7 @@ require (
 	github.com/artyom/mtab v0.0.0-20141107123140-74b6fd01d416
 	github.com/atotto/clipboard v0.1.4
 	github.com/aws/aws-sdk-go v1.42.1
-	github.com/billziss-gh/cgofuse v1.5.0
+	github.com/winfsp/cgofuse v1.5.0
 	github.com/buengese/sgzip v0.1.1
 	github.com/colinmarc/hdfs/v2 v2.2.0
 	github.com/coreos/go-semver v0.3.0
@@ -59,7 +59,7 @@ require (
 	github.com/yunify/qingstor-sdk-go/v3 v3.2.0
 	go.etcd.io/bbolt v1.3.6
 	goftp.io/server v0.4.1
-	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3
+	golang.org/x/crypto v0.0.0-20220331220935-ae2d96664a29
 	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
