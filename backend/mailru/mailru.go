@@ -435,10 +435,10 @@ func (f *Fs) authorize(ctx context.Context, force bool) (err error) {
 		t, err = oauthConfig.PasswordCredentialsToken(ctx, f.opt.Username, f.opt.Password)
 	}
 	if err == nil && !tokenIsValid(t) {
-		err = errors.New("Invalid token")
+		err = errors.New("invalid token")
 	}
 	if err != nil {
-		return fmt.Errorf("Failed to authorize: %w", err)
+		return fmt.Errorf("failed to authorize: %w", err)
 	}
 
 	if err = oauthutil.PutToken(f.name, f.m, t, false); err != nil {
@@ -580,7 +580,7 @@ func readBodyWord(res *http.Response) (word string, err error) {
 		word = strings.Split(line, " ")[0]
 	}
 	if word == "" {
-		return "", errors.New("Empty reply from dispatcher")
+		return "", errors.New("empty reply from dispatcher")
 	}
 	return word, nil
 }
@@ -1683,7 +1683,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 			spoolFile, mrHash, err := makeTempFile(ctx, tmpFs, wrapIn, src)
 			if err != nil {
-				return fmt.Errorf("Failed to create spool file: %w", err)
+				return fmt.Errorf("failed to create spool file: %w", err)
 			}
 			if o.putByHash(ctx, mrHash, src, "spool") {
 				// If put by hash is successful, ignore transitive error
@@ -1722,7 +1722,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	if bytes.Compare(fileHash, newHash) != 0 {
+	if !bytes.Equal(fileHash, newHash) {
 		if o.fs.opt.CheckHash {
 			return mrhash.ErrorInvalidHash
 		}
@@ -1965,7 +1965,7 @@ func (o *Object) readMetaData(ctx context.Context, force bool) error {
 		return fs.ErrorIsDir
 	}
 	if newObj.remote != o.remote {
-		return fmt.Errorf("File %q path has changed to %q", o.remote, newObj.remote)
+		return fmt.Errorf("file %q path has changed to %q", o.remote, newObj.remote)
 	}
 	o.hasMetaData = true
 	o.size = newObj.size
@@ -2261,7 +2261,7 @@ func (e *endHandler) handle(err error) error {
 	}
 
 	newHash := e.hasher.Sum(nil)
-	if bytes.Compare(o.mrHash, newHash) == 0 {
+	if bytes.Equal(o.mrHash, newHash) {
 		return io.EOF
 	}
 	if o.fs.opt.CheckHash {
@@ -2276,7 +2276,7 @@ type serverPool struct {
 	pool      pendingServerMap
 	mu        sync.Mutex
 	path      string
-	expirySec time.Duration
+	expirySec int
 	fs        *Fs
 }
 
@@ -2317,7 +2317,7 @@ func (p *serverPool) Dispatch(ctx context.Context, current string) (string, erro
 	})
 	if err != nil || url == "" {
 		closeBody(res)
-		return "", fmt.Errorf("Failed to request file server: %w", err)
+		return "", fmt.Errorf("failed to request file server: %w", err)
 	}
 
 	p.addServer(url, now)
@@ -2383,7 +2383,7 @@ func (p *serverPool) addServer(url string, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	expiry := now.Add(p.expirySec * time.Second)
+	expiry := now.Add(time.Duration(p.expirySec) * time.Second)
 
 	expiryStr := []byte("-")
 	if p.fs.ci.LogLevel >= fs.LogLevelInfo {

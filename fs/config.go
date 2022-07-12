@@ -124,6 +124,7 @@ type ConfigInfo struct {
 	UploadHeaders          []*HTTPOption
 	DownloadHeaders        []*HTTPOption
 	Headers                []*HTTPOption
+	MetadataSet            Metadata // extra metadata to write when uploading
 	RefreshTimes           bool
 	NoConsole              bool
 	TrafficClass           uint8
@@ -132,6 +133,8 @@ type ConfigInfo struct {
 	DisableHTTP2           bool
 	HumanReadable          bool
 	KvLockTime             time.Duration // maximum time to keep key-value database locked by process
+	DisableHTTPKeepAlives  bool
+	Metadata               bool
 }
 
 // NewConfig creates a new config with everything set to the default
@@ -248,11 +251,11 @@ func AddConfig(ctx context.Context) (context.Context, *ConfigInfo) {
 // "ignore-size") into an environment name
 // "RCLONE_CONFIG_MY-REMOTE_IGNORE_SIZE"
 func ConfigToEnv(section, name string) string {
-	return "RCLONE_CONFIG_" + strings.ToUpper(section+"_"+strings.Replace(name, "-", "_", -1))
+	return "RCLONE_CONFIG_" + strings.ToUpper(section+"_"+strings.ReplaceAll(name, "-", "_"))
 }
 
 // OptionToEnv converts an option name, e.g. "ignore-size" into an
 // environment name "RCLONE_IGNORE_SIZE"
 func OptionToEnv(name string) string {
-	return "RCLONE_" + strings.ToUpper(strings.Replace(name, "-", "_", -1))
+	return "RCLONE_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 }

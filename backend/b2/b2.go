@@ -64,7 +64,8 @@ const (
 
 // Globals
 var (
-	errNotWithVersions = errors.New("can't modify or delete files in --b2-versions mode")
+	errNotWithVersions  = errors.New("can't modify or delete files in --b2-versions mode")
+	errNotWithVersionAt = errors.New("can't modify or delete files in --b2-version-at mode")
 )
 
 // Register with Fs
@@ -105,6 +106,11 @@ in the [b2 integrations checklist](https://www.backblaze.com/b2/docs/integration
 			Name:     "versions",
 			Help:     "Include old versions in directory listings.\n\nNote that when using this no file write operations are permitted,\nso you can't upload files or delete them.",
 			Default:  false,
+			Advanced: true,
+		}, {
+			Name:     "version_at",
+			Help:     "Show file versions as they were at the specified time.\n\nNote that when using this no file write operations are permitted,\nso you can't upload files or delete them.",
+			Default:  fs.Time{},
 			Advanced: true,
 		}, {
 			Name:    "hard_delete",
@@ -211,6 +217,7 @@ type Options struct {
 	Endpoint                      string               `config:"endpoint"`
 	TestMode                      string               `config:"test_mode"`
 	Versions                      bool                 `config:"versions"`
+	VersionAt                     fs.Time              `config:"version_at"`
 	HardDelete                    bool                 `config:"hard_delete"`
 	UploadCutoff                  fs.SizeSuffix        `config:"upload_cutoff"`
 	CopyCutoff                    fs.SizeSuffix        `config:"copy_cutoff"`
@@ -273,7 +280,7 @@ func (f *Fs) Root() string {
 // String converts this Fs to a string
 func (f *Fs) String() string {
 	if f.rootBucket == "" {
-		return fmt.Sprintf("B2 root")
+		return "B2 root"
 	}
 	if f.rootDirectory == "" {
 		return fmt.Sprintf("B2 bucket %s", f.rootBucket)
@@ -696,9 +703,12 @@ func (f *Fs) list(ctx context.Context, bucket, directory, prefix string, addBuck
 		Method: "POST",
 		Path:   "/b2_list_file_names",
 	}
-	if hidden {
+	if hidden || f.opt.VersionAt.IsSet() {
 		opts.Path = "/b2_list_file_versions"
 	}
+
+	lastFileName := ""
+
 	for {
 		var response api.ListFileNamesResponse
 		err := f.pacer.Call(func() (bool, error) {
@@ -728,7 +738,21 @@ func (f *Fs) list(ctx context.Context, bucket, directory, prefix string, addBuck
 			if addBucket {
 				remote = path.Join(bucket, remote)
 			}
+
+			if f.opt.VersionAt.IsSet() {
+				if time.Time(file.UploadTimestamp).After(time.Time(f.opt.VersionAt)) {
+					// Ignore versions that were created after the specified time
+					continue
+				}
+
+				if file.Name == lastFileName {
+					// Ignore versions before the already returned version
+					continue
+				}
+			}
+
 			// Send object
+			lastFileName = file.Name
 			err = fn(remote, file, isDirectory)
 			if err != nil {
 				if err == errEndList {
@@ -1181,10 +1205,7 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 		}
 	}
 	var isUnfinishedUploadStale = func(timestamp api.Timestamp) bool {
-		if time.Since(time.Time(timestamp)).Hours() > 24 {
-			return true
-		}
-		return false
+		return time.Since(time.Time(timestamp)).Hours() > 24
 	}
 
 	// Delete Config.Transfers in parallel
@@ -1461,13 +1482,9 @@ func (o *Object) Size() int64 {
 //
 // Remove unverified prefix - see https://www.backblaze.com/b2/docs/uploading.html
 // Some tools (e.g. Cyberduck) use this
-func cleanSHA1(sha1 string) (out string) {
-	out = strings.ToLower(sha1)
+func cleanSHA1(sha1 string) string {
 	const unverified = "unverified:"
-	if strings.HasPrefix(out, unverified) {
-		out = out[len(unverified):]
-	}
-	return out
+	return strings.TrimPrefix(strings.ToLower(sha1), unverified)
 }
 
 // decodeMetaDataRaw sets the metadata from the data passed in
@@ -1828,6 +1845,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if o.fs.opt.Versions {
 		return errNotWithVersions
 	}
+	if o.fs.opt.VersionAt.IsSet() {
+		return errNotWithVersionAt
+	}
 	size := src.Size()
 
 	bucket, bucketPath := o.split()
@@ -1982,6 +2002,9 @@ func (o *Object) Remove(ctx context.Context) error {
 	bucket, bucketPath := o.split()
 	if o.fs.opt.Versions {
 		return errNotWithVersions
+	}
+	if o.fs.opt.VersionAt.IsSet() {
+		return errNotWithVersionAt
 	}
 	if o.fs.opt.HardDelete {
 		return o.fs.deleteByID(ctx, o.id, bucketPath)

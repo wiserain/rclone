@@ -11,14 +11,16 @@ Serve remote:path over DLNA
 
 ## Synopsis
 
-rclone serve dlna is a DLNA media server for media stored in an rclone remote. Many
-devices, such as the Xbox and PlayStation, can automatically discover this server in the LAN
-and play audio/video from it. VLC is also supported. Service discovery uses UDP multicast
-packets (SSDP) and will thus only work on LANs.
+Run a DLNA media server for media stored in an rclone remote. Many
+devices, such as the Xbox and PlayStation, can automatically discover
+this server in the LAN and play audio/video from it. VLC is also
+supported. Service discovery uses UDP multicast packets (SSDP) and
+will thus only work on LANs.
 
-Rclone will list all files present in the remote, without filtering based on media formats or
-file extensions. Additionally, there is no media transcoding support. This means that some
-players might show files that they are not able to play back correctly.
+Rclone will list all files present in the remote, without filtering
+based on media formats or file extensions. Additionally, there is no
+media transcoding support. This means that some players might show
+files that they are not able to play back correctly.
 
 
 ## Server options
@@ -208,6 +210,38 @@ FAT/exFAT do not. Rclone will perform very badly if the cache
 directory is on a filesystem which doesn't support sparse files and it
 will log an ERROR message if one is detected.
 
+### Fingerprinting
+
+Various parts of the VFS use fingerprinting to see if a local file
+copy has changed relative to a remote file. Fingerprints are made
+from:
+
+- size
+- modification time
+- hash
+
+where available on an object.
+
+On some backends some of these attributes are slow to read (they take
+an extra API call per object, or extra work per object).
+
+For example `hash` is slow with the `local` and `sftp` backends as
+they have to read the entire file and hash it, and `modtime` is slow
+with the `s3`, `swift`, `ftp` and `qinqstor` backends because they
+need to do an extra API call to fetch it.
+
+If you use the `--vfs-fast-fingerprint` flag then rclone will not
+include the slow operations in the fingerprint. This makes the
+fingerprinting less accurate but much faster and will improve the
+opening time of cached files.
+
+If you are running a vfs cache over `local`, `s3` or `swift` backends
+then using this flag is recommended.
+
+Note that if you change the value of this flag, the fingerprints of
+the files in the cache may be invalidated and the files will need to
+be downloaded again.
+
 ## VFS Chunked Reading
 
 When rclone reads files from a remote it reads them in chunks. This
@@ -299,6 +333,13 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+## VFS Disk Options
+
+This flag allows you to manually set the statistics about the filing system.
+It can be useful when those statistics cannot be read correctly automatically.
+
+    --vfs-disk-space-total-size    Manually set the total disk space size (example: 256G, default: -1)
+
 ## Alternate report of used bytes
 
 Some backends, most notably S3, do not report the amount of bytes used.
@@ -340,6 +381,8 @@ rclone serve dlna remote:path [flags]
       --vfs-cache-mode CacheMode               Cache mode off|minimal|writes|full (default off)
       --vfs-cache-poll-interval duration       Interval to poll the cache for stale objects (default 1m0s)
       --vfs-case-insensitive                   If a file name not found, find a case insensitive match
+      --vfs-disk-space-total-size SizeSuffix   Specify the total space of disk (default off)
+      --vfs-fast-fingerprint                   Use fast (less accurate) fingerprints for change detection
       --vfs-read-ahead SizeSuffix              Extra read ahead over --buffer-size when using cache-mode full
       --vfs-read-chunk-size SizeSuffix         Read the source objects in chunks (default 128Mi)
       --vfs-read-chunk-size-limit SizeSuffix   If greater than --vfs-read-chunk-size, double the chunk size after each chunk read, until the limit is reached ('off' is unlimited) (default off)

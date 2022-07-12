@@ -38,5 +38,7 @@ func AddFlags(flagSet *pflag.FlagSet) {
 	flags.DurationVarP(flagSet, &Opt.WriteBack, "vfs-write-back", "", Opt.WriteBack, "Time to writeback files after last use when using cache")
 	flags.FVarP(flagSet, &Opt.ReadAhead, "vfs-read-ahead", "", "Extra read ahead over --buffer-size when using cache-mode full")
 	flags.BoolVarP(flagSet, &Opt.UsedIsSize, "vfs-used-is-size", "", Opt.UsedIsSize, "Use the `rclone size` algorithm for Used size")
+	flags.BoolVarP(flagSet, &Opt.FastFingerprint, "vfs-fast-fingerprint", "", Opt.FastFingerprint, "Use fast (less accurate) fingerprints for change detection")
+	flags.FVarP(flagSet, &Opt.DiskSpaceTotalSize, "vfs-disk-space-total-size", "", "Specify the total space of disk")
 	platformFlags(flagSet)
 }

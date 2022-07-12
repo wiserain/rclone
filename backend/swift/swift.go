@@ -268,7 +268,7 @@ func (f *Fs) Root() string {
 // String converts this Fs to a string
 func (f *Fs) String() string {
 	if f.rootContainer == "" {
-		return fmt.Sprintf("Swift root")
+		return "Swift root"
 	}
 	if f.rootDirectory == "" {
 		return fmt.Sprintf("Swift container %s", f.rootContainer)
@@ -1271,7 +1271,7 @@ func (o *Object) getSegmentsLargeObject(ctx context.Context) (map[string][]strin
 		if _, ok := containerSegments[segmentContainer]; !ok {
 			containerSegments[segmentContainer] = make([]string, 0, len(segmentObjects))
 		}
-		segments, _ := containerSegments[segmentContainer]
+		segments := containerSegments[segmentContainer]
 		segments = append(segments, segment.Name)
 		containerSegments[segmentContainer] = segments
 	}
@@ -1303,7 +1303,7 @@ func (o *Object) getSegmentsDlo(ctx context.Context) (segmentsContainer string, 
 	}
 	delimiter := strings.Index(dirManifest, "/")
 	if len(dirManifest) == 0 || delimiter < 0 {
-		err = errors.New("Missing or wrong structure of manifest of Dynamic large object")
+		err = errors.New("missing or wrong structure of manifest of Dynamic large object")
 		return
 	}
 	return dirManifest[:delimiter], dirManifest[delimiter+1:], nil
@@ -1363,7 +1363,7 @@ func (o *Object) updateChunks(ctx context.Context, in0 io.Reader, headers swift.
 			return
 		}
 		fs.Debugf(o, "Delete segments when err raise %v", err)
-		if segmentInfos == nil || len(segmentInfos) == 0 {
+		if len(segmentInfos) == 0 {
 			return
 		}
 		_ctx := context.Background()
@@ -1418,7 +1418,7 @@ func (o *Object) updateChunks(ctx context.Context, in0 io.Reader, headers swift.
 }
 
 func deleteChunks(ctx context.Context, o *Object, segmentsContainer string, segmentInfos []string) {
-	if segmentInfos == nil || len(segmentInfos) == 0 {
+	if len(segmentInfos) == 0 {
 		return
 	}
 	for _, v := range segmentInfos {

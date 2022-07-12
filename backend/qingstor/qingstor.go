@@ -253,7 +253,7 @@ func qsServiceConnection(ctx context.Context, opt *Options) (*qs.Service, error)
 		_protocol, _host, _port, err := qsParseEndpoint(endpoint)
 
 		if err != nil {
-			return nil, fmt.Errorf("The endpoint \"%s\" format error", endpoint)
+			return nil, fmt.Errorf("the endpoint \"%s\" format error", endpoint)
 		}
 
 		if _protocol != "" {
@@ -573,9 +573,7 @@ func (f *Fs) list(ctx context.Context, bucket, directory, prefix string, addBuck
 				if addBucket {
 					remote = path.Join(bucket, remote)
 				}
-				if strings.HasSuffix(remote, "/") {
-					remote = remote[:len(remote)-1]
-				}
+				remote = strings.TrimSuffix(remote, "/")
 				err = fn(remote, &qs.KeyType{Key: &remote}, true)
 				if err != nil {
 					return err
@@ -775,8 +773,6 @@ func (f *Fs) makeBucket(ctx context.Context, bucket string) error {
 				retries++
 				wasDeleted = true
 				continue
-			default:
-				break
 			}
 			break
 		}
@@ -854,7 +850,6 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 						continue
 					default:
 						err = e
-						break
 					}
 				}
 			} else {

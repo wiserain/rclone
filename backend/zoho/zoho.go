@@ -173,6 +173,12 @@ browser.`,
 				Value: "in",
 				Help:  "India",
 			}, {
+				Value: "jp",
+				Help:  "Japan",
+			}, {
+				Value: "com.cn",
+				Help:  "China",
+			}, {
 				Value: "com.au",
 				Help:  "Australia",
 			}}}, {
@@ -281,7 +287,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 	}
 	authRetry := false
 
-	if resp != nil && resp.StatusCode == 401 && len(resp.Header["Www-Authenticate"]) == 1 && strings.Index(resp.Header["Www-Authenticate"][0], "expired_token") >= 0 {
+	if resp != nil && resp.StatusCode == 401 && len(resp.Header["Www-Authenticate"]) == 1 && strings.Contains(resp.Header["Www-Authenticate"][0], "expired_token") {
 		authRetry = true
 		fs.Debugf(nil, "Should retry: %v", err)
 	}

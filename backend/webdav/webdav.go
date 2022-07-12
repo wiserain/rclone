@@ -66,7 +66,7 @@ func init() {
 
 	fs.Register(&fs.RegInfo{
 		Name:        "webdav",
-		Description: "Webdav",
+		Description: "WebDAV",
 		NewFs:       NewFs,
 		Options: []fs.Option{{
 			Name:     "url",
@@ -74,7 +74,7 @@ func init() {
 			Required: true,
 		}, {
 			Name: "vendor",
-			Help: "Name of the Webdav site/service/software you are using.",
+			Help: "Name of the WebDAV site/service/software you are using.",
 			Examples: []fs.OptionExample{{
 				Value: "nextcloud",
 				Help:  "Nextcloud",
@@ -716,9 +716,7 @@ func (f *Fs) listAll(ctx context.Context, dir string, directoriesOnly bool, file
 			subPath = f.opt.Enc.ToStandardPath(subPath)
 		}
 		remote := path.Join(dir, subPath)
-		if strings.HasSuffix(remote, "/") {
-			remote = remote[:len(remote)-1]
-		}
+		remote = strings.TrimSuffix(remote, "/")
 
 		// the listing contains info about itself which we ignore
 		if remote == dir {
@@ -820,10 +818,7 @@ func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, opt
 func (f *Fs) mkParentDir(ctx context.Context, dirPath string) (err error) {
 	// defer log.Trace(dirPath, "")("err=%v", &err)
 	// chop off trailing / if it exists
-	if strings.HasSuffix(dirPath, "/") {
-		dirPath = dirPath[:len(dirPath)-1]
-	}
-	parent := path.Dir(dirPath)
+	parent := path.Dir(strings.TrimSuffix(dirPath, "/"))
 	if parent == "." {
 		parent = ""
 	}
@@ -1161,7 +1156,7 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("about call failed: %w", err)
+		return nil, err
 	}
 	usage := &fs.Usage{}
 	if i, err := strconv.ParseInt(q.Used, 10, 64); err == nil && i >= 0 {

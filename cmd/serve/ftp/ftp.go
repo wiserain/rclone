@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -79,9 +80,9 @@ var Command = &cobra.Command{
 	Use:   "ftp remote:path",
 	Short: `Serve remote:path over FTP.`,
 	Long: `
-rclone serve ftp implements a basic ftp server to serve the
-remote over FTP protocol. This can be viewed with a ftp client
-or you can make a remote of type ftp to read and write it.
+Run a basic FTP server to serve a remote over FTP protocol.
+This can be viewed with a FTP client or you can make a remote of
+type FTP to read and write it.
 
 ### Server options
 
@@ -128,15 +129,17 @@ type server struct {
 	useTLS bool
 }
 
+var passivePortsRe = regexp.MustCompile(`^\s*\d+\s*-\s*\d+\s*$`)
+
 // Make a new FTP to serve the remote
 func newServer(ctx context.Context, f fs.Fs, opt *Options) (*server, error) {
 	host, port, err := net.SplitHostPort(opt.ListenAddr)
 	if err != nil {
-		return nil, errors.New("Failed to parse host:port")
+		return nil, errors.New("failed to parse host:port")
 	}
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		return nil, errors.New("Failed to parse host:port")
+		return nil, errors.New("failed to parse host:port")
 	}
 
 	s := &server{
@@ -150,6 +153,11 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options) (*server, error) {
 		s.vfs = vfs.New(f, &vfsflags.Opt)
 	}
 	s.useTLS = s.opt.TLSKey != ""
+
+	// Check PassivePorts format since the the server library doesn't!
+	if !passivePortsRe.MatchString(opt.PassivePorts) {
+		return nil, fmt.Errorf("invalid format for passive ports %q", opt.PassivePorts)
+	}
 
 	ftpopt := &ftp.ServerOpts{
 		Name:           "Rclone FTP Server",
@@ -176,7 +184,8 @@ func (s *server) serve() error {
 	return s.srv.ListenAndServe()
 }
 
-// serve runs the ftp server
+// close stops the ftp server
+//lint:ignore U1000 unused when not building linux
 func (s *server) close() error {
 	fs.Logf(s.f, "Stopping FTP on %s", s.srv.Hostname+":"+strconv.Itoa(s.srv.Port))
 	return s.srv.Shutdown()
@@ -276,7 +285,7 @@ func (d *Driver) ChangeDir(path string) (err error) {
 		return err
 	}
 	if !n.IsDir() {
-		return errors.New("Not a directory")
+		return errors.New("not a directory")
 	}
 	return nil
 }
@@ -288,12 +297,12 @@ func (d *Driver) ListDir(path string, callback func(ftp.FileInfo) error) (err er
 	defer log.Trace(path, "")("err = %v", &err)
 	node, err := d.vfs.Stat(path)
 	if err == vfs.ENOENT {
-		return errors.New("Directory not found")
+		return errors.New("directory not found")
 	} else if err != nil {
 		return err
 	}
 	if !node.IsDir() {
-		return errors.New("Not a directory")
+		return errors.New("not a directory")
 	}
 
 	dir := node.(*vfs.Dir)
@@ -327,7 +336,7 @@ func (d *Driver) DeleteDir(path string) (err error) {
 		return err
 	}
 	if !node.IsDir() {
-		return errors.New("Not a directory")
+		return errors.New("not a directory")
 	}
 	err = node.Remove()
 	if err != nil {
@@ -346,7 +355,7 @@ func (d *Driver) DeleteFile(path string) (err error) {
 		return err
 	}
 	if !node.IsFile() {
-		return errors.New("Not a file")
+		return errors.New("not a file")
 	}
 	err = node.Remove()
 	if err != nil {
@@ -384,12 +393,12 @@ func (d *Driver) GetFile(path string, offset int64) (size int64, fr io.ReadClose
 	node, err := d.vfs.Stat(path)
 	if err == vfs.ENOENT {
 		fs.Infof(path, "File not found")
-		return 0, nil, errors.New("File not found")
+		return 0, nil, errors.New("file not found")
 	} else if err != nil {
 		return 0, nil, err
 	}
 	if !node.IsFile() {
-		return 0, nil, errors.New("Not a file")
+		return 0, nil, errors.New("not a file")
 	}
 
 	handle, err := node.Open(os.O_RDONLY)
@@ -418,7 +427,7 @@ func (d *Driver) PutFile(path string, data io.Reader, appendData bool) (n int64,
 	if err == nil {
 		isExist = true
 		if node.IsDir() {
-			return 0, errors.New("A dir has the same name")
+			return 0, errors.New("a dir has the same name")
 		}
 	} else {
 		if os.IsNotExist(err) {
