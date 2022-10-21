@@ -9,11 +9,13 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/configmap"
+	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fstest"
@@ -190,7 +192,7 @@ func TestHashOnUpdate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "9a0364b9e99bb480dd25e1f0284c8555", md5)
 
-	// Reupload it with diferent contents but same size and timestamp
+	// Reupload it with different contents but same size and timestamp
 	var b = bytes.NewBufferString("CONTENT")
 	src := object.NewStaticObjectInfo(filePath, when, int64(b.Len()), true, nil, f)
 	err = o.Update(ctx, b, src)
@@ -365,4 +367,37 @@ func TestMetadata(t *testing.T) {
 		}
 	})
 
+}
+
+func TestFilter(t *testing.T) {
+	ctx := context.Background()
+	r := fstest.NewRun(t)
+	defer r.Finalise()
+	when := time.Now()
+	r.WriteFile("included", "included file", when)
+	r.WriteFile("excluded", "excluded file", when)
+	f := r.Flocal.(*Fs)
+
+	// Check set up for filtering
+	assert.True(t, f.Features().FilterAware)
+
+	// Add a filter
+	ctx, fi := filter.AddConfig(ctx)
+	require.NoError(t, fi.AddRule("+ included"))
+	require.NoError(t, fi.AddRule("- *"))
+
+	// Check listing without use filter flag
+	entries, err := f.List(ctx, "")
+	require.NoError(t, err)
+	sort.Sort(entries)
+	require.Equal(t, "[excluded included]", fmt.Sprint(entries))
+
+	// Add user filter flag
+	ctx = filter.SetUseFilter(ctx, true)
+
+	// Check listing with use filter flag
+	entries, err = f.List(ctx, "")
+	require.NoError(t, err)
+	sort.Sort(entries)
+	require.Equal(t, "[included]", fmt.Sprint(entries))
 }

@@ -626,3 +626,27 @@ put them back in again.` >}}
   * Lorenzo Maiorfi <maiorfi@gmail.com>
   * Claudio Maradonna <penguyman@stronzi.org>
   * Ovidiu Victor Tatar <ovi.tatar@googlemail.com>
+  * Evan Spensley <epspensley@gmail.com>
+  * Yen Hu <61753151+0x59656e@users.noreply.github.com>
+  * Steve Kowalik <steven@wedontsleep.org>
+  * Jordi Gonzalez Muñoz <jordigonzm@gmail.com>
+  * Joram Schrijver <i@joram.io>
+  * Mark Trolley <marktrolley@gmail.com>
+  * João Henrique Franco <joaohenrique.franco@gmail.com>
+  * anonion <aman207@users.noreply.github.com>
+  * Ryan Morey <4590343+rmorey@users.noreply.github.com>
+  * Simon Bos <simonbos9@gmail.com>
+  * YFdyh000 <yfdyh000@gmail.com>  * Josh Soref <2119212+jsoref@users.noreply.github.com>
+  * Øyvind Heddeland Instefjord <instefjord@outlook.com>
+  * Dmitry Deniskin <110819396+ddeniskin@users.noreply.github.com>
+  * Alexander Knorr <106825+opexxx@users.noreply.github.com>
+  * Richard Bateman <richard@batemansr.us>
+  * Dimitri Papadopoulos Orfanos <3234522+DimitriPapadopoulos@users.noreply.github.com>
+  * Lorenzo Milesi <lorenzo.milesi@yetopen.com>
+  * Isaac Aymerich <isaac.aymerich@gmail.com>
+  * YanceyChiew <35898533+YanceyChiew@users.noreply.github.com>
+  * Manoj Ghosh <msays2000@gmail.com>
+  * Bachue Zhou <bachue.shu@gmail.com>
+  * Manoj Ghosh <manoj.ghosh@oracle.com>
+  * Tom Mombourquette <tom@devnode.com>
+  * Robert Newson <rnewson@apache.org>

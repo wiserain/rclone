@@ -1,8 +1,7 @@
-// Package ncdu implements a text based user interface for exploring a remote
-
 //go:build !plan9 && !js
 // +build !plan9,!js
 
+// Package ncdu implements a text based user interface for exploring a remote
 package ncdu
 
 import (
@@ -49,7 +48,7 @@ press '?' to toggle the help on and off. The supported keys are:
     ` + strings.Join(helpText()[1:], "\n    ") + `
 
 Listed files/directories may be prefixed by a one-character flag,
-some of them combined with a description in brackes at end of line.
+some of them combined with a description in brackets at end of line.
 These flags have the following meaning:
 
     e means this is an empty directory, i.e. contains no files (but

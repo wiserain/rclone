@@ -22,6 +22,7 @@ import (
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
+	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/encoder"
@@ -299,6 +300,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		ReadMetadata:            true,
 		WriteMetadata:           true,
 		UserMetadata:            xattrSupported, // can only R/W general purpose metadata if xattrs are supported
+		FilterAware:             true,
 	}).Fill(ctx, f)
 	if opt.FollowSymlinks {
 		f.lstat = os.Stat
@@ -443,6 +445,8 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
+	filter, useFilter := filter.GetConfig(ctx), filter.GetUseFilter(ctx)
+
 	fsDirPath := f.localPath(dir)
 	_, err = os.Stat(fsDirPath)
 	if err != nil {
@@ -493,6 +497,13 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 						continue
 					}
 					if fierr != nil {
+						// Don't report errors on any file names that are excluded
+						if useFilter {
+							newRemote := f.cleanRemote(dir, name)
+							if !filter.IncludeRemote(newRemote) {
+								continue
+							}
+						}
 						err = fmt.Errorf("failed to read directory %q: %w", namepath, err)
 						fs.Errorf(dir, "%v", fierr)
 						_ = accounting.Stats(ctx).Error(fserrors.NoRetryError(fierr)) // fail the sync
@@ -510,6 +521,11 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			name := fi.Name()
 			mode := fi.Mode()
 			newRemote := f.cleanRemote(dir, name)
+			// Don't include non directory if not included
+			// we leave directory filtering to the layer above
+			if useFilter && !fi.IsDir() && !filter.IncludeRemote(newRemote) {
+				continue
+			}
 			// Follow symlinks if required
 			if f.opt.FollowSymlinks && (mode&os.ModeSymlink) != 0 {
 				localPath := filepath.Join(fsDirPath, name)
@@ -699,9 +715,9 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 
 // Move src to this remote using server-side move operations.
 //
-// This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

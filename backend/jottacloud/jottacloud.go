@@ -1,3 +1,4 @@
+// Package jottacloud provides an interface to the Jottacloud storage system.
 package jottacloud
 
 import (
@@ -1247,7 +1248,7 @@ func (f *Fs) createObject(remote string, modTime time.Time, size int64) (o *Obje
 
 // Put the object
 //
-// Copy the reader in to the new object which is returned
+// Copy the reader in to the new object which is returned.
 //
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
@@ -1397,9 +1398,9 @@ func (f *Fs) copyOrMove(ctx context.Context, method, src, dest string) (info *ap
 
 // Copy src to this remote using server-side copy operations.
 //
-// This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1417,7 +1418,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	info, err := f.copyOrMove(ctx, "cp", srcObj.filePath(), remote)
 
-	// if destination was a trashed file then after a successfull copy the copied file is still in trash (bug in api?)
+	// if destination was a trashed file then after a successful copy the copied file is still in trash (bug in api?)
 	if err == nil && bool(info.Deleted) && !f.opt.TrashedOnly && info.State == "COMPLETED" {
 		fs.Debugf(src, "Server-side copied to trashed destination, restoring")
 		info, err = f.createOrUpdate(ctx, remote, srcObj.modTime, srcObj.size, srcObj.md5)
@@ -1433,9 +1434,9 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 // Move src to this remote using server-side move operations.
 //
-// This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1829,7 +1830,7 @@ func readMD5(in io.Reader, size, threshold int64) (md5sum string, out io.Reader,
 
 // Update the object with the contents of the io.Reader, modTime and size
 //
-// If existing is set then it updates the object rather than creating a new one
+// If existing is set then it updates the object rather than creating a new one.
 //
 // The new object may have been created if an error is returned
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (err error) {

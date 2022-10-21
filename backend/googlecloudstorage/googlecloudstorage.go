@@ -311,7 +311,7 @@ rclone does if you know the bucket exists already.
 			Help: `If set this will decompress gzip encoded objects.
 
 It is possible to upload objects to GCS with "Content-Encoding: gzip"
-set. Normally rclone will download these files files as compressed objects.
+set. Normally rclone will download these files as compressed objects.
 
 If this flag is set then rclone will decompress these files with
 "Content-Encoding: gzip" as they are received. This means that rclone
@@ -319,6 +319,10 @@ can't check the size and hash but the file contents will be decompressed.
 `,
 			Advanced: true,
 			Default:  false,
+		}, {
+			Name:     "endpoint",
+			Help:     "Endpoint for the service.\n\nLeave blank normally.",
+			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
@@ -343,6 +347,7 @@ type Options struct {
 	StorageClass              string               `config:"storage_class"`
 	NoCheckBucket             bool                 `config:"no_check_bucket"`
 	Decompress                bool                 `config:"decompress"`
+	Endpoint                  string               `config:"endpoint"`
 	Enc                       encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -523,7 +528,11 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	// Create a new authorized Drive client.
 	f.client = oAuthClient
-	f.svc, err = storage.NewService(context.Background(), option.WithHTTPClient(f.client))
+	gcsOpts := []option.ClientOption{option.WithHTTPClient(f.client)}
+	if opt.Endpoint != "" {
+		gcsOpts = append(gcsOpts, option.WithEndpoint(opt.Endpoint))
+	}
+	f.svc, err = storage.NewService(context.Background(), gcsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't create Google Cloud Storage client: %w", err)
 	}
@@ -580,7 +589,7 @@ type listFn func(remote string, object *storage.Object, isDirectory bool) error
 //
 // dir is the starting directory, "" for root
 //
-// Set recurse to read sub directories
+// Set recurse to read sub directories.
 //
 // The remote has prefix removed from it and if addBucket is set
 // then it adds the bucket to the start.
@@ -798,7 +807,7 @@ func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) (
 
 // Put the object into the bucket
 //
-// Copy the reader in to the new object which is returned
+// Copy the reader in to the new object which is returned.
 //
 // The new object may have been created if an error is returned
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
@@ -900,9 +909,9 @@ func (f *Fs) Precision() time.Duration {
 
 // Copy src to this remote using server-side copy operations.
 //
-// This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //

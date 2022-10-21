@@ -227,7 +227,7 @@ type Object struct {
 	rawData json.RawMessage
 }
 
-// IAFile reprensents a subset of object in MetadataResponse.Files
+// IAFile represents a subset of object in MetadataResponse.Files
 type IAFile struct {
 	Name string `json:"name"`
 	// Source     string `json:"source"`
@@ -243,7 +243,7 @@ type IAFile struct {
 	rawData json.RawMessage
 }
 
-// MetadataResponse reprensents subset of the JSON object returned by (frontend)/metadata/
+// MetadataResponse represents subset of the JSON object returned by (frontend)/metadata/
 type MetadataResponse struct {
 	Files    []IAFile `json:"files"`
 	ItemSize int64    `json:"item_size"`
@@ -577,9 +577,9 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 
 // Copy src to this remote using server-side copy operations.
 //
-// This is stored with the remote path given
+// This is stored with the remote path given.
 //
-// It returns the destination Object and a possible error
+// It returns the destination Object and a possible error.
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -1273,7 +1273,7 @@ func trimPathPrefix(s, prefix string, enc encoder.MultiEncoder) string {
 	return enc.ToStandardPath(strings.TrimPrefix(s, prefix+"/"))
 }
 
-// mimicks urllib.parse.quote() on Python; exclude / from url.PathEscape
+// mimics urllib.parse.quote() on Python; exclude / from url.PathEscape
 func quotePath(s string) string {
 	seg := strings.Split(s, "/")
 	newValues := []string{}

@@ -301,9 +301,9 @@ func (f *Filter) Add(Include bool, glob string) error {
 //
 // These are
 //
-//   + glob
 //   - glob
-//   !
+//   - glob
+//     !
 //
 // '+' includes the glob, '-' excludes it and '!' resets the filter list
 //
@@ -375,6 +375,11 @@ func (f *Filter) InActive() bool {
 
 // IncludeRemote returns whether this remote passes the filter rules.
 func (f *Filter) IncludeRemote(remote string) bool {
+	// filesFrom takes precedence
+	if f.files != nil {
+		_, include := f.files[remote]
+		return include
+	}
 	for _, rule := range f.fileRules.rules {
 		if rule.Match(remote) {
 			return rule.Include

@@ -26,6 +26,9 @@ import (
 // up with drive letters.
 func NewFs(ctx context.Context, path string) (Fs, error) {
 	Debugf(nil, "Creating backend with remote %q", path)
+	if ConfigFileHasSection(path) {
+		Logf(nil, "%q refers to a local folder, use %q to refer to your remote or %q to hide this warning", path, path+":", "./"+path)
+	}
 	fsInfo, configName, fsPath, config, err := ConfigFs(path)
 	if err != nil {
 		return nil, err
@@ -33,7 +36,7 @@ func NewFs(ctx context.Context, path string) (Fs, error) {
 	overridden := fsInfo.Options.Overridden(config)
 	if len(overridden) > 0 {
 		extraConfig := overridden.String()
-		//Debugf(nil, "detected overriden config %q", extraConfig)
+		//Debugf(nil, "detected overridden config %q", extraConfig)
 		md5sumBinary := md5.Sum([]byte(extraConfig))
 		suffix := base64.RawURLEncoding.EncodeToString(md5sumBinary[:])
 		// 5 characters length is 5*6 = 30 bits of base64
