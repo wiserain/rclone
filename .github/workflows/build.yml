@@ -240,12 +240,21 @@ jobs:
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
-        name: Upload Assets to Release with a wildcard
-        uses: csexton/release-asset-action@v2
-        with:
-          pattern: "build/*"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          release-url: ${{needs.create-release.outputs.upload_url}}
+        name: Upload Assets to Release
+        shell: bash
+        run: |
+          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+          for FILE in build/*; do
+            echo "Uploading \"$FILE\"..."
+            curl -sX POST \
+              --output /dev/null \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $(file -b --mime-type ${FILE})" \
+              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+              -T "${FILE}" \
+              "${UPLOAD_URL}?name=$(basename ${FILE})"
+          done
 
   lint:
     if: ${{ github.repository == 'rclone/rclone' || github.event.inputs.manual }}
@@ -437,9 +446,18 @@ jobs:
           cd ../output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - 
-        name: Upload Assets to Release with a wildcard
-        uses: csexton/release-asset-action@v2
-        with:
-          pattern: "output/*"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          release-url: ${{needs.create-release.outputs.upload_url}}
+        name: Upload Assets to Release
+        shell: bash
+        run: |
+          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+          for FILE in output/*; do
+            echo "Uploading \"$FILE\"..."
+            curl -sX POST \
+              --output /dev/null \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $(file -b --mime-type ${FILE})" \
+              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+              -T "${FILE}" \
+              "${UPLOAD_URL}?name=$(basename ${FILE})"
+          done
