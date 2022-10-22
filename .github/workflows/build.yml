@@ -28,13 +28,17 @@ jobs:
       - 
         name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: rclone mod
-          body: Auto-generated release
+          tag: ${{ github.ref }}
+          name: rclone mod
+          body: |
+            ## Changes
+
+            ## How to Update
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash 
+            ```
           draft: true
           prerelease: false
   build:
