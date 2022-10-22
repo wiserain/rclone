@@ -245,6 +245,7 @@ jobs:
         run: |
           UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
           for FILE in build/*; do
+            [ ! -f "$FILE" ] && continue
             echo "Uploading \"$FILE\"..."
             curl -sX POST \
               --output /dev/null \
@@ -451,6 +452,7 @@ jobs:
         run: |
           UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
           for FILE in output/*; do
+            [ ! -f "$FILE" ] && continue
             echo "Uploading \"$FILE\"..."
             curl -sX POST \
               --output /dev/null \
