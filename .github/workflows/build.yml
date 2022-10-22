@@ -28,13 +28,17 @@ jobs:
       - 
         name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: rclone mod
-          body: Auto-generated release
+          tag: ${{ github.ref }}
+          name: rclone mod
+          body: |
+            ## Changes
+
+            ## How to Update
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash 
+            ```
           draft: true
           prerelease: false
   build:
@@ -124,7 +128,6 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v3
         with:
-          stable: 'false'
           go-version: ${{ matrix.go }}
           check-latest: true
 
@@ -237,12 +240,22 @@ jobs:
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
-        name: Upload Assets to Release with a wildcard
-        uses: csexton/release-asset-action@v2
-        with:
-          pattern: "build/*"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          release-url: ${{needs.create-release.outputs.upload_url}}
+        name: Upload Assets to Release
+        shell: bash
+        run: |
+          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+          for FILE in build/*; do
+            [ ! -f "$FILE" ] && continue
+            echo "Uploading \"$FILE\"..."
+            curl -sX POST \
+              --output /dev/null \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $(file -b --mime-type ${FILE})" \
+              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+              -T "${FILE}" \
+              "${UPLOAD_URL}?name=$(basename ${FILE})"
+          done
 
   lint:
     if: ${{ github.repository == 'rclone/rclone' || github.event.inputs.manual }}
@@ -374,31 +387,29 @@ jobs:
     if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Get Variables (beta)
-        id: varb
+      - name: Set Variables (beta)
         if: github.event_name == 'push' && contains(github.ref, 'refs/heads/')
         shell: bash
         run: |
           LAST_TAG=$(git describe --tags --abbrev=0)
-          echo ::set-output name=version::$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)
-          echo ::set-output name=revision::0
-          echo ::set-output name=branch::$(git rev-parse --abbrev-ref HEAD)
-          echo ::set-output name=version_all::v$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)-beta.$(git rev-list --count HEAD).$(git show --no-patch --no-notes --pretty='%h' HEAD).$(git rev-parse --abbrev-ref HEAD)
-      - name: Get Variables (release)
-        id: varr
+          echo "version=$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)" >> $GITHUB_ENV
+          echo "revision=0" >> $GITHUB_ENV
+          echo "branch=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          echo "version_all=v$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)-beta.$(git rev-list --count HEAD).$(git show --no-patch --no-notes --pretty='%h' HEAD).$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+      - name: Set Variables (release)
         if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
         shell: bash
         run: |
           LAST_TAG=$(git describe --tags --abbrev=0)
-          echo ::set-output name=version::$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)
-          echo ::set-output name=revision::$(echo $LAST_TAG | cut -c 2- | cut -d- -f2)
-          echo ::set-output name=branch::$LAST_TAG
-          echo ::set-output name=version_all::$LAST_TAG
+          echo "version=$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)" >> $GITHUB_ENV
+          echo "revision=$(echo $LAST_TAG | cut -c 2- | cut -d- -f2)" >> $GITHUB_ENV
+          echo "branch=$LAST_TAG" >> $GITHUB_ENV
+          echo "version_all=$LAST_TAG" >> $GITHUB_ENV
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'termux/termux-packages'
       - name: build (beta)
@@ -406,39 +417,49 @@ jobs:
         shell: bash
         run: |
           sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ steps.varb.outputs.version }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ env.version }}/g" packages/rclone/build.sh
           grep -q "^TERMUX_PKG_REVISION" packages/rclone/build.sh || sed -i "/^TERMUX_PKG_VERSION=/a TERMUX_PKG_REVISION=0" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ steps.varb.outputs.revision }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ env.revision }}/g" packages/rclone/build.sh
           sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=https:\/\/github.com\/wiserain\/rclone.git/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ steps.varb.outputs.branch }}/g" packages/rclone/build.sh
-          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ steps.varb.outputs.version_all }}\"/g" packages/rclone/build.sh
-          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ steps.varb.outputs.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
+          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
+          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
           cd ./scripts
           ./run-docker.sh ./build-package.sh -a aarch64 rclone
           ./run-docker.sh ./build-package.sh -a arm rclone
           cd ../output
-          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ steps.varb.outputs.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - name: build (release)
         if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
         shell: bash
         run: |
           sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ steps.varr.outputs.version }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=${{ env.version }}/g" packages/rclone/build.sh
           grep -q "^TERMUX_PKG_REVISION" packages/rclone/build.sh || sed -i "/^TERMUX_PKG_VERSION=/a TERMUX_PKG_REVISION=0" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ steps.varr.outputs.revision }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ env.revision }}/g" packages/rclone/build.sh
           sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=https:\/\/github.com\/wiserain\/rclone.git/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ steps.varr.outputs.branch }}/g" packages/rclone/build.sh
-          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ steps.varr.outputs.version_all }}\"/g" packages/rclone/build.sh
-          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ steps.varr.outputs.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
+          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
+          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
           cd ./scripts
           ./run-docker.sh ./build-package.sh -a aarch64 rclone
           ./run-docker.sh ./build-package.sh -a arm rclone
           cd ../output
-          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ steps.varr.outputs.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - 
-        name: Upload Assets to Release with a wildcard
-        uses: csexton/release-asset-action@v2
-        with:
-          pattern: "output/*"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          release-url: ${{needs.create-release.outputs.upload_url}}
+        name: Upload Assets to Release
+        shell: bash
+        run: |
+          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+          for FILE in output/*; do
+            [ ! -f "$FILE" ] && continue
+            echo "Uploading \"$FILE\"..."
+            curl -sX POST \
+              --output /dev/null \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $(file -b --mime-type ${FILE})" \
+              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+              -T "${FILE}" \
+              "${UPLOAD_URL}?name=$(basename ${FILE})"
+          done
