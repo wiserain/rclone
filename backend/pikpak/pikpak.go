@@ -28,6 +28,21 @@ package pikpak
 // canReadRenormalized   = false
 // canStream = false
 
+// ------------------------------------------------------------
+// FIXME
+// ------------------------------------------------------------
+
+// 휴지통을 비우고 난 뒤라도 --pikpak-trashed-only하면 여전히 비워진 파일이 보임
+
+// batchUntrash를 하면 root로 복원되는데 언제나 그러한가? 다른 방법은 없는가?
+
+// ------------------------------------------------------------
+// TODO
+// ------------------------------------------------------------
+// backend(untrash,offline download), event, task
+
+// mergerdirs
+
 import (
 	"bytes"
 	"context"
@@ -925,6 +940,13 @@ func (f *Fs) CleanUp(ctx context.Context) (err error) {
 	var IDs []string
 	_, err = f.listAll(ctx, "*", "", "true", func(item *api.File) bool {
 		IDs = append(IDs, item.Id)
+		if len(IDs) >= 100 {
+			if err = f.deleteObjects(ctx, IDs, false); err != nil {
+				return true
+			} else {
+				IDs = nil
+			}
+		}
 		return false
 	})
 	if err != nil {
@@ -1326,7 +1348,42 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 	}, nil
 }
 
-var commandHelp = []fs.CommandHelp{{}}
+// ------------------------------------------------------------
+
+// get an id of file or directory
+func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
+	if id, _ := parseRootID(path); len(id) > 6 {
+		info, err := f.getFile(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("couldn't find id: %w", err)
+		}
+		return info.Id, nil
+	}
+	path = strings.Trim(path, "/")
+	id, err = f.dirCache.FindDir(ctx, path, false)
+	if err != nil {
+		o, err := f.NewObject(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		id = o.(fs.IDer).ID()
+	}
+	return id, nil
+}
+
+var commandHelp = []fs.CommandHelp{{
+	Name:  "getid",
+	Short: "Get IDs of files or directories",
+	Long: `This command is to obtain IDs of files or directories.
+
+Usage:
+
+    rclone backend getid pikpak:path {subpath}
+
+The "path" should point to a directory not a file. Use an extra argument
+"subpath" to get an ID of a file located in "pikpak:path".
+`,
+}}
 
 // Command the backend to run a named command
 //
@@ -1338,8 +1395,40 @@ var commandHelp = []fs.CommandHelp{{}}
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+	switch name {
 	// TODO: untrash
-	return nil, nil
+	case "getid":
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		return f.getID(ctx, path)
+	case "getlink":
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		var id string
+		id, err = f.getID(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		var info *api.File
+		info, err = f.getFile(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if info.Links != nil && info.Links.ApplicationOctetStream != nil {
+			return info.Links.ApplicationOctetStream, nil
+		}
+		return nil, fmt.Errorf("ERROR")
+	case "sendlink":
+		return nil, nil
+	case "untrash":
+		return nil, nil
+	default:
+		return nil, fs.ErrorCommandNotFound
+	}
 }
 
 // ------------------------------------------------------------
