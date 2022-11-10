@@ -475,6 +475,16 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		CanHaveEmptyDirectories: true, // can have empty directories
 	}).Fill(ctx, f)
 
+	// Check if current token is valid and re-authorize if necessary.
+	// It is somehow redundant since it is covered in shouldRetry().
+	// However it is a preemptive measure to avoid possible retries while validating a token.
+	if token, err := oauthutil.GetToken(name, m); err == nil && !token.Valid() {
+		fs.Debugf(f, "Token is invalid. Trying to get a new one using username/password...")
+		if err := f.doAuthorize(ctx); err != nil {
+			return nil, fserrors.FatalError(err)
+		}
+	}
+
 	return f, nil
 }
 
