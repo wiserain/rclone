@@ -41,8 +41,6 @@ package pikpak
 // ------------------------------------------------------------
 // backend(untrash,offline download), event, task
 
-// mergerdirs
-
 import (
 	"bytes"
 	"context"
@@ -661,7 +659,7 @@ func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAl
 	// Url Parameters
 	params := url.Values{}
 	params.Set("thumbnail_size", api.ThumbnaleSizeM)
-	params.Set("limit", strconv.Itoa(100))
+	params.Set("limit", strconv.Itoa(api.ListLimit))
 	params.Set("with_audit", strconv.FormatBool(true))
 	if parentId := parentIdForRequest(dirID); parentId != "" {
 		params.Set("parent_id", parentId)
@@ -940,7 +938,8 @@ func (f *Fs) CleanUp(ctx context.Context) (err error) {
 	var IDs []string
 	_, err = f.listAll(ctx, "*", "", "true", func(item *api.File) bool {
 		IDs = append(IDs, item.Id)
-		if len(IDs) >= 100 {
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= api.ListLimit {
 			if err = f.deleteObjects(ctx, IDs, false); err != nil {
 				return true
 			} else {
@@ -1182,7 +1181,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 // MergeDirs merges the contents of all the directories passed
 // in into the first one and rmdirs the other directories.
-func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
+func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 	if len(dirs) < 2 {
 		return nil
 	}
@@ -1193,16 +1192,24 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
 		// Moving objects in recycler throws following error:
 		// file_move_from_recycle_bin (9): "Moving in recycler is not allowed"
 		var IDs []string
-		_, err := f.listAll(ctx, srcDir.ID(), "", "false", func(item *api.File) bool {
+		_, err = f.listAll(ctx, srcDir.ID(), "", "false", func(item *api.File) bool {
 			fs.Infof(srcDir, "listing for merging %q", item.Name)
 			IDs = append(IDs, item.Id)
+			// API doesn't allow to move a large number of objects at once, so doing it in chunked
+			if len(IDs) >= api.ListLimit {
+				if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
+					return true
+				} else {
+					IDs = nil
+				}
+			}
 			return false
 		})
 		if err != nil {
 			return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
 		}
 		// move them into place
-		if err := f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
+		if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
 			return fmt.Errorf("MergeDirs move failed in %v: %w", srcDir, err)
 		}
 	}
@@ -1212,6 +1219,14 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
 	for _, srcDir := range dirs[1:] {
 		fs.Infof(srcDir, "removing empty directory")
 		IDs = append(IDs, srcDir.ID())
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= api.ListLimit {
+			if err = f.deleteObjects(ctx, IDs, true); err != nil {
+				return err
+			} else {
+				IDs = nil
+			}
+		}
 	}
 	if err := f.deleteObjects(ctx, IDs, true); err != nil {
 		return fmt.Errorf("MergeDirs failed to rmdir: %w", err)
