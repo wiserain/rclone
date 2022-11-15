@@ -57,6 +57,24 @@ func (f *Fs) requestBatchAction(ctx context.Context, action string, req *api.Req
 	return nil
 }
 
+// requestNewTask requests a new api.NewTask and returns api.Task
+func (f *Fs) requestNewTask(ctx context.Context, req *api.RequestNewTask) (info *api.Task, err error) {
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/drive/v1/files",
+	}
+	var newTask api.NewTask
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, &req, &newTask)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newTask.Task, nil
+}
+
 // requestNewFile requests a new api.NewFile and returns api.File
 func (f *Fs) requestNewFile(ctx context.Context, req *api.RequestNewFile) (info *api.File, err error) {
 	opts := rest.Opts{

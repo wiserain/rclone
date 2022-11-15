@@ -39,7 +39,7 @@ package pikpak
 // ------------------------------------------------------------
 // TODO
 // ------------------------------------------------------------
-// backend(untrash,offline download), event, task
+// backend(untrash,decompress), event, task
 
 import (
 	"bytes"
@@ -1396,6 +1396,22 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 	return id, nil
 }
 
+func (f *Fs) addUrl(ctx context.Context, url string, path string) (*api.Task, error) {
+	req := api.RequestNewTask{
+		Kind:       api.KindOfFile,
+		UploadType: "UPLOAD_TYPE_URL",
+		Url: &api.Url{
+			Url: url,
+		},
+		FolderType: "DOWNLOAD",
+	}
+	if parentId, err := f.getID(ctx, path); err == nil {
+		req.ParentId = parentIdForRequest(parentId)
+		req.FolderType = ""
+	}
+	return f.requestNewTask(ctx, &req)
+}
+
 var commandHelp = []fs.CommandHelp{{
 	Name:  "getid",
 	Short: "Get IDs of files or directories",
@@ -1405,8 +1421,21 @@ Usage:
 
     rclone backend getid pikpak:path {subpath}
 
-The "path" should point to a directory not a file. Use an extra argument
-"subpath" to get an ID of a file located in "pikpak:path".
+The 'path' should point to a directory not a file. Use an extra argument
+'subpath' to get an ID of a file located in 'pikpak:path'.
+`,
+}, {
+	Name:  "addurl",
+	Short: "add offline download task for url",
+	Long: `This command adds offline download task for url.
+
+Usage:
+
+    rclone backend addurl pikpak:path url
+
+The 'path' should point to a directory not a file. Downloads will be stored
+in this path. If the 'path' is invalid, download will fallback to default
+'My Pack'.
 `,
 }}
 
@@ -1428,27 +1457,11 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			path = arg[0]
 		}
 		return f.getID(ctx, path)
-	case "getlink":
-		path := ""
-		if len(arg) > 0 {
-			path = arg[0]
+	case "addurl":
+		if len(arg) != 1 {
+			return nil, errors.New("need exactly 1 argument")
 		}
-		var id string
-		id, err = f.getID(ctx, path)
-		if err != nil {
-			return "", err
-		}
-		var info *api.File
-		info, err = f.getFile(ctx, id)
-		if err != nil {
-			return "", err
-		}
-		if info.Links != nil && info.Links.ApplicationOctetStream != nil {
-			return info.Links.ApplicationOctetStream, nil
-		}
-		return nil, fmt.Errorf("ERROR")
-	case "sendlink":
-		return nil, nil
+		return f.addUrl(ctx, arg[0], "")
 	case "untrash":
 		return nil, nil
 	default:
