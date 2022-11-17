@@ -295,6 +295,17 @@ type ResumableParams struct {
 	SecurityToken   string `json:"security_token,omitempty"`
 }
 
+type FileInArchive struct {
+	Index    int    `json:"index,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Filesize string `json:"filesize,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	Gcid     string `json:"gcid,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	IconLink string `json:"icon_link,omitempty"`
+	Path     string `json:"path,omitempty"`
+}
+
 // ------------------------------------------------------------
 
 type NewFile struct {
@@ -362,6 +373,14 @@ type UserProvider struct {
 	Name           string `json:"name,omitempty"` // username
 }
 
+type DecompressResult struct {
+	Status       string `json:"status,omitempty"` // "OK"
+	StatusText   string `json:"status_text,omitempty"`
+	TaskId       string `json:"task_id,omitempty"`   // same as File.Id
+	FilesNum     int    `json:"files_num,omitempty"` // number of files in archive
+	RedirectLink string `json:"redirect_link,omitempty"`
+}
+
 // ------------------------------------------------------------
 
 type RequestShare struct {
@@ -406,6 +425,14 @@ type RequestNewTask struct {
 	FolderType string `json:"folder_type,omitempty"` // "" if parent_id else "DOWNLOAD"
 }
 
+type RequestDecompress struct {
+	Gcid          string           `json:"gcid,omitempty"`     // same as File.Hash
+	Password      string           `json:"password,omitempty"` // ""
+	FileId        string           `json:"file_id,omitempty"`
+	Files         []*FileInArchive `json:"files,omitempty"` // can request selected files to be decompressed
+	DefaultParent bool             `json:"default_parent,omitempty"`
+}
+
 // ------------------------------------------------------------
 
 // NOT implemented YET
@@ -424,48 +451,20 @@ type VIP struct {
 }
 
 // POST https://api-drive.mypikpak.com/decompress/v1/list
-type RequestDecompressList struct {
-	Gcid     string `json:"gcid,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Password string `json:"password,omitempty"`
+type RequestArchiveFileList struct {
+	Gcid     string `json:"gcid,omitempty"`     // same as api.File.Hash
+	Path     string `json:"path,omitempty"`     // "" by default
+	Password string `json:"password,omitempty"` // "" by default
 	FileId   string `json:"file_id,omitempty"`
 }
 
-type DecompressList struct {
-	Status      string            `json:"status,omitempty"` // "OK"
-	StatusText  string            `json:"status_text,omitempty"`
-	TaskId      string            `json:"task_id,omitempty"`
-	CurrentPath string            `json:"current_path,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	FileSize    int64             `json:"file_size,omitempty"`
-	Gcid        string            `json:"gcid,omitempty"` // same sa File.Hash
-	Files       []*DecompressFile `json:"files,omitempty"`
-}
-
-type DecompressFile struct {
-	Index    int    `json:"index,omitempty"`
-	Filename string `json:"filename,omitempty"`
-	Filesize string `json:"filesize,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-	Gcid     string `json:"gcid,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	IconLink string `json:"icon_link,omitempty"`
-	Path     string `json:"path,omitempty"`
-}
-
-// POST https://api-drive.mypikpak.com/decompress/v1/decompress
-type RequestDecompress struct {
-	Gcid          string        `json:"gcid,omitempty"`
-	Password      string        `json:"password,omitempty"`
-	FileId        string        `json:"file_id,omitempty"`
-	Files         []interface{} `json:"files,omitempty"`
-	DefaultParent bool          `json:"default_parent,omitempty"`
-}
-
-type Decompressed struct {
-	Status       string `json:"status,omitempty"` // "OK"
-	StatusText   string `json:"status_text,omitempty"`
-	TaskId       string `json:"task_id,omitempty"`   // same as File.Id
-	FilesNum     int    `json:"files_num,omitempty"` // number of files in archive
-	RedirectLink string `json:"redirect_link,omitempty"`
+type ArchiveFileList struct {
+	Status      string           `json:"status,omitempty"`       // "OK"
+	StatusText  string           `json:"status_text,omitempty"`  // ""
+	TaskId      string           `json:"task_id,omitempty"`      // ""
+	CurrentPath string           `json:"current_path,omitempty"` // ""
+	Title       string           `json:"title,omitempty"`
+	FileSize    int64            `json:"file_size,omitempty"`
+	Gcid        string           `json:"gcid,omitempty"` // same as File.Hash
+	Files       []*FileInArchive `json:"files,omitempty"`
 }

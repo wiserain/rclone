@@ -20,6 +20,27 @@ const (
 	cachePrefix = "rclone-pikpak-sha1sum-"
 )
 
+// requestDecompress requests decompress of compressed files
+func (f *Fs) requestDecompress(ctx context.Context, file *api.File, password string) (info *api.DecompressResult, err error) {
+	req := &api.RequestDecompress{
+		Gcid:          file.Hash,
+		Password:      password,
+		FileId:        file.Id,
+		Files:         []*api.FileInArchive{},
+		DefaultParent: true,
+	}
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/decompress/v1/decompress",
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, &req, &info)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
+}
+
 // getUserInfo gets UserInfo from API
 func (f *Fs) getUserInfo(ctx context.Context) (info *api.User, err error) {
 	opts := rest.Opts{

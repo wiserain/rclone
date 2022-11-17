@@ -28,19 +28,6 @@ package pikpak
 // canReadRenormalized   = false
 // canStream = false
 
-// ------------------------------------------------------------
-// FIXME
-// ------------------------------------------------------------
-
-// 휴지통을 비우고 난 뒤라도 --pikpak-trashed-only하면 여전히 비워진 파일이 보임
-
-// batchUntrash를 하면 root로 복원되는데 언제나 그러한가? 다른 방법은 없는가?
-
-// ------------------------------------------------------------
-// TODO
-// ------------------------------------------------------------
-// backend(untrash,decompress), event, task
-
 import (
 	"bytes"
 	"context"
@@ -1396,7 +1383,8 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 	return id, nil
 }
 
-func (f *Fs) addUrl(ctx context.Context, url string, path string) (*api.Task, error) {
+// add offline download task for url
+func (f *Fs) addUrl(ctx context.Context, url, path string) (*api.Task, error) {
 	req := api.RequestNewTask{
 		Kind:       api.KindOfFile,
 		UploadType: "UPLOAD_TYPE_URL",
@@ -1410,6 +1398,40 @@ func (f *Fs) addUrl(ctx context.Context, url string, path string) (*api.Task, er
 		req.FolderType = ""
 	}
 	return f.requestNewTask(ctx, &req)
+}
+
+// decompress file/files in a directory of an ID
+func (f *Fs) decompressFiles(ctx context.Context, filename, id, password string, srcDelete bool) (err error) {
+	var files []*api.File
+	_, err = f.listAll(ctx, id, api.KindOfFile, "false", func(item *api.File) bool {
+		if item.MimeType == "application/zip" || item.MimeType == "application/x-7z-compressed" || item.MimeType == "application/x-rar-compressed" {
+			if filename == "" || filename == item.Name {
+				files = append(files, item)
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return fmt.Errorf("couldn't list files to decompress: %w", err)
+	}
+
+	for _, file := range files {
+		res, err := f.requestDecompress(ctx, file, password)
+		if err != nil {
+			fs.Errorf(f, "Unexpected error occurred while requesting decompress of %q: %w", file.Name, err)
+		} else if res.Status != "OK" {
+			fs.Errorf(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
+		} else {
+			fs.Infof(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
+			if srcDelete {
+				derr := f.deleteObjects(ctx, []string{file.Id}, f.opt.UseTrash)
+				if derr != nil {
+					fs.Errorf(f, "failed to delete %q: %w", file.Name, derr)
+				}
+			}
+		}
+	}
+	return
 }
 
 var commandHelp = []fs.CommandHelp{{
@@ -1426,16 +1448,30 @@ The 'path' should point to a directory not a file. Use an extra argument
 `,
 }, {
 	Name:  "addurl",
-	Short: "add offline download task for url",
+	Short: "Add offline download task for url",
 	Long: `This command adds offline download task for url.
 
 Usage:
 
-    rclone backend addurl pikpak:path url
+    rclone backend addurl pikpak:dirpath url
 
-The 'path' should point to a directory not a file. Downloads will be stored
-in this path. If the 'path' is invalid, download will fallback to default
-'My Pack'.
+Downloads will be stored in 'dirpath'. If 'dirpath' is invalid, 
+download will fallback to default 'My Pack' folder.
+`,
+}, {
+	Name:  "decompress",
+	Short: "Request decompress of file/files in a folder",
+	Long: `This command requests decompress of file/files in a folder.
+
+Usage:
+
+    rclone backend decompress pikpak:dirpath {filename} -o password=password
+	rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
+
+An optional argument 'filename' can be specified for a file located in 
+'pikpak:dirpath'. You may want to pass '-o password=password' for a 
+password-protected files. Also, pass '-o delete-src-file' to delete 
+source files after decompression finished.
 `,
 }}
 
@@ -1450,7 +1486,6 @@ in this path. If the 'path' is invalid, download will fallback to default
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
 	switch name {
-	// TODO: untrash
 	case "getid":
 		path := ""
 		if len(arg) > 0 {
@@ -1462,7 +1497,23 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			return nil, errors.New("need exactly 1 argument")
 		}
 		return f.addUrl(ctx, arg[0], "")
+	case "decompress":
+		filename := ""
+		if len(arg) > 0 {
+			filename = arg[0]
+		}
+		id, err := f.getID(ctx, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to get an ID of dirpath: %w", err)
+		}
+		password := ""
+		if pass, ok := opt["password"]; ok {
+			password = pass
+		}
+		_, srcDelete := opt["delete-src-file"]
+		return nil, f.decompressFiles(ctx, filename, id, password, srcDelete)
 	case "untrash":
+		// TODO: untrash
 		return nil, nil
 	default:
 		return nil, fs.ErrorCommandNotFound
