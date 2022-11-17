@@ -20,6 +20,27 @@ const (
 	cachePrefix = "rclone-pikpak-sha1sum-"
 )
 
+// requestDecompress requests decompress of compressed files
+func (f *Fs) requestDecompress(ctx context.Context, file *api.File, password string) (info *api.DecompressResult, err error) {
+	req := &api.RequestDecompress{
+		Gcid:          file.Hash,
+		Password:      password,
+		FileId:        file.Id,
+		Files:         []*api.FileInArchive{},
+		DefaultParent: true,
+	}
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/decompress/v1/decompress",
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, &req, &info)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
+}
+
 // getUserInfo gets UserInfo from API
 func (f *Fs) getUserInfo(ctx context.Context) (info *api.User, err error) {
 	opts := rest.Opts{
@@ -55,6 +76,24 @@ func (f *Fs) requestBatchAction(ctx context.Context, action string, req *api.Req
 		return fmt.Errorf("batch action %q failed: %w", action, err)
 	}
 	return nil
+}
+
+// requestNewTask requests a new api.NewTask and returns api.Task
+func (f *Fs) requestNewTask(ctx context.Context, req *api.RequestNewTask) (info *api.Task, err error) {
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/drive/v1/files",
+	}
+	var newTask api.NewTask
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, &req, &newTask)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newTask.Task, nil
 }
 
 // requestNewFile requests a new api.NewFile and returns api.File

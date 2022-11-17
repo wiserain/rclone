@@ -15,6 +15,8 @@ package pikpak
 
 // There are some cases with no downloadUrl for Open(). e.g. 0byte file
 
+// Trashed files are not restored to the original location when using `batchUntrash`
+
 // result of `rclone test info --all -vv --write-json remote.json remote:test`
 // stringNeedsEscaping = []rune{
 // 	' ', '!', '$', ''', '(', '*', '+', '.', '/', '0', '3', '4', '6', '8', '9', ':', '<', '>', '?', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'X', 'Z', '\"', '\\', '\a', '\b', '\f', '\n', '\r', '\t', '\u007f', '\u00a0', '\v', '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f', '\xbf', '\xfe', '^', 'a', 'b', 'c', 'd', 'l', 'm', 'n', 'o', 'q', 'r', 'v', 'w', '|', '＼'
@@ -27,6 +29,22 @@ package pikpak
 // canReadUnnormalized   = true
 // canReadRenormalized   = false
 // canStream = false
+
+// ------------------------------------------------------------
+// FIXME
+// ------------------------------------------------------------
+
+// * Even after emptied trash, files are still visible with `--pikpak-trashed-only`. This goes aways after few days.
+
+// ------------------------------------------------------------
+// TODO
+// ------------------------------------------------------------
+
+// * List() with options starred-only and completed-only
+// * PublicLink() with more user-configurable options
+// * upload() with configurable chunk-size
+// * backend command: untrash
+// * api(event,task)
 
 import (
 	"bytes"
@@ -462,6 +480,16 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		CanHaveEmptyDirectories: true, // can have empty directories
 	}).Fill(ctx, f)
 
+	// Check if current token is valid and re-authorize if necessary.
+	// It is somehow redundant since it is covered in shouldRetry().
+	// However it is a preemptive measure to avoid possible retries while validating a token.
+	if token, err := oauthutil.GetToken(name, m); err == nil && !token.Valid() {
+		fs.Debugf(f, "Token is invalid. Trying to get a new one using username/password...")
+		if err := f.doAuthorize(ctx); err != nil {
+			return nil, fserrors.FatalError(err)
+		}
+	}
+
 	return f, nil
 }
 
@@ -646,7 +674,7 @@ func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAl
 	// Url Parameters
 	params := url.Values{}
 	params.Set("thumbnail_size", api.ThumbnaleSizeM)
-	params.Set("limit", strconv.Itoa(100))
+	params.Set("limit", strconv.Itoa(api.ListLimit))
 	params.Set("with_audit", strconv.FormatBool(true))
 	if parentId := parentIdForRequest(dirID); parentId != "" {
 		params.Set("parent_id", parentId)
@@ -925,6 +953,14 @@ func (f *Fs) CleanUp(ctx context.Context) (err error) {
 	var IDs []string
 	_, err = f.listAll(ctx, "*", "", "true", func(item *api.File) bool {
 		IDs = append(IDs, item.Id)
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= api.ListLimit {
+			if err = f.deleteObjects(ctx, IDs, false); err != nil {
+				return true
+			} else {
+				IDs = nil
+			}
+		}
 		return false
 	})
 	if err != nil {
@@ -1160,7 +1196,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 // MergeDirs merges the contents of all the directories passed
 // in into the first one and rmdirs the other directories.
-func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
+func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 	if len(dirs) < 2 {
 		return nil
 	}
@@ -1171,16 +1207,24 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
 		// Moving objects in recycler throws following error:
 		// file_move_from_recycle_bin (9): "Moving in recycler is not allowed"
 		var IDs []string
-		_, err := f.listAll(ctx, srcDir.ID(), "", "false", func(item *api.File) bool {
+		_, err = f.listAll(ctx, srcDir.ID(), "", "false", func(item *api.File) bool {
 			fs.Infof(srcDir, "listing for merging %q", item.Name)
 			IDs = append(IDs, item.Id)
+			// API doesn't allow to move a large number of objects at once, so doing it in chunked
+			if len(IDs) >= api.ListLimit {
+				if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
+					return true
+				} else {
+					IDs = nil
+				}
+			}
 			return false
 		})
 		if err != nil {
 			return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
 		}
 		// move them into place
-		if err := f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
+		if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
 			return fmt.Errorf("MergeDirs move failed in %v: %w", srcDir, err)
 		}
 	}
@@ -1190,6 +1234,14 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
 	for _, srcDir := range dirs[1:] {
 		fs.Infof(srcDir, "removing empty directory")
 		IDs = append(IDs, srcDir.ID())
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= api.ListLimit {
+			if err = f.deleteObjects(ctx, IDs, true); err != nil {
+				return err
+			} else {
+				IDs = nil
+			}
+		}
 	}
 	if err := f.deleteObjects(ctx, IDs, true); err != nil {
 		return fmt.Errorf("MergeDirs failed to rmdir: %w", err)
@@ -1326,7 +1378,120 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 	}, nil
 }
 
-var commandHelp = []fs.CommandHelp{{}}
+// ------------------------------------------------------------
+
+// get an id of file or directory
+func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
+	if id, _ := parseRootID(path); len(id) > 6 {
+		info, err := f.getFile(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("couldn't find id: %w", err)
+		}
+		return info.Id, nil
+	}
+	path = strings.Trim(path, "/")
+	id, err = f.dirCache.FindDir(ctx, path, false)
+	if err != nil {
+		o, err := f.NewObject(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		id = o.(fs.IDer).ID()
+	}
+	return id, nil
+}
+
+// add offline download task for url
+func (f *Fs) addUrl(ctx context.Context, url, path string) (*api.Task, error) {
+	req := api.RequestNewTask{
+		Kind:       api.KindOfFile,
+		UploadType: "UPLOAD_TYPE_URL",
+		Url: &api.Url{
+			Url: url,
+		},
+		FolderType: "DOWNLOAD",
+	}
+	if parentId, err := f.getID(ctx, path); err == nil {
+		req.ParentId = parentIdForRequest(parentId)
+		req.FolderType = ""
+	}
+	return f.requestNewTask(ctx, &req)
+}
+
+// decompress file/files in a directory of an ID
+func (f *Fs) decompressFiles(ctx context.Context, filename, id, password string, srcDelete bool) (err error) {
+	var files []*api.File
+	_, err = f.listAll(ctx, id, api.KindOfFile, "false", func(item *api.File) bool {
+		if item.MimeType == "application/zip" || item.MimeType == "application/x-7z-compressed" || item.MimeType == "application/x-rar-compressed" {
+			if filename == "" || filename == item.Name {
+				files = append(files, item)
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return fmt.Errorf("couldn't list files to decompress: %w", err)
+	}
+
+	for _, file := range files {
+		res, err := f.requestDecompress(ctx, file, password)
+		if err != nil {
+			fs.Errorf(f, "Unexpected error occurred while requesting decompress of %q: %w", file.Name, err)
+		} else if res.Status != "OK" {
+			fs.Errorf(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
+		} else {
+			fs.Infof(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
+			if srcDelete {
+				derr := f.deleteObjects(ctx, []string{file.Id}, f.opt.UseTrash)
+				if derr != nil {
+					fs.Errorf(f, "failed to delete %q: %w", file.Name, derr)
+				}
+			}
+		}
+	}
+	return
+}
+
+var commandHelp = []fs.CommandHelp{{
+	Name:  "getid",
+	Short: "Get IDs of files or directories",
+	Long: `This command is to obtain IDs of files or directories.
+
+Usage:
+
+    rclone backend getid pikpak:path {subpath}
+
+The 'path' should point to a directory not a file. Use an extra argument
+'subpath' to get an ID of a file located in 'pikpak:path'.
+`,
+}, {
+	Name:  "addurl",
+	Short: "Add offline download task for url",
+	Long: `This command adds offline download task for url.
+
+Usage:
+
+    rclone backend addurl pikpak:dirpath url
+
+Downloads will be stored in 'dirpath'. If 'dirpath' is invalid, 
+download will fallback to default 'My Pack' folder.
+`,
+}, {
+	Name:  "decompress",
+	Short: "Request decompress of file/files in a folder",
+	Long: `This command requests decompress of file/files in a folder.
+
+Usage:
+
+    rclone backend decompress pikpak:dirpath {filename} -o password=password
+	rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
+
+An optional argument 'filename' can be specified for a file located in 
+'pikpak:dirpath'. You may want to pass '-o password=password' for a 
+password-protected files. Also, pass '-o delete-src-file' to delete 
+source files after decompression finished.
+`,
+}}
 
 // Command the backend to run a named command
 //
@@ -1338,8 +1503,39 @@ var commandHelp = []fs.CommandHelp{{}}
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
-	// TODO: untrash
-	return nil, nil
+	switch name {
+	case "getid":
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		return f.getID(ctx, path)
+	case "addurl":
+		if len(arg) != 1 {
+			return nil, errors.New("need exactly 1 argument")
+		}
+		return f.addUrl(ctx, arg[0], "")
+	case "decompress":
+		filename := ""
+		if len(arg) > 0 {
+			filename = arg[0]
+		}
+		id, err := f.getID(ctx, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to get an ID of dirpath: %w", err)
+		}
+		password := ""
+		if pass, ok := opt["password"]; ok {
+			password = pass
+		}
+		_, srcDelete := opt["delete-src-file"]
+		return nil, f.decompressFiles(ctx, filename, id, password, srcDelete)
+	case "untrash":
+		// TODO: untrash
+		return nil, nil
+	default:
+		return nil, fs.ErrorCommandNotFound
+	}
 }
 
 // ------------------------------------------------------------
