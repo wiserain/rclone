@@ -15,6 +15,8 @@ package pikpak
 
 // There are some cases with no downloadUrl for Open(). e.g. 0byte file
 
+// Trashed files are not restored to the original location when using `batchUntrash`
+
 // result of `rclone test info --all -vv --write-json remote.json remote:test`
 // stringNeedsEscaping = []rune{
 // 	' ', '!', '$', ''', '(', '*', '+', '.', '/', '0', '3', '4', '6', '8', '9', ':', '<', '>', '?', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'X', 'Z', '\"', '\\', '\a', '\b', '\f', '\n', '\r', '\t', '\u007f', '\u00a0', '\v', '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f', '\xbf', '\xfe', '^', 'a', 'b', 'c', 'd', 'l', 'm', 'n', 'o', 'q', 'r', 'v', 'w', '|', '＼'
@@ -27,6 +29,22 @@ package pikpak
 // canReadUnnormalized   = true
 // canReadRenormalized   = false
 // canStream = false
+
+// ------------------------------------------------------------
+// FIXME
+// ------------------------------------------------------------
+
+// * Even after emptied trash, files are still visible with `--pikpak-trashed-only`. This goes aways after few days.
+
+// ------------------------------------------------------------
+// TODO
+// ------------------------------------------------------------
+
+// * List() with options starred-only and completed-only
+// * PublicLink() with more user-configurable options
+// * upload() with configurable chunk-size
+// * backend command: untrash
+// * api(event,task)
 
 import (
 	"bytes"
