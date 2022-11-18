@@ -1411,45 +1411,63 @@ func (f *Fs) addUrl(ctx context.Context, url, path string) (*api.Task, error) {
 		},
 		FolderType: "DOWNLOAD",
 	}
-	if parentId, err := f.getID(ctx, path); err == nil {
+	if parentId, err := f.dirCache.FindDir(ctx, path, false); err == nil {
 		req.ParentId = parentIdForRequest(parentId)
 		req.FolderType = ""
 	}
 	return f.requestNewTask(ctx, &req)
 }
 
+type decompressDirResult struct {
+	Decompressed  int
+	SourceDeleted int
+	Errors        int
+}
+
+func (r decompressDirResult) Error() string {
+	return fmt.Sprintf("%d error(s) while decompressing - see log", r.Errors)
+}
+
 // decompress file/files in a directory of an ID
-func (f *Fs) decompressFiles(ctx context.Context, filename, id, password string, srcDelete bool) (err error) {
-	var files []*api.File
+func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, srcDelete bool) (r decompressDirResult, err error) {
 	_, err = f.listAll(ctx, id, api.KindOfFile, "false", func(item *api.File) bool {
 		if item.MimeType == "application/zip" || item.MimeType == "application/x-7z-compressed" || item.MimeType == "application/x-rar-compressed" {
 			if filename == "" || filename == item.Name {
-				files = append(files, item)
+				res, err := f.requestDecompress(ctx, item, password)
+				if err != nil {
+					err = fmt.Errorf("unexpected error while requesting decompress of %q: %w", item.Name, err)
+					r.Errors++
+					fs.Errorf(f, "%v", err)
+				} else if res.Status != "OK" {
+					r.Errors++
+					fs.Errorf(f, "%q: %d files: %s", item.Name, res.FilesNum, res.Status)
+				} else {
+					r.Decompressed++
+					fs.Infof(f, "%q: %d files: %s", item.Name, res.FilesNum, res.Status)
+					if srcDelete {
+						derr := f.deleteObjects(ctx, []string{item.Id}, f.opt.UseTrash)
+						if derr != nil {
+							derr = fmt.Errorf("failed to delete %q: %w", item.Name, derr)
+							r.Errors++
+							fs.Errorf(f, "%v", derr)
+						} else {
+							r.SourceDeleted++
+						}
+					}
+				}
 			}
 		}
 		return false
 	})
 	if err != nil {
-		return fmt.Errorf("couldn't list files to decompress: %w", err)
+		err = fmt.Errorf("couldn't list files to decompress: %w", err)
+		r.Errors++
+		fs.Errorf(f, "%v", err)
 	}
-
-	for _, file := range files {
-		res, err := f.requestDecompress(ctx, file, password)
-		if err != nil {
-			fs.Errorf(f, "Unexpected error occurred while requesting decompress of %q: %w", file.Name, err)
-		} else if res.Status != "OK" {
-			fs.Errorf(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
-		} else {
-			fs.Infof(f, "%q: %d files: %s", file.Name, res.FilesNum, res.Status)
-			if srcDelete {
-				derr := f.deleteObjects(ctx, []string{file.Id}, f.opt.UseTrash)
-				if derr != nil {
-					fs.Errorf(f, "failed to delete %q: %w", file.Name, derr)
-				}
-			}
-		}
+	if r.Errors != 0 {
+		return r, r
 	}
-	return
+	return r, nil
 }
 
 var commandHelp = []fs.CommandHelp{{
@@ -1520,7 +1538,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		if len(arg) > 0 {
 			filename = arg[0]
 		}
-		id, err := f.getID(ctx, "")
+		id, err := f.dirCache.FindDir(ctx, "", false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get an ID of dirpath: %w", err)
 		}
@@ -1529,7 +1547,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			password = pass
 		}
 		_, srcDelete := opt["delete-src-file"]
-		return nil, f.decompressFiles(ctx, filename, id, password, srcDelete)
+		return f.decompressDir(ctx, filename, id, password, srcDelete)
 	case "untrash":
 		// TODO: untrash
 		return nil, nil
