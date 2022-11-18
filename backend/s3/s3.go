@@ -1126,15 +1126,39 @@ func init() {
 				Provider: "LyveCloud",
 			}, {
 				Value:    "s3.wasabisys.com",
-				Help:     "Wasabi US East endpoint",
+				Help:     "Wasabi US East 1 (N. Virginia)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.us-east-2.wasabisys.com",
+				Help:     "Wasabi US East 2 (N. Virginia)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.us-central-1.wasabisys.com",
+				Help:     "Wasabi US Central 1 (Texas)",
 				Provider: "Wasabi",
 			}, {
 				Value:    "s3.us-west-1.wasabisys.com",
-				Help:     "Wasabi US West endpoint",
+				Help:     "Wasabi US West 1 (Oregon)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.ca-central-1.wasabisys.com",
+				Help:     "Wasabi CA Central 1 (Toronto)",
 				Provider: "Wasabi",
 			}, {
 				Value:    "s3.eu-central-1.wasabisys.com",
-				Help:     "Wasabi EU Central endpoint",
+				Help:     "Wasabi EU Central 1 (Amsterdam)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.eu-central-2.wasabisys.com",
+				Help:     "Wasabi EU Central 2 (Frankfurt)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.eu-west-1.wasabisys.com",
+				Help:     "Wasabi EU West 1 (London)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.eu-west-2.wasabisys.com",
+				Help:     "Wasabi EU West 2 (Paris)",
 				Provider: "Wasabi",
 			}, {
 				Value:    "s3.ap-northeast-1.wasabisys.com",
@@ -1143,6 +1167,14 @@ func init() {
 			}, {
 				Value:    "s3.ap-northeast-2.wasabisys.com",
 				Help:     "Wasabi AP Northeast 2 (Osaka) endpoint",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.ap-southeast-1.wasabisys.com",
+				Help:     "Wasabi AP Southeast 1 (Singapore)",
+				Provider: "Wasabi",
+			}, {
+				Value:    "s3.ap-southeast-2.wasabisys.com",
+				Help:     "Wasabi AP Southeast 2 (Sydney)",
 				Provider: "Wasabi",
 			}, {
 				Value:    "s3.ir-thr-at1.arvanstorage.com",
@@ -2165,6 +2197,31 @@ can't check the size and hash but the file contents will be decompressed.
 			Advanced: true,
 			Default:  false,
 		}, {
+			Name: "might_gzip",
+			Help: strings.ReplaceAll(`Set this if the backend might gzip objects.
+
+Normally providers will not alter objects when they are downloaded. If
+an object was not uploaded with |Content-Encoding: gzip| then it won't
+be set on download.
+
+However some providers may gzip objects even if they weren't uploaded
+with |Content-Encoding: gzip| (eg Cloudflare).
+
+A symptom of this would be receiving errors like
+
+    ERROR corrupted on transfer: sizes differ NNN vs MMM
+
+If you set this flag and rclone downloads an object with
+Content-Encoding: gzip set and chunked transfer encoding, then rclone
+will decompress the object on the fly.
+
+If this is set to unset (the default) then rclone will choose
+according to the provider setting what to apply, but you can override
+rclone's choice here.
+`, "|", "`"),
+			Default:  fs.Tristate{},
+			Advanced: true,
+		}, {
 			Name:     "no_system_metadata",
 			Help:     `Suppress setting and reading of system metadata`,
 			Advanced: true,
@@ -2295,6 +2352,7 @@ type Options struct {
 	Versions              bool                 `config:"versions"`
 	VersionAt             fs.Time              `config:"version_at"`
 	Decompress            bool                 `config:"decompress"`
+	MightGzip             fs.Tristate          `config:"might_gzip"`
 	NoSystemMetadata      bool                 `config:"no_system_metadata"`
 }
 
@@ -2655,10 +2713,12 @@ func setQuirks(opt *Options) {
 		virtualHostStyle  = true
 		urlEncodeListings = true
 		useMultipartEtag  = true
+		mightGzip         = true // assume all providers might gzip until proven otherwise
 	)
 	switch opt.Provider {
 	case "AWS":
 		// No quirks
+		mightGzip = false // Never auto gzips objects
 	case "Alibaba":
 		useMultipartEtag = false // Alibaba seems to calculate multipart Etags differently from AWS
 	case "HuaweiOBS":
@@ -2771,6 +2831,12 @@ func setQuirks(opt *Options) {
 	if !opt.UseMultipartEtag.Valid {
 		opt.UseMultipartEtag.Valid = true
 		opt.UseMultipartEtag.Value = useMultipartEtag
+	}
+
+	// set MightGzip if not manually set
+	if !opt.MightGzip.Valid {
+		opt.MightGzip.Valid = true
+		opt.MightGzip.Value = mightGzip
 	}
 }
 
@@ -2889,7 +2955,6 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return f, fs.ErrorIsFile
 	}
 	if opt.Provider == "Storj" {
-		f.features.Copy = nil
 		f.features.SetTier = false
 		f.features.GetTier = false
 	}
@@ -3118,8 +3183,11 @@ func (f *Fs) newV2List(req *s3.ListObjectsV2Input) bucketLister {
 // Do a V2 listing
 func (ls *v2List) List(ctx context.Context) (resp *s3.ListObjectsV2Output, versionIDs []*string, err error) {
 	resp, err = ls.f.c.ListObjectsV2WithContext(ctx, &ls.req)
+	if err != nil {
+		return nil, nil, err
+	}
 	ls.req.ContinuationToken = resp.NextContinuationToken
-	return resp, nil, err
+	return resp, nil, nil
 }
 
 // URL Encode the listings
@@ -4858,7 +4926,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 	// Decompress body if necessary
 	if aws.StringValue(resp.ContentEncoding) == "gzip" {
-		if o.fs.opt.Decompress {
+		if o.fs.opt.Decompress || (resp.ContentLength == nil && o.fs.opt.MightGzip.Value) {
 			return readers.NewGzipReader(resp.Body)
 		}
 		o.fs.warnCompressed.Do(func() {
