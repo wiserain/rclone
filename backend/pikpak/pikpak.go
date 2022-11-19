@@ -1385,7 +1385,7 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 	if id, _ := parseRootID(path); len(id) > 6 {
 		info, err := f.getFile(ctx, id)
 		if err != nil {
-			return "", fmt.Errorf("couldn't find id: %w", err)
+			return "", fmt.Errorf("no such object with id %q: %w", id, err)
 		}
 		return info.Id, nil
 	}

@@ -286,13 +286,10 @@ func (f *Fs) getID(ctx context.Context, path string, real bool) (id string, err 
 	if id, _ := parseRootID(path); len(id) > 6 {
 		info, err := f.getFile(ctx, id, f.fileFields)
 		if err != nil {
-			return "", fmt.Errorf("couldn't find id: %w", err)
+			return "", fmt.Errorf("no such object with id %q: %w", id, err)
 		}
-		if info.ShortcutDetails != nil {
-			newInfo, err := f.getFile(ctx, info.ShortcutDetails.TargetId, f.fileFields)
-			if err == nil {
-				return newInfo.Id, nil
-			}
+		if real && info.ShortcutDetails != nil {
+			return info.ShortcutDetails.TargetId, nil
 		}
 		return info.Id, nil
 	}

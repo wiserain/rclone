@@ -3700,8 +3700,8 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		if len(arg) > 0 {
 			path = arg[0]
 		}
-		_, ok := opt["real"]
-		return f.getID(ctx, path, ok)
+		_, real := opt["real"]
+		return f.getID(ctx, path, real)
 	case "getfile":
 		// mod
 		path := ""
