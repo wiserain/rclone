@@ -447,9 +447,9 @@ date is used.`,
 			Help:     `Impersonate this user when using a service account.`,
 			Advanced: true,
 		}, { // mod
-			Name:     "impersonate_user_path",
+			Name:     "impersonate_list",
 			Default:  "",
-			Help:     `Use filenames in this folder as impersonators.`,
+			Help:     `A list of names to be used for impersonation.`,
 			Advanced: true,
 		}, { // mod
 			Name:     "gds_userid",
@@ -689,11 +689,11 @@ type Options struct {
 	UseSharedDate             bool                 `config:"use_shared_date"`
 	ListChunk                 int64                `config:"list_chunk"`
 	Impersonate               string               `config:"impersonate"`
-	ImpersonateUserPath       string               `config:"impersonate_user_path"` // mod
-	GdsUserid                 string               `config:"gds_userid"`            // mod
-	GdsApikey                 string               `config:"gds_apikey"`            // mod
-	GdsEndpoint               string               `config:"gds_endpoint"`          // mod
-	GdsMode                   string               `config:"gds_mode"`              // mod
+	ImpersonateList           string               `config:"impersonate_list"` // mod
+	GdsUserid                 string               `config:"gds_userid"`       // mod
+	GdsApikey                 string               `config:"gds_apikey"`       // mod
+	GdsEndpoint               string               `config:"gds_endpoint"`     // mod
+	GdsMode                   string               `config:"gds_mode"`         // mod
 	UploadCutoff              fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize                 fs.SizeSuffix        `config:"chunk_size"`
 	AcknowledgeAbuse          bool                 `config:"acknowledge_abuse"`

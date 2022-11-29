@@ -60,6 +60,7 @@ type baseSAobject struct {
 }
 
 type ServiceAccountPool struct {
+	creds   string          // on newServiceAccountPool
 	files   []string        // on newServiceAccountPool
 	users   []string        // on newServiceAccountPool
 	mutex   *sync.Mutex     // on newServiceAccountPool
@@ -90,28 +91,23 @@ func newServiceAccountPool(ctx context.Context, opt *Options) (*ServiceAccountPo
 		saFiles = append(saFiles, opt.ServiceAccountFile)
 		fs.Debugf(nil, "1 service account file from %q", opt.ServiceAccountFile)
 	}
-	if opt.ImpersonateUserPath != "" {
-		dirList, err := os.ReadDir(opt.ImpersonateUserPath)
-		if err != nil {
-			return nil, fmt.Errorf("unable to read impersonate_user_path: %w", err)
+	if opt.ImpersonateList != "" {
+		var users []string
+		if err := json.Unmarshal([]byte(opt.ImpersonateList), &users); err != nil {
+			return nil, fmt.Errorf("unabled to read impersonate_list: %w", err)
 		}
-		for _, v := range dirList {
-			basename := v.Name()
-			ext := filepath.Ext(basename)
-			name := strings.TrimSuffix(basename, ext)
-			if ext != ".json" {
-				continue
-			}
+		for _, name := range users {
 			ipUsers = append(ipUsers, name)
 		}
 		if len(ipUsers) == 0 {
-			return nil, fmt.Errorf("unable to locate impersonate users in %s", opt.ImpersonateUserPath)
+			return nil, fmt.Errorf("unable to find impersonate users in %s", opt.ImpersonateList)
 		}
-		fs.Debugf(nil, "%d impersonate users from %q", len(ipUsers), opt.ImpersonateUserPath)
+		fs.Debugf(nil, "%d impersonate users from %q", len(ipUsers), opt.ImpersonateList)
 	} else {
 		ipUsers = append(ipUsers, opt.Impersonate)
 	}
 	p := &ServiceAccountPool{
+		creds:   opt.ServiceAccountCredentials,
 		files:   saFiles,
 		users:   ipUsers,
 		mutex:   new(sync.Mutex),
@@ -132,6 +128,14 @@ func (p *ServiceAccountPool) LoadSA() error {
 		for _, imp := range p.users {
 			saList = append(saList, &baseSAobject{
 				ServiceAccountFile: sa,
+				Impersonate:        imp,
+			})
+		}
+	}
+	if len(saList) == 0 && p.creds != "" {
+		for _, imp := range p.users {
+			saList = append(saList, &baseSAobject{
+				ServiceAccountFile: "",
 				Impersonate:        imp,
 			})
 		}
@@ -185,8 +189,9 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 		return err
 	}
 	newOpt := &Options{
-		ServiceAccountFile: sa[0].ServiceAccountFile,
-		Impersonate:        sa[0].Impersonate,
+		ServiceAccountCredentials: f.opt.ServiceAccountCredentials,
+		ServiceAccountFile:        sa[0].ServiceAccountFile,
+		Impersonate:               sa[0].Impersonate,
 	}
 	f.client, err = createOAuthClient(ctx, newOpt, f.name, f.m)
 	if err != nil {
@@ -205,10 +210,14 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 	if err == nil {
 		f.changeSAtime = time.Now()
 		f.pacer = fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
+		svcAcc := "a service account credential"
+		if sa[0].ServiceAccountFile != "" {
+			svcAcc = fmt.Sprintf("a service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
+		}
 		if sa[0].Impersonate != "" {
-			fs.Debugf(nil, "Now working with %q as %q", filepath.Base(sa[0].ServiceAccountFile), sa[0].Impersonate)
+			fs.Debugf(nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)
 		} else {
-			fs.Debugf(nil, "Now working with %q", filepath.Base(sa[0].ServiceAccountFile))
+			fs.Debugf(nil, "Now working with %s", svcAcc)
 		}
 		fs.Debugf(nil, "%d service account remaining", len(f.changeSApool.SAs))
 	}
