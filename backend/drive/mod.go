@@ -189,7 +189,7 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 		return err
 	}
 	newOpt := &Options{
-		ServiceAccountCredentials: f.opt.ServiceAccountCredentials,
+		ServiceAccountCredentials: f.changeSApool.creds,
 		ServiceAccountFile:        sa[0].ServiceAccountFile,
 		Impersonate:               sa[0].Impersonate,
 	}
