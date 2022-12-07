@@ -2417,17 +2417,17 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		createInfo.MimeType = fs.MimeTypeFromName(remote)
 	}
 
+	// mod
+	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
+		f.changeSAmu.Lock()
+		defer f.changeSAmu.Unlock()
+		f.changeServiceAccount(ctx)
+	}
 	var info *drive.File
 	if size >= 0 && size < int64(f.opt.UploadCutoff) {
 		// Make the API request to upload metadata and file data.
 		// Don't retry, return a retry error instead
 		err = f.pacer.CallNoRetry(func() (bool, error) {
-			// mod
-			if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-				f.changeSAmu.Lock()
-				defer f.changeSAmu.Unlock()
-				f.changeServiceAccount(ctx)
-			}
 			info, err = f.svc.Files.Create(createInfo).
 				Media(in, googleapi.ContentType(srcMimeType), googleapi.ChunkSize(0)).
 				Fields(partialFields).
@@ -3524,8 +3524,8 @@ Result:
 `,
 }, { // mod
 	Name:  "getid",
-	Short: "Get IDs of files or directories",
-	Long: `This command is to obtain IDs of files or directories.
+	Short: "Get an ID of a file or directory",
+	Long: `This command is to obtain an ID of a file or directory.
 
 Usage:
 

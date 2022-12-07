@@ -1473,8 +1473,8 @@ func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, s
 
 var commandHelp = []fs.CommandHelp{{
 	Name:  "getid",
-	Short: "Get IDs of files or directories",
-	Long: `This command is to obtain IDs of files or directories.
+	Short: "Get an ID of a file or directory",
+	Long: `This command is to obtain an ID of a file or directory.
 
 Usage:
 
@@ -1497,13 +1497,13 @@ download will fallback to default 'My Pack' folder.
 `,
 }, {
 	Name:  "decompress",
-	Short: "Request decompress of file/files in a folder",
+	Short: "Request decompress of a file/files in a folder",
 	Long: `This command requests decompress of file/files in a folder.
 
 Usage:
 
     rclone backend decompress pikpak:dirpath {filename} -o password=password
-	rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
+    rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
 
 An optional argument 'filename' can be specified for a file located in 
 'pikpak:dirpath'. You may want to pass '-o password=password' for a 
