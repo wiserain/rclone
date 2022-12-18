@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -210,7 +209,7 @@ func readSHA1(in io.Reader, size, threshold int64) (sha1sum string, out io.Reade
 		var tempFile *os.File
 
 		// create the cache file
-		tempFile, err = ioutil.TempFile("", cachePrefix)
+		tempFile, err = os.CreateTemp("", cachePrefix)
 		if err != nil {
 			return
 		}
@@ -238,7 +237,7 @@ func readSHA1(in io.Reader, size, threshold int64) (sha1sum string, out io.Reade
 	} else {
 		// that's a small file, just read it into memory
 		var inData []byte
-		inData, err = ioutil.ReadAll(teeReader)
+		inData, err = io.ReadAll(teeReader)
 		if err != nil {
 			return
 		}

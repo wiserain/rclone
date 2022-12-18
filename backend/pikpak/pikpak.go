@@ -243,7 +243,6 @@ type Fs struct {
 	rootFolderID string             // the id of the root folder
 	client       *http.Client       // authorized client
 	fileObj      *fs.Object         // mod
-	fileName     string             // mod
 	m            configmap.Mapper
 	tokenMu      *sync.Mutex // mod
 }

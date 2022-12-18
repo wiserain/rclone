@@ -739,7 +739,6 @@ type Fs struct {
 	changeSAmu       *sync.Mutex         // mod
 	changeSAtime     time.Time           // mod
 	fileObj          *fs.Object          // mod
-	fileName         string              // mod
 	dirResourceKeys  *sync.Map           // map directory ID to resource key
 }
 

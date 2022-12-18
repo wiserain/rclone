@@ -96,9 +96,7 @@ func newServiceAccountPool(ctx context.Context, opt *Options) (*ServiceAccountPo
 		if err := json.Unmarshal([]byte(opt.ImpersonateList), &users); err != nil {
 			return nil, fmt.Errorf("unabled to read impersonate_list: %w", err)
 		}
-		for _, name := range users {
-			ipUsers = append(ipUsers, name)
-		}
+		ipUsers = append(ipUsers, users...)
 		if len(ipUsers) == 0 {
 			return nil, fmt.Errorf("unable to find impersonate users in %s", opt.ImpersonateList)
 		}
