@@ -172,6 +172,8 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 		fs.Debugf(nil, "retrying with the same service account")
 		return nil
 	}
+	f.changeSAmu.Lock()
+	defer f.changeSAmu.Unlock()
 	// reloading SA
 	if len(f.changeSApool.SAs) < 1 {
 		if err := f.changeSApool.LoadSA(); err != nil {
@@ -208,9 +210,9 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 	if err == nil {
 		f.changeSAtime = time.Now()
 		f.pacer = fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
-		svcAcc := "a service account credential"
+		svcAcc := "service account credential"
 		if sa[0].ServiceAccountFile != "" {
-			svcAcc = fmt.Sprintf("a service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
+			svcAcc = fmt.Sprintf("service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
 		}
 		if sa[0].Impersonate != "" {
 			fs.Debugf(nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)

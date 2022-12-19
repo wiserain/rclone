@@ -817,8 +817,6 @@ func (f *Fs) shouldRetry(ctx context.Context, err error) (bool, error) {
 			if reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" || (reason == "dailyLimitExceededUnreg" || strings.HasPrefix(message, "Daily Limit")) {
 				// mod - try changing service account
 				if f.changeSAenabled {
-					f.changeSAmu.Lock()
-					defer f.changeSAmu.Unlock()
 					if saerr := f.changeServiceAccount(ctx); saerr == nil {
 						return true, err
 					}
@@ -2418,8 +2416,6 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-		f.changeSAmu.Lock()
-		defer f.changeSAmu.Unlock()
 		f.changeServiceAccount(ctx)
 	}
 	var info *drive.File
@@ -2663,14 +2659,12 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		id = actualID(srcObj.id)
 	}
 
+	// mod
+	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
+		f.changeServiceAccount(ctx)
+	}
 	var info *drive.File
 	err = f.pacer.Call(func() (bool, error) {
-		// mod
-		if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-			f.changeSAmu.Lock()
-			defer f.changeSAmu.Unlock()
-			f.changeServiceAccount(ctx)
-		}
 		copy := f.svc.Files.Copy(id, createInfo).
 			Fields(partialFields).
 			SupportsAllDrives(true).
