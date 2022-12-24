@@ -1,9 +1,10 @@
 ---
 title: "Swift"
 description: "Swift"
+versionIntroduced: "v0.91"
 ---
 
-# {{< icon "fa fa-space-shuttle" >}}Swift
+# {{< icon "fa fa-space-shuttle" >}} Swift
 
 Swift refers to [OpenStack Object Storage](https://docs.openstack.org/swift/latest/).
 Commercial implementations of that being:

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	gohash "hash"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"path"
 	"regexp"
@@ -1040,7 +1039,7 @@ func (o *Object) readMetadata(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	metadata, err := ioutil.ReadAll(reader)
+	metadata, err := io.ReadAll(reader)
 	_ = reader.Close() // ensure file handle is freed on windows
 	if err != nil {
 		return err
@@ -1099,7 +1098,7 @@ func (o *Object) readXactID(ctx context.Context) (xactID string, err error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := ioutil.ReadAll(reader)
+	data, err := io.ReadAll(reader)
 	_ = reader.Close() // ensure file handle is freed on windows
 	if err != nil {
 		return "", err

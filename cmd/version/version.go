@@ -4,7 +4,7 @@ package version
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -67,6 +67,9 @@ Or
       upgrade: https://beta.rclone.org/v1.42-005-g56e1e820
 
 `,
+	Annotations: map[string]string{
+		"versionIntroduced": "v1.33",
+	},
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(0, 0, command, args)
 		if check {
@@ -95,7 +98,7 @@ func GetVersion(url string) (v *semver.Version, vs string, date time.Time, err e
 	if resp.StatusCode != http.StatusOK {
 		return v, vs, date, errors.New(resp.Status)
 	}
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return v, vs, date, err
 	}

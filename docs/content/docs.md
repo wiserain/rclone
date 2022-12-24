@@ -338,8 +338,17 @@ Will get their own names
 ### Valid remote names
 
 Remote names are case sensitive, and must adhere to the following rules:
- - May only contain `0`-`9`, `A`-`Z`, `a`-`z`, `_`, `-`, `.` and space.
+ - May contain number, letter, `_`, `-`, `.` and space.
  - May not start with `-` or space.
+ - May not end with space.
+
+Starting with rclone version 1.61, any Unicode numbers and letters are allowed,
+while in older versions it was limited to plain ASCII (0-9, A-Z, a-z). If you use
+the same rclone configuration from different shells, which may be configured with
+different character encoding, you must be cautious to use characters that are
+possible to write in all of them. This is mostly a problem on Windows, where
+the console traditionally uses a non-Unicode character set - defined
+by the so-called "code page".
 
 Quoting and the shell
 ---------------------
@@ -822,6 +831,16 @@ quicker than without the `--checksum` flag.
 
 When using this flag, rclone won't update mtimes of remote files if
 they are incorrect as it would normally.
+
+### --color WHEN ###
+
+Specifiy when colors (and other ANSI codes) should be added to the output.
+
+`AUTO` (default) only allows ANSI codes when the output is a terminal
+
+`NEVER` never allow ANSI codes
+
+`ALWAYS` always add ANSI codes, regardless of the output format (terminal or file)
 
 ### --compare-dest=DIR ###
 
@@ -2336,6 +2355,12 @@ For the filtering options
   * `--min-age`
   * `--max-age`
   * `--dump filters`
+  * `--metadata-include`
+  * `--metadata-include-from`
+  * `--metadata-exclude`
+  * `--metadata-exclude-from`
+  * `--metadata-filter`
+  * `--metadata-filter-from`
 
 See the [filtering section](/filtering/).
 

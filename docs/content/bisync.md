@@ -1,6 +1,7 @@
 ---
 title: "Bisync"
 description: "Bidirectional cloud sync solution in rclone"
+versionIntroduced: "v1.58"
 ---
 
 ## Getting started {#getting-started}

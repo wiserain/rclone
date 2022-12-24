@@ -14,12 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1179,7 +1178,7 @@ func createOAuthClient(ctx context.Context, opt *Options, name string, m configm
 
 	// try loading service account credentials from env variable, then from a file
 	if len(opt.ServiceAccountCredentials) == 0 && opt.ServiceAccountFile != "" {
-		loadedCreds, err := ioutil.ReadFile(env.ShellExpand(opt.ServiceAccountFile))
+		loadedCreds, err := os.ReadFile(env.ShellExpand(opt.ServiceAccountFile))
 		if err != nil {
 			return nil, fmt.Errorf("error opening service account credentials file: %w", err)
 		}
@@ -3654,13 +3653,12 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		if err != nil {
 			return nil, err
 		}
-		re := regexp.MustCompile(`[^\w_. -]+`)
 		if _, ok := opt["config"]; ok {
 			lines := []string{}
 			upstreams := []string{}
 			names := make(map[string]struct{}, len(drives))
 			for i, drive := range drives {
-				name := re.ReplaceAllString(drive.Name, "_")
+				name := fspath.MakeConfigName(drive.Name)
 				for {
 					if _, found := names[name]; !found {
 						break
@@ -4068,7 +4066,7 @@ func (o *linkObject) Open(ctx context.Context, options ...fs.OpenOption) (in io.
 		data = data[:limit]
 	}
 
-	return ioutil.NopCloser(bytes.NewReader(data)), nil
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 func (o *baseObject) update(ctx context.Context, updateInfo *drive.File, uploadMimeType string, in io.Reader,

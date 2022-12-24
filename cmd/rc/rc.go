@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -99,6 +99,9 @@ rclone rc server, e.g.:
     rclone rc --loopback operations/about fs=/
 
 Use ` + "`rclone rc`" + ` to see a list of all possible commands.`,
+	Annotations: map[string]string{
+		"versionIntroduced": "v1.40",
+	},
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(0, 1e9, command, args)
 		cmd.Run(false, false, command, func() error {
@@ -153,6 +156,15 @@ func ParseOptions(options []string) (opt map[string]string) {
 func setAlternateFlag(flagName string, output *string) {
 	if rcFlag := pflag.Lookup(flagName); rcFlag != nil && rcFlag.Changed {
 		*output = rcFlag.Value.String()
+		if sliceValue, ok := rcFlag.Value.(pflag.SliceValue); ok {
+			stringSlice := sliceValue.GetSlice()
+			for _, value := range stringSlice {
+				if value != "" {
+					*output = value
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -204,7 +216,7 @@ func doCall(ctx context.Context, path string, in rc.Params) (out rc.Params, err 
 
 	if resp.StatusCode != http.StatusOK {
 		var body []byte
-		body, err = ioutil.ReadAll(resp.Body)
+		body, err = io.ReadAll(resp.Body)
 		var bodyString string
 		if err == nil {
 			bodyString = string(body)

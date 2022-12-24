@@ -231,6 +231,7 @@ put them back in again.` >}}
   * Jay <dev@jaygoel.com>
   * andrea rota <a@xelera.eu>
   * nicolov <nicolov@users.noreply.github.com>
+  * Matt Joiner <anacrolix@gmail.com>
   * Dario Guzik <dario@guzik.com.ar>
   * qip <qip@users.noreply.github.com>
   * yair@unicorn <yair@unicorn>
@@ -650,3 +651,25 @@ put them back in again.` >}}
   * Manoj Ghosh <manoj.ghosh@oracle.com>
   * Tom Mombourquette <tom@devnode.com>
   * Robert Newson <rnewson@apache.org>
+  * Samuel Johnson <esamueljohnson@gmail.com>
+  * coultonluke <luke@luke.org.uk>
+  * Anthony Pessy <anthony@cogniteev.com>
+  * Philip Harvey <pharvey@battelleecology.org>
+  * dgouju <dgouju@users.noreply.github.com>
+  * Clément Notin <clement.notin@gmail.com>
+  * x3-apptech <66947598+x3-apptech@users.noreply.github.com>
+  * Arnie97 <arnie97@gmail.com>
+  * Roel Arents <2691308+roelarents@users.noreply.github.com>
+  * Aaron Gokaslan <aaronGokaslan@gmail.com>
+  * techknowlogick <matti@mdranta.net>
+  * rkettelerij <richard@mindloops.nl>
+  * Kamui <fin-kamui@pm.me>
+  * asdffdsazqqq <90116442+asdffdsazqqq@users.noreply.github.com>
+  * Nathaniel Wesley Filardo <nfilardo@microsoft.com>
+  * ycdtosa <ycdtosa@users.noreply.github.com>
+  * Erik Agterdenbos <agterdenbos@users.noreply.github.com>
+  * Kevin Verstaen <48050031+kverstae@users.noreply.github.com>
+  * MohammadReza <mrvashian@gmail.com>
+  * vanplus <60313789+vanplus@users.noreply.github.com>
+  * Jack <16779171+jkpe@users.noreply.github.com>
+  * Abdullah Saglam <abdullah.saglam@stonebranch.com>

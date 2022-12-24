@@ -3,7 +3,6 @@ package downloaders
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"sync"
 	"testing"
 	"time"
@@ -76,7 +75,6 @@ func (item *testItem) WriteAtNoOverwrite(b []byte, off int64) (n int, skipped in
 
 func TestDownloaders(t *testing.T) {
 	r := fstest.NewRun(t)
-	defer r.Finalise()
 
 	var (
 		ctx    = context.Background()
@@ -85,8 +83,8 @@ func TestDownloaders(t *testing.T) {
 	)
 
 	// Write the test file
-	in := ioutil.NopCloser(readers.NewPatternReader(size))
-	src, err := operations.RcatSize(ctx, r.Fremote, remote, in, size, time.Now())
+	in := io.NopCloser(readers.NewPatternReader(size))
+	src, err := operations.RcatSize(ctx, r.Fremote, remote, in, size, time.Now(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, size, src.Size())
 

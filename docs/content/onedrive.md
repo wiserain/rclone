@@ -1,6 +1,7 @@
 ---
 title: "Microsoft OneDrive"
 description: "Rclone docs for Microsoft OneDrive"
+versionIntroduced: "v1.24"
 ---
 
 # {{< icon "fab fa-windows" >}} Microsoft OneDrive
@@ -52,9 +53,10 @@ y) Yes
 n) No
 y/n> n
 Remote config
-Use auto config?
- * Say Y if not sure
- * Say N if you are working on a remote or headless machine
+Use web browser to automatically authenticate rclone with remote?
+ * Say Y if the machine running rclone has a web browser you can use
+ * Say N if running rclone on a (remote) machine without web browser access
+If not sure try Y. If Y failed, try N.
 y) Yes
 n) No
 y/n> y
@@ -712,3 +714,14 @@ public links to be made for the organisation/sharepoint library. To fix the
 permissions as an admin, take a look at the docs:
 [1](https://docs.microsoft.com/en-us/sharepoint/turn-external-sharing-on-or-off),
 [2](https://support.microsoft.com/en-us/office/set-up-and-manage-access-requests-94b26e0b-2822-49d4-929a-8455698654b3).
+
+### Can not access `Shared` with me files
+
+Shared with me files is not supported by rclone [currently](https://github.com/rclone/rclone/issues/4062), but there is a workaround:
+
+1. Visit [https://onedrive.live.com](https://onedrive.live.com/)
+2. Right click a item in `Shared`, then click `Add shortcut to My files` in the context
+    ![make_shortcut](https://user-images.githubusercontent.com/60313789/206118040-7e762b3b-aa61-41a1-8649-cc18889f3572.png "Screenshot (Shared with me)")
+3. The shortcut will appear in `My files`, you can access it with rclone, it behaves like a normal folder/file.
+    ![in_my_files](https://i.imgur.com/0S8H3li.png "Screenshot (My Files)")
+    ![rclone_mount](https://i.imgur.com/2Iq66sW.png "Screenshot (rclone mount)")

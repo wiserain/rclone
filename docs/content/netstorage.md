@@ -1,6 +1,7 @@
 ---
 title: "Akamai Netstorage"
 description: "Rclone docs for Akamai NetStorage"
+versionIntroduced: "v1.58"
 ---
 
 # {{< icon "fas fa-database" >}} Akamai NetStorage

@@ -1,9 +1,10 @@
 ---
 title: "Zoho"
 description: "Zoho WorkDrive"
+versionIntroduced: "v1.54"
 ---
 
-# {{< icon "fas fa-folder" >}}Zoho Workdrive
+# {{< icon "fas fa-folder" >}} Zoho Workdrive
 
 [Zoho WorkDrive](https://www.zoho.com/workdrive/) is a cloud storage solution created by [Zoho](https://zoho.com).
 
@@ -44,9 +45,10 @@ y) Yes
 n) No (default)
 y/n> n
 Remote config
-Use auto config?
- * Say Y if not sure
- * Say N if you are working on a remote or headless machine
+Use web browser to automatically authenticate rclone with remote?
+ * Say Y if the machine running rclone has a web browser you can use
+ * Say N if running rclone on a (remote) machine without web browser access
+If not sure try Y. If Y failed, try N.
 y) Yes (default)
 n) No
 y/n> 

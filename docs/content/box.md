@@ -1,6 +1,7 @@
 ---
 title: "Box"
 description: "Rclone docs for Box"
+versionIntroduced: "v1.38"
 ---
 
 # {{< icon "fa fa-archive" >}} Box
@@ -56,9 +57,10 @@ Choose a number from below, or type in your own value
    \ "enterprise"
 box_sub_type>
 Remote config
-Use auto config?
- * Say Y if not sure
- * Say N if you are working on a remote or headless machine
+Use web browser to automatically authenticate rclone with remote?
+ * Say Y if the machine running rclone has a web browser you can use
+ * Say N if running rclone on a (remote) machine without web browser access
+If not sure try Y. If Y failed, try N.
 y) Yes
 n) No
 y/n> y
@@ -175,9 +177,10 @@ Already have a token - refresh?
 y) Yes
 n) No
 y/n> y
-Use auto config?
- * Say Y if not sure
- * Say N if you are working on a remote or headless machine
+Use web browser to automatically authenticate rclone with remote?
+ * Say Y if the machine running rclone has a web browser you can use
+ * Say N if running rclone on a (remote) machine without web browser access
+If not sure try Y. If Y failed, try N.
 y) Yes
 n) No
 y/n> y
@@ -460,6 +463,8 @@ and from an identical looking unicode equivalent `＼` (U+FF3C Fullwidth
 Reverse Solidus).
 
 Box only supports filenames up to 255 characters in length.
+
+Box has [API rate limits](https://developer.box.com/guides/api-calls/permissions-and-errors/rate-limits/) that sometimes reduce the speed of rclone.
 
 `rclone about` is not supported by the Box backend. Backends without
 this capability cannot determine free space for an rclone mount or

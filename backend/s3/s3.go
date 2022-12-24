@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path"
@@ -25,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -65,7 +66,7 @@ import (
 func init() {
 	fs.Register(&fs.RegInfo{
 		Name:        "s3",
-		Description: "Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, Digital Ocean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, IONOS Cloud, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Tencent COS, Qiniu and Wasabi",
+		Description: "Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, IONOS Cloud, Liara, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Tencent COS, Qiniu and Wasabi",
 		NewFs:       NewFs,
 		CommandHelp: commandHelp,
 		Config: func(ctx context.Context, name string, m configmap.Mapper, config fs.ConfigIn) (*fs.ConfigOut, error) {
@@ -104,7 +105,7 @@ func init() {
 				Help:  "Arvan Cloud Object Storage (AOS)",
 			}, {
 				Value: "DigitalOcean",
-				Help:  "Digital Ocean Spaces",
+				Help:  "DigitalOcean Spaces",
 			}, {
 				Value: "Dreamhost",
 				Help:  "Dreamhost DreamObjects",
@@ -123,6 +124,9 @@ func init() {
 			}, {
 				Value: "LyveCloud",
 				Help:  "Seagate Lyve Cloud",
+			}, {
+				Value: "Liara",
+				Help:  "Liara Object Storage",
 			}, {
 				Value: "Minio",
 				Help:  "Minio Object Storage",
@@ -436,7 +440,7 @@ func init() {
 		}, {
 			Name:     "region",
 			Help:     "Region to connect to.\n\nLeave blank if you are using an S3 clone and you don't have a region.",
-			Provider: "!AWS,Alibaba,ChinaMobile,Cloudflare,IONOS,ArvanCloud,Qiniu,RackCorp,Scaleway,Storj,TencentCOS,HuaweiOBS,IDrive",
+			Provider: "!AWS,Alibaba,ChinaMobile,Cloudflare,IONOS,ArvanCloud,Liara,Qiniu,RackCorp,Scaleway,Storj,TencentCOS,HuaweiOBS,IDrive",
 			Examples: []fs.OptionExample{{
 				Value: "",
 				Help:  "Use this if unsure.\nWill use v4 signatures and an empty region.",
@@ -762,6 +766,15 @@ func init() {
 				Help:  "Logrono, Spain",
 			}},
 		}, {
+			// Liara endpoints: https://liara.ir/landing/object-storage
+			Name:     "endpoint",
+			Help:     "Endpoint for Liara Object Storage API.",
+			Provider: "Liara",
+			Examples: []fs.OptionExample{{
+				Value: "storage.iran.liara.space",
+				Help:  "The default endpoint\nIran",
+			}},
+		}, {
 			// oss endpoints: https://help.aliyun.com/document_detail/31837.html
 			Name:     "endpoint",
 			Help:     "Endpoint for OSS API.",
@@ -923,17 +936,11 @@ func init() {
 			}},
 		}, {
 			Name:     "endpoint",
-			Help:     "Endpoint of the Shared Gateway.",
+			Help:     "Endpoint for Storj Gateway.",
 			Provider: "Storj",
 			Examples: []fs.OptionExample{{
-				Value: "gateway.eu1.storjshare.io",
-				Help:  "EU1 Shared Gateway",
-			}, {
-				Value: "gateway.us1.storjshare.io",
-				Help:  "US1 Shared Gateway",
-			}, {
-				Value: "gateway.ap1.storjshare.io",
-				Help:  "Asia-Pacific Shared Gateway",
+				Value: "gateway.storjshare.io",
+				Help:  "Global Hosted Gateway",
 			}},
 		}, {
 			// cos endpoints: https://intl.cloud.tencent.com/document/product/436/6224
@@ -1091,22 +1098,34 @@ func init() {
 		}, {
 			Name:     "endpoint",
 			Help:     "Endpoint for S3 API.\n\nRequired when using an S3 clone.",
-			Provider: "!AWS,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,ArvanCloud,Scaleway,StackPath,Storj,RackCorp,Qiniu",
+			Provider: "!AWS,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,Liara,ArvanCloud,Scaleway,StackPath,Storj,RackCorp,Qiniu",
 			Examples: []fs.OptionExample{{
 				Value:    "objects-us-east-1.dream.io",
 				Help:     "Dream Objects endpoint",
 				Provider: "Dreamhost",
 			}, {
+				Value:    "syd1.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces Sydney 1",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "sfo3.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces San Francisco 3",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "fra1.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces Frankfurt 1",
+				Provider: "DigitalOcean",
+			}, {
 				Value:    "nyc3.digitaloceanspaces.com",
-				Help:     "Digital Ocean Spaces New York 3",
+				Help:     "DigitalOcean Spaces New York 3",
 				Provider: "DigitalOcean",
 			}, {
 				Value:    "ams3.digitaloceanspaces.com",
-				Help:     "Digital Ocean Spaces Amsterdam 3",
+				Help:     "DigitalOcean Spaces Amsterdam 3",
 				Provider: "DigitalOcean",
 			}, {
 				Value:    "sgp1.digitaloceanspaces.com",
-				Help:     "Digital Ocean Spaces Singapore 1",
+				Help:     "DigitalOcean Spaces Singapore 1",
 				Provider: "DigitalOcean",
 			}, {
 				Value:    "localhost:8333",
@@ -1176,6 +1195,10 @@ func init() {
 				Value:    "s3.ap-southeast-2.wasabisys.com",
 				Help:     "Wasabi AP Southeast 2 (Sydney)",
 				Provider: "Wasabi",
+			}, {
+				Value:    "storage.iran.liara.space",
+				Help:     "Liara Iran endpoint",
+				Provider: "Liara",
 			}, {
 				Value:    "s3.ir-thr-at1.arvanstorage.com",
 				Help:     "ArvanCloud Tehran Iran (Asiatech) endpoint",
@@ -1559,7 +1582,7 @@ func init() {
 		}, {
 			Name:     "location_constraint",
 			Help:     "Location constraint - must be set to match the Region.\n\nLeave blank if not sure. Used when creating buckets only.",
-			Provider: "!AWS,Alibaba,HuaweiOBS,ChinaMobile,Cloudflare,IBMCOS,IDrive,IONOS,ArvanCloud,Qiniu,RackCorp,Scaleway,StackPath,Storj,TencentCOS",
+			Provider: "!AWS,Alibaba,HuaweiOBS,ChinaMobile,Cloudflare,IBMCOS,IDrive,IONOS,Liara,ArvanCloud,Qiniu,RackCorp,Scaleway,StackPath,Storj,TencentCOS",
 		}, {
 			Name: "acl",
 			Help: `Canned ACL used when creating buckets and storing or copying objects.
@@ -1569,7 +1592,11 @@ This ACL is used for creating objects and if bucket_acl isn't set, for creating 
 For more info visit https://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
 
 Note that this ACL is applied when server-side copying objects as S3
-doesn't copy the ACL from the source but rather writes a fresh one.`,
+doesn't copy the ACL from the source but rather writes a fresh one.
+
+If the acl is an empty string then no X-Amz-Acl: header is added and
+the default (private) will be used.
+`,
 			Provider: "!Storj,Cloudflare",
 			Examples: []fs.OptionExample{{
 				Value:    "default",
@@ -1623,7 +1650,11 @@ doesn't copy the ACL from the source but rather writes a fresh one.`,
 For more info visit https://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
 
 Note that this ACL is applied when only when creating buckets.  If it
-isn't set then "acl" is used instead.`,
+isn't set then "acl" is used instead.
+
+If the "acl" and "bucket_acl" are empty strings then no X-Amz-Acl:
+header is added and the default (private) will be used.
+`,
 			Advanced: true,
 			Examples: []fs.OptionExample{{
 				Value: "private",
@@ -1783,6 +1814,15 @@ If you leave it blank, this is calculated automatically from the sse_customer_ke
 			}, {
 				Value: "STANDARD_IA",
 				Help:  "Infrequent access storage mode",
+			}},
+		}, {
+			// Mapping from here: https://liara.ir/landing/object-storage
+			Name:     "storage_class",
+			Help:     "The storage class to use when storing new objects in Liara",
+			Provider: "Liara",
+			Examples: []fs.OptionExample{{
+				Value: "STANDARD",
+				Help:  "Standard storage class",
 			}},
 		}, {
 			// Mapping from here: https://www.arvancloud.com/en/products/cloud-storage
@@ -2755,6 +2795,10 @@ func setQuirks(opt *Options) {
 		// listObjectsV2 supported - https://api.ionos.com/docs/s3/#Basic-Operations-get-Bucket-list-type-2
 		virtualHostStyle = false
 		urlEncodeListings = false
+	case "Liara":
+		virtualHostStyle = false
+		urlEncodeListings = false
+		useMultipartEtag = false
 	case "LyveCloud":
 		useMultipartEtag = false // LyveCloud seems to calculate multipart Etags differently from AWS
 	case "Minio":
@@ -2846,6 +2890,14 @@ func (f *Fs) setRoot(root string) {
 	f.rootBucket, f.rootDirectory = bucket.Split(f.root)
 }
 
+// return a pointer to the string if non empty or nil if it is empty
+func stringPointerOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // NewFs constructs an Fs from the path, bucket:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	// Parse config into Options struct
@@ -2864,9 +2916,6 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	if opt.Versions && opt.VersionAt.IsSet() {
 		return nil, errors.New("s3: cant use --s3-versions and --s3-version-at at the same time")
-	}
-	if opt.ACL == "" {
-		opt.ACL = "private"
 	}
 	if opt.BucketACL == "" {
 		opt.BucketACL = opt.ACL
@@ -3013,6 +3062,17 @@ func (f *Fs) getMetaDataListing(ctx context.Context, wantRemote string) (info *s
 	return info, versionID, nil
 }
 
+// stringClonePointer clones the string pointed to by sp into new
+// memory. This is useful to stop us keeping references to small
+// strings carved out of large XML responses.
+func stringClonePointer(sp *string) *string {
+	if sp == nil {
+		return nil
+	}
+	var s = *sp
+	return &s
+}
+
 // Return an Object from a path
 //
 // If it can't be found it returns the error ErrorObjectNotFound.
@@ -3038,8 +3098,8 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *s3.Obje
 		}
 		o.setMD5FromEtag(aws.StringValue(info.ETag))
 		o.bytes = aws.Int64Value(info.Size)
-		o.storageClass = info.StorageClass
-		o.versionID = versionID
+		o.storageClass = stringClonePointer(info.StorageClass)
+		o.versionID = stringClonePointer(versionID)
 	} else if !o.fs.opt.NoHeadObject {
 		err := o.readMetaData(ctx) // reads info and meta, returning an error
 		if err != nil {
@@ -3057,19 +3117,13 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 // Gets the bucket location
 func (f *Fs) getBucketLocation(ctx context.Context, bucket string) (string, error) {
-	req := s3.GetBucketLocationInput{
-		Bucket: &bucket,
-	}
-	var resp *s3.GetBucketLocationOutput
-	var err error
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.c.GetBucketLocation(&req)
-		return f.shouldRetry(ctx, err)
+	region, err := s3manager.GetBucketRegion(ctx, f.ses, bucket, "", func(r *request.Request) {
+		r.Config.S3ForcePathStyle = aws.Bool(f.opt.ForcePathStyle)
 	})
 	if err != nil {
 		return "", err
 	}
-	return s3.NormalizeBucketLocation(aws.StringValue(resp.LocationConstraint)), nil
+	return region, nil
 }
 
 // Updates the region for the bucket by reading the region from the
@@ -3185,6 +3239,9 @@ func (ls *v2List) List(ctx context.Context) (resp *s3.ListObjectsV2Output, versi
 	resp, err = ls.f.c.ListObjectsV2WithContext(ctx, &ls.req)
 	if err != nil {
 		return nil, nil, err
+	}
+	if aws.BoolValue(resp.IsTruncated) && (resp.NextContinuationToken == nil || *resp.NextContinuationToken == "") {
+		return nil, nil, errors.New("s3 protocol error: received listing v2 with IsTruncated set and no NextContinuationToken. Should you be using `--s3-list-version 1`?")
 	}
 	ls.req.ContinuationToken = resp.NextContinuationToken
 	return resp, nil, nil
@@ -3744,7 +3801,7 @@ func (f *Fs) makeBucket(ctx context.Context, bucket string) error {
 	return f.cache.Create(bucket, func() error {
 		req := s3.CreateBucketInput{
 			Bucket: &bucket,
-			ACL:    &f.opt.BucketACL,
+			ACL:    stringPointerOrNil(f.opt.BucketACL),
 		}
 		if f.opt.LocationConstraint != "" {
 			req.CreateBucketConfiguration = &s3.CreateBucketConfiguration{
@@ -3809,7 +3866,7 @@ func pathEscape(s string) string {
 // method
 func (f *Fs) copy(ctx context.Context, req *s3.CopyObjectInput, dstBucket, dstPath, srcBucket, srcPath string, src *Object) error {
 	req.Bucket = &dstBucket
-	req.ACL = &f.opt.ACL
+	req.ACL = stringPointerOrNil(f.opt.ACL)
 	req.Key = &dstPath
 	source := pathEscape(path.Join(srcBucket, srcPath))
 	if src.versionID != nil {
@@ -4787,23 +4844,12 @@ func (o *Object) downloadFromURL(ctx context.Context, bucketPath string, options
 		return nil, err
 	}
 
-	contentLength := &resp.ContentLength
-	if resp.Header.Get("Content-Range") != "" {
-		var contentRange = resp.Header.Get("Content-Range")
-		slash := strings.IndexRune(contentRange, '/')
-		if slash >= 0 {
-			i, err := strconv.ParseInt(contentRange[slash+1:], 10, 64)
-			if err == nil {
-				contentLength = &i
-			} else {
-				fs.Debugf(o, "Failed to find parse integer from in %q: %v", contentRange, err)
-			}
-		} else {
-			fs.Debugf(o, "Failed to find length in %q", contentRange)
-		}
+	contentLength := rest.ParseSizeFromHeaders(resp.Header)
+	if contentLength < 0 {
+		fs.Debugf(o, "Failed to parse file size from headers")
 	}
 
-	lastModified, err := time.Parse(time.RFC1123, resp.Header.Get("Last-Modified"))
+	lastModified, err := http.ParseTime(resp.Header.Get("Last-Modified"))
 	if err != nil {
 		fs.Debugf(o, "Failed to parse last modified from string %s, %v", resp.Header.Get("Last-Modified"), err)
 	}
@@ -4827,7 +4873,7 @@ func (o *Object) downloadFromURL(ctx context.Context, bucketPath string, options
 
 	var head = s3.HeadObjectOutput{
 		ETag:               header("Etag"),
-		ContentLength:      contentLength,
+		ContentLength:      &contentLength,
 		LastModified:       &lastModified,
 		Metadata:           metaData,
 		CacheControl:       header("Cache-Control"),
@@ -5173,7 +5219,7 @@ func (o *Object) uploadSinglepartPutObject(ctx context.Context, req *s3.PutObjec
 		// Can't upload zero length files like this for some reason
 		r.Body = bytes.NewReader([]byte{})
 	} else {
-		r.SetStreamingBody(ioutil.NopCloser(in))
+		r.SetStreamingBody(io.NopCloser(in))
 	}
 	r.SetContext(ctx)
 	r.HTTPRequest.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
@@ -5287,7 +5333,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 	req := s3.PutObjectInput{
 		Bucket: &bucket,
-		ACL:    &o.fs.opt.ACL,
+		ACL:    stringPointerOrNil(o.fs.opt.ACL),
 		Key:    &bucketPath,
 	}
 
@@ -5455,7 +5501,12 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if err != nil {
 		return err
 	}
-	o.versionID = versionID
+	// Only record versionID if we are using --s3-versions or --s3-version-at
+	if o.fs.opt.Versions || o.fs.opt.VersionAt.IsSet() {
+		o.versionID = versionID
+	} else {
+		o.versionID = nil
+	}
 
 	// User requested we don't HEAD the object after uploading it
 	// so make up the object as best we can assuming it got

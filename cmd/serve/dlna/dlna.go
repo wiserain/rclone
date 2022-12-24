@@ -17,6 +17,7 @@ import (
 	"github.com/anacrolix/dms/soap"
 	"github.com/anacrolix/dms/ssdp"
 	"github.com/anacrolix/dms/upnp"
+	"github.com/anacrolix/log"
 	"github.com/rclone/rclone/cmd"
 	"github.com/rclone/rclone/cmd/serve/dlna/data"
 	"github.com/rclone/rclone/cmd/serve/dlna/dlnaflags"
@@ -47,6 +48,9 @@ media transcoding support. This means that some players might show
 files that they are not able to play back correctly.
 
 ` + dlnaflags.Help + vfs.Help,
+	Annotations: map[string]string{
+		"versionIntroduced": "v1.46",
+	},
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		f := cmd.NewFsSrc(args)
@@ -401,6 +405,7 @@ func (s *server) ssdpInterface(intf net.Interface) {
 		Server:         serverField,
 		UUID:           s.RootDeviceUUID,
 		NotifyInterval: s.AnnounceInterval,
+		Logger:         log.Default,
 	}
 
 	// An interface with these flags should be valid for SSDP.
