@@ -188,12 +188,11 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	newOpt := &Options{
-		ServiceAccountCredentials: f.changeSApool.creds,
-		ServiceAccountFile:        sa[0].ServiceAccountFile,
-		Impersonate:               sa[0].Impersonate,
-	}
-	f.client, err = createOAuthClient(ctx, newOpt, f.name, f.m)
+	newOpt := f.opt
+	newOpt.ServiceAccountCredentials = f.changeSApool.creds
+	newOpt.ServiceAccountFile = sa[0].ServiceAccountFile
+	newOpt.Impersonate = sa[0].Impersonate
+	f.client, err = createOAuthClient(ctx, &newOpt, f.name, f.m)
 	if err != nil {
 		return fmt.Errorf("failed to create oauth client: %w", err)
 	}

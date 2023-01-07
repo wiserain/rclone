@@ -2413,10 +2413,6 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		createInfo.MimeType = fs.MimeTypeFromName(remote)
 	}
 
-	// mod
-	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-		f.changeServiceAccount(ctx)
-	}
 	var info *drive.File
 	if size >= 0 && size < int64(f.opt.UploadCutoff) {
 		// Make the API request to upload metadata and file data.
