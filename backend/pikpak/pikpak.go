@@ -673,7 +673,7 @@ type listAllFn func(*api.File) bool
 func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAllFn) (found bool, err error) {
 	// Url Parameters
 	params := url.Values{}
-	params.Set("thumbnail_size", api.ThumbnaleSizeM)
+	params.Set("thumbnail_size", api.ThumbnailSizeM)
 	params.Set("limit", strconv.Itoa(api.ListLimit))
 	params.Set("with_audit", strconv.FormatBool(true))
 	if parentId := parentIdForRequest(dirID); parentId != "" {
