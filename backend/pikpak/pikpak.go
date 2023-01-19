@@ -7,8 +7,6 @@ package pikpak
 
 // Multipart copy doesn't seem to be allowed. `--multi-thread-streams=1` is forced for temporary workaround.
 
-// Usage in trash seems not working in About()
-
 // Size and/or Hash from api.File are sometimes incorrect. It might need `--ignore-checksum` and/or `--ignore-size`.
 
 // There are some cases with no downloadUrl for Open(). e.g. 0byte file
@@ -825,8 +823,8 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 	}
 	q := info.Quota
 	usage = &fs.Usage{
-		Used:    fs.NewUsageValue(q.Usage),        // bytes in use
-		Trashed: fs.NewUsageValue(q.UsageInTrash), // bytes in trash but this seems not working
+		Used: fs.NewUsageValue(q.Usage), // bytes in use
+		// Trashed: fs.NewUsageValue(q.UsageInTrash), // bytes in trash but this seems not working
 	}
 	if q.Limit > 0 {
 		usage.Total = fs.NewUsageValue(q.Limit)          // quota of bytes that can be used
