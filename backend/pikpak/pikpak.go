@@ -1262,7 +1262,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 		Body:   in,
 	}
 	// Perform upload with options different than the those in the Uploader.
-	_, err = uploader.Upload(uParams, func(u *s3manager.Uploader) {
+	_, err = uploader.UploadWithContext(ctx, uParams, func(u *s3manager.Uploader) {
 		// TODO can be user-configurable
 		u.PartSize = 10 * 1024 * 1024 // 10MB part size
 	})
