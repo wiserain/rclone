@@ -2,22 +2,22 @@
 package pikpak
 
 // ------------------------------------------------------------
-// NOTE for backend
+// NOTE
 // ------------------------------------------------------------
 
-// Multipart copy doesn't seem to be allowed. `--multi-thread-streams=1` is forced for temporary workaround.
+// Multipart copy doesn't seem to be allowed.
+// `--multi-thread-streams=1` is forced for temporary workaround.
 
-// Size and/or Hash from api.File are sometimes incorrect. It might need `--ignore-checksum` and/or `--ignore-size`.
+// Size and/or Hash from api.File are sometimes incorrect, rarely happen though.
+// It might need `--ignore-checksum` and/or `--ignore-size`.
 
-// There are some cases with no downloadUrl for Open(). e.g. 0byte file
+// There are some cases with no downloadUrl/md5sum for Open().
+// e.g. 0byte or very small size(<100byte) of files
 
 // Trashed files are not restored to the original location when using `batchUntrash`
 
-// ------------------------------------------------------------
-// FIXME
-// ------------------------------------------------------------
-
-// * Even after emptied trash, files are still visible with `--pikpak-trashed-only`. This goes aways after few days.
+// Even after emptied trash, files are still visible with `--pikpak-trashed-only`.
+// This goes away after few days.
 
 // ------------------------------------------------------------
 // TODO
@@ -1108,6 +1108,11 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	dstObj, dstLeaf, dirID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
+	}
+	if srcObj.parent == dirID {
+		// api restriction
+		fs.Debugf(src, "Can't copy - same parent")
+		return nil, fs.ErrorCantCopy
 	}
 	// Copy the object
 	if err := f.copyObjects(ctx, []string{srcObj.id}, dirID); err != nil {

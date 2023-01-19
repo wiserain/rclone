@@ -302,6 +302,17 @@ backends:
  - backend:  "pcloud"
    remote:   "TestPcloud:"
    fastlist: true
+ - backend:  "pikpak"
+   remote:   "TestPikPak:"
+   fastlist: false
+   ignore:
+    #  fs/operations
+     - TestHashSums/Md5
+     - TestCopyFileMaxTransfer
+    #  fs/sync
+     - TestSyncWithTrackRenames
+    #  backend
+     - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:
