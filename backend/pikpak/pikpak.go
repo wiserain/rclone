@@ -71,12 +71,12 @@ import (
 
 // Constants
 const (
-	rcloneClientID     = "YNxT9w7GMdWvEOKa"
-	rcloneClientSecret = "dbw2OtmVEeuUvIptb1Coygx"
-	minSleep           = 10 * time.Millisecond
-	maxSleep           = 2 * time.Second
-	decayConstant      = 2 // bigger for slower decay, exponential
-	rootURL            = "https://api-drive.mypikpak.com"
+	rcloneClientID              = "YNxT9w7GMdWvEOKa"
+	rcloneEncryptedClientSecret = "XbockxvVHHT6IIyvQtrlROvdZKq4fzSvQ-NKXie478A44TUFzoi6"
+	minSleep                    = 10 * time.Millisecond
+	maxSleep                    = 2 * time.Second
+	decayConstant               = 2 // bigger for slower decay, exponential
+	rootURL                     = "https://api-drive.mypikpak.com"
 )
 
 // Globals
@@ -90,7 +90,7 @@ var (
 			AuthStyle: oauth2.AuthStyleInParams,
 		},
 		ClientID:     rcloneClientID,
-		ClientSecret: rcloneClientSecret,
+		ClientSecret: obscure.MustReveal(rcloneEncryptedClientSecret),
 		RedirectURL:  oauthutil.RedirectURL,
 	}
 )
