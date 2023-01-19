@@ -7,8 +7,6 @@ package pikpak
 
 // Multipart copy doesn't seem to be allowed. `--multi-thread-streams=1` is forced for temporary workaround.
 
-// SetModTime doesn't seem to be supported
-
 // Usage in trash seems not working in About()
 
 // Size and/or Hash from api.File are sometimes incorrect. It might need `--ignore-checksum` and/or `--ignore-size`.
@@ -16,19 +14,6 @@ package pikpak
 // There are some cases with no downloadUrl for Open(). e.g. 0byte file
 
 // Trashed files are not restored to the original location when using `batchUntrash`
-
-// result of `rclone test info --all -vv --write-json remote.json remote:test`
-// stringNeedsEscaping = []rune{
-// 	' ', '!', '$', ''', '(', '*', '+', '.', '/', '0', '3', '4', '6', '8', '9', ':', '<', '>', '?', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'X', 'Z', '\"', '\\', '\a', '\b', '\f', '\n', '\r', '\t', '\u007f', '\u00a0', '\v', '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f', '\xbf', '\xfe', '^', 'a', 'b', 'c', 'd', 'l', 'm', 'n', 'o', 'q', 'r', 'v', 'w', '|', '＼'
-// }
-// maxFileLength = 1024 // for 1 byte unicode characters
-// maxFileLength = 512 // for 2 byte unicode characters
-// maxFileLength = 341 // for 3 byte unicode characters
-// maxFileLength = 256 // for 4 byte unicode characters
-// canWriteUnnormalized = true
-// canReadUnnormalized   = true
-// canReadRenormalized   = false
-// canStream = false
 
 // ------------------------------------------------------------
 // FIXME
@@ -212,9 +197,19 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
-			Default:  encoder.EncodeInvalidUtf8,
-			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
-			// TODO: elaborate more on this option
+			Default: (encoder.EncodeCtl |
+				encoder.EncodeDot |
+				encoder.EncodeBackSlash |
+				encoder.EncodeSlash |
+				encoder.EncodeWin |
+				encoder.EncodeLeftSpace |
+				encoder.EncodeLeftPeriod |
+				encoder.EncodeLeftTilde |
+				encoder.EncodeLeftCrLfHtVt |
+				encoder.EncodeRightSpace |
+				encoder.EncodeRightPeriod |
+				encoder.EncodeRightCrLfHtVt |
+				encoder.EncodeInvalidUtf8),
 		}}...),
 	})
 }
@@ -286,7 +281,9 @@ func (f *Fs) Features() *fs.Features {
 
 // Precision return the precision of this Fs
 func (f *Fs) Precision() time.Duration {
-	return time.Millisecond
+	return fs.ModTimeNotSupported
+	// meaning that the modification times from the backend shouldn't be used for syncing
+	// as they can't be set.
 }
 
 // DirCacheFlush resets the directory cache - used in testing as an
@@ -404,15 +401,17 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (b
 		}
 	}
 
-	// switch apiErr := err.(type) {
-	// case *api.Error:
-	// 	if apiErr.Reason == "unauthenticated" || apiErr.Reason == "invalid_grant" {
-	// 		if err := f.doAuthorize(ctx); err != nil {
-	// 			return false, fserrors.FatalError(err)
-	// 		}
-	// 		return true, nil
-	// 	}
-	// }
+	switch apiErr := err.(type) {
+	case *api.Error:
+		if apiErr.Reason == "file_rename_uncompleted" {
+			// "file_rename_uncompleted" (9): Renaming uncompleted file or folder is not supported
+			// This error occurs when you attempt to rename objects right after some server-side changes.
+			return true, nil
+		} else if apiErr.Reason == "task_daily_create_limit_vip" {
+			// "task_daily_create_limit_vip" (11): Sorry, you have submitted too many tasks and have exceeded the current processing capacity, please try again tomorrow
+			return false, fserrors.FatalError(err)
+		}
+	}
 
 	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
@@ -1279,6 +1278,16 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resumable: %w", err)
 	}
+	if resumable.Resumable == nil {
+		// sometimes api doesn't return Resumable field
+		if resumable.File == nil {
+			return nil, fmt.Errorf("failed to create resumable: %+v", resumable)
+		}
+		if resumable.File.Phase != api.PhaseTypeComplete {
+			return nil, fmt.Errorf("failed to create resumable: %+v", resumable)
+		}
+		return resumable.File, nil
+	}
 	r := resumable.Resumable
 
 	p := r.Params
@@ -1353,11 +1362,6 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	default:
 		return nil, err
 	}
-}
-
-// PutStream uploads to the remote path with the modTime given of indeterminate size
-func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	return f.Put(ctx, in, src, options...)
 }
 
 // UserInfo fetches info about the current user
@@ -1794,7 +1798,6 @@ var (
 	_ fs.Fs              = (*Fs)(nil)
 	_ fs.Purger          = (*Fs)(nil)
 	_ fs.CleanUpper      = (*Fs)(nil)
-	_ fs.PutStreamer     = (*Fs)(nil)
 	_ fs.Copier          = (*Fs)(nil)
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
