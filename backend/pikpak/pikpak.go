@@ -9,8 +9,10 @@ package pikpak
 // Thus, we force `--multi-thread-streams=1` as a new default
 // but users still can optionally choose up to 2.
 
-// Size and/or Hash from api.File are sometimes incorrect, rarely happen though.
-// It might need `--ignore-checksum` and/or `--ignore-size`.
+// md5sum is not always available, sometimes given empty.
+
+// Size and/or Md5Checksum from api.File are sometimes incorrect.
+// In such rare cases, it might need `--ignore-checksum` and/or `--ignore-size`.
 
 // There are some cases with no downloadUrl/md5sum for Open().
 // e.g. 0byte or very small size(<100byte) of files
@@ -1601,6 +1603,9 @@ func (o *Object) Remote() string {
 func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 	if t != hash.MD5 {
 		return "", hash.ErrUnsupported
+	}
+	if o.md5sum == "" {
+		return "", nil
 	}
 	return strings.ToLower(o.md5sum), nil
 }
