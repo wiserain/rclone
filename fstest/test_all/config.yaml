@@ -309,7 +309,6 @@ backends:
     #  fs/operations
      - TestHashSums/Md5
      - TestCopyFileMaxTransfer
-     - TestMultithreadCopy
     #  fs/sync
      - TestSyncWithTrackRenames
     #  backend

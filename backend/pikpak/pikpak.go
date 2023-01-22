@@ -5,9 +5,8 @@ package pikpak
 // NOTE
 // ------------------------------------------------------------
 
-// PikPak is restrictive for opening a single object multiple times for download.
-// Thus, we force `--multi-thread-streams=1` as a new default
-// but users still can optionally choose up to 2.
+// PikPak doesn't allow multipart copy.
+// Thus,`--multi-thread-streams=1` is forced for a temporary workaround.
 
 // md5sum is not always available, sometimes given empty.
 
@@ -451,10 +450,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	ci := fs.GetConfig(ctx)
-	if ci.MultiThreadStreams > 2 {
-		fs.Debugf(nil, "forcing '--multi-thread-streams=1' as a new default but can optionally choose up to 2")
-		ci.MultiThreadStreams = 1
-	}
+	// multipart copy doesn't seem to be allowed.
+	// temporary workaround by forcing `--multi-thread-streams=1`
+	ci.MultiThreadStreams = 1
 
 	f := &Fs{
 		name:    name,
