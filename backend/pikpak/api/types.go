@@ -50,7 +50,7 @@ const (
 	PhaseTypeRunning  = "PHASE_TYPE_RUNNING"
 	PhaseTypeError    = "PHASE_TYPE_ERROR"
 	PhaseTypePending  = "PHASE_TYPE_PENDING"
-	ListLimit         = 100
+	ListLimit         = 200
 )
 
 // ------------------------------------------------------------
