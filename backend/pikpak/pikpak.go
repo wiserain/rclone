@@ -182,12 +182,6 @@ Fill in for rclone to use a non root folder as its starting point.
 			Help:     "Only show files that are in the trash.\n\nThis will show trashed files in their original directory structure.",
 			Advanced: true,
 		}, {
-			// TODO not implemented yet
-			Name:     "starred_only",
-			Default:  false,
-			Help:     "Only show files that are starred.",
-			Advanced: true,
-		}, {
 			Name:     "hash_memory_limit",
 			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
@@ -635,8 +629,6 @@ func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAl
 	filters := &api.Filters{}
 	filters.Set("Phase", api.PhaseTypeComplete)
 	filters.Set("Trashed", trashed)
-	// TODO: starred only
-	// TODO: completed only
 	filters.Set("Kind", kind)
 	if *filters != (api.Filters{}) {
 		if filterStr, err := json.Marshal(filters); err == nil {
@@ -1509,9 +1501,6 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		}
 		_, srcDelete := opt["delete-src-file"]
 		return f.decompressDir(ctx, filename, id, password, srcDelete)
-	case "untrash":
-		// TODO: untrash
-		return nil, nil
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}
