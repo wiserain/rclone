@@ -96,7 +96,7 @@ var _ error = (*Error)(nil)
 // possible operators
 // * in: a list of comma-separated string
 // * eq: "true" or "false"
-// * gt or lt: time format string, e.g. "2023-01-28T15:28:45.902+08:00"
+// * gt or lt: time format string, e.g. "2023-01-28T10:56:49.757+08:00"
 type Filters struct {
 	Phase        *map[string]string `json:"phase,omitempty"`         // "in" or "eq"
 	Trashed      *map[string]bool   `json:"trashed,omitempty"`       // "eq"
@@ -146,37 +146,40 @@ type FileList struct {
 }
 
 type File struct {
-	Kind              string      `json:"kind,omitempty"` // "drive#file"
-	Id                string      `json:"id,omitempty"`
-	ParentId          string      `json:"parent_id,omitempty"`
-	Name              string      `json:"name,omitempty"`
-	UserId            string      `json:"user_id,omitempty"`
-	Size              int64       `json:"size,omitempty,string"`
-	Revision          int         `json:"revision,omitempty,string"`
-	FileExtension     string      `json:"file_extension,omitempty"`
-	MimeType          string      `json:"mime_type,omitempty"`
-	Starred           bool        `json:"starred,omitempty"`
-	WebContentLink    string      `json:"web_content_link,omitempty"`
-	CreatedTime       Time        `json:"created_time,omitempty"`
-	ModifiedTime      Time        `json:"modified_time,omitempty"`
-	IconLink          string      `json:"icon_link,omitempty"`
-	ThumbnailLink     string      `json:"thumbnail_link,omitempty"`
-	Md5Checksum       string      `json:"md5_checksum,omitempty"`
-	Hash              string      `json:"hash,omitempty"` // sha1 but NOT a valid file hash.
-	Links             *FileLinks  `json:"links,omitempty"`
-	Phase             string      `json:"phase,omitempty"`
-	Audit             *FileAudit  `json:"audit,omitempty"`
-	Medias            []*Media    `json:"medias,omitempty"`
-	Trashed           bool        `json:"trashed,omitempty"`
-	DeleteTime        Time        `json:"delete_time,omitempty"`
-	OriginalUrl       string      `json:"original_url,omitempty"`
-	Params            *FileParams `json:"params,omitempty"`
-	OriginalFileIndex int         `json:"original_file_index,omitempty"` // TODO
-	Space             string      `json:"space,omitempty"`
-	Apps              []*FileApp  `json:"apps,omitempty"`
-	Writable          bool        `json:"writable,omitempty"`
-	FolderType        string      `json:"folder_type,omitempty"`
-	Collection        string      `json:"collection,omitempty"` // TODO
+	Apps              []*FileApp    `json:"apps,omitempty"`
+	Audit             *FileAudit    `json:"audit,omitempty"`
+	Collection        string        `json:"collection,omitempty"` // TODO
+	CreatedTime       Time          `json:"created_time,omitempty"`
+	DeleteTime        Time          `json:"delete_time,omitempty"`
+	FileExtension     string        `json:"file_extension,omitempty"`
+	FolderType        string        `json:"folder_type,omitempty"`
+	Hash              string        `json:"hash,omitempty"` // sha1 but NOT a valid file hash.
+	IconLink          string        `json:"icon_link,omitempty"`
+	Id                string        `json:"id,omitempty"`
+	Kind              string        `json:"kind,omitempty"` // "drive#file"
+	Links             *FileLinks    `json:"links,omitempty"`
+	Md5Checksum       string        `json:"md5_checksum,omitempty"`
+	Medias            []*Media      `json:"medias,omitempty"`
+	MimeType          string        `json:"mime_type,omitempty"`
+	ModifiedTime      Time          `json:"modified_time,omitempty"`
+	Name              string        `json:"name,omitempty"`
+	OriginalFileIndex int           `json:"original_file_index,omitempty"` // TODO
+	OriginalUrl       string        `json:"original_url,omitempty"`
+	Params            *FileParams   `json:"params,omitempty"`
+	ParentId          string        `json:"parent_id,omitempty"`
+	Phase             string        `json:"phase,omitempty"`
+	Revision          int           `json:"revision,omitempty,string"`
+	Size              int64         `json:"size,omitempty,string"`
+	SortName          string        `json:"sort_name,omitempty"`
+	Space             string        `json:"space,omitempty"`
+	SpellName         []interface{} `json:"spell_name,omitempty"` // TODO maybe list of something?
+	Starred           bool          `json:"starred,omitempty"`
+	ThumbnailLink     string        `json:"thumbnail_link,omitempty"`
+	Trashed           bool          `json:"trashed,omitempty"`
+	UserId            string        `json:"user_id,omitempty"`
+	UserModifiedTime  Time          `json:"user_modified_time,omitempty"`
+	WebContentLink    string        `json:"web_content_link,omitempty"`
+	Writable          bool          `json:"writable,omitempty"`
 }
 
 type FileLinks struct {
