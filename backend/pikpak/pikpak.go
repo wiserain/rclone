@@ -893,23 +893,20 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 
 // CleanUp empties the trash
 func (f *Fs) CleanUp(ctx context.Context) (err error) {
-	var IDs []string
-	_, err = f.listAll(ctx, "*", "", "true", func(item *api.File) bool {
-		IDs = append(IDs, item.Id)
-		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
-		if len(IDs) >= api.ListLimit {
-			if err = f.deleteObjects(ctx, IDs, false); err != nil {
-				return true
-			} else {
-				IDs = nil
-			}
-		}
-		return false
+	opts := rest.Opts{
+		Method:     "PATCH",
+		Path:       "/drive/v1/files/trash:empty",
+		NoResponse: true, // Only returns `{"task_id":""}
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.Call(ctx, &opts)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
-		return fmt.Errorf("couldn't list trashed items: %w", err)
+		return fmt.Errorf("couldn't empty trash: %w", err)
 	}
-	return f.deleteObjects(ctx, IDs, false)
+	return nil
 }
 
 // Move the object
