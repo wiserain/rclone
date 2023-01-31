@@ -1215,29 +1215,29 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 
 	// request upload ticket to API
 	req := api.RequestNewFile{
-		Kind:        api.KindOfFile,
-		Name:        f.opt.Enc.FromStandardName(leaf),
-		Size:        size,
-		Hash:        strings.ToUpper(sha1Str),
-		UploadType:  "UPLOAD_TYPE_RESUMABLE",
-		ObjProvider: &map[string]string{"provider": "UPLOAD_TYPE_UNKNOWN"},
-		ParentId:    parentIdForRequest(dirID),
+		Kind:       api.KindOfFile,
+		Name:       f.opt.Enc.FromStandardName(leaf),
+		Size:       size,
+		Hash:       strings.ToUpper(sha1Str),
+		UploadType: "UPLOAD_TYPE_RESUMABLE",
+		Resumable:  &map[string]string{"provider": "PROVIDER_ALIYUN"},
+		ParentId:   parentIdForRequest(dirID),
 	}
-	resumable, err := f.requestNewFile(ctx, &req)
+	newfile, err := f.requestNewFile(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resumable: %w", err)
+		return nil, fmt.Errorf("failed to create a new file: %w", err)
 	}
-	if resumable.Resumable == nil {
+	if newfile.Resumable == nil {
 		// sometimes api doesn't return Resumable field
-		if resumable.File == nil {
-			return nil, fmt.Errorf("failed to create resumable: %+v", resumable)
+		if newfile.File == nil {
+			return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
 		}
-		if resumable.File.Phase != api.PhaseTypeComplete {
-			return nil, fmt.Errorf("failed to create resumable: %+v", resumable)
+		if newfile.File.Phase != api.PhaseTypeComplete {
+			return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
 		}
-		return resumable.File, nil
+		return newfile.File, nil
 	}
-	r := resumable.Resumable
+	r := newfile.Resumable
 
 	p := r.Params
 	endpointSplit := strings.Split(p.Endpoint, ".")
@@ -1268,7 +1268,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	if err != nil {
 		return nil, err
 	}
-	return resumable.File, nil
+	return newfile.File, nil
 }
 
 // PutUnchecked the object into the container

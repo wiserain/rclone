@@ -398,14 +398,14 @@ type RequestBatch struct {
 // used for creating `drive#folder`
 type RequestNewFile struct {
 	// always required
-	Kind     string `json:"kind,omitempty"` // "drive#folder" or "drive#file"
-	Name     string `json:"name,omitempty"`
-	ParentId string `json:"parent_id,omitempty"`
+	Kind     string `json:"kind"` // "drive#folder" or "drive#file"
+	Name     string `json:"name"`
+	ParentId string `json:"parent_id"`
 	// only when uploading a new file
-	Hash        string             `json:"hash,omitempty"`        // sha1sum
-	ObjProvider *map[string]string `json:"objProvider,omitempty"` // {"provider": "UPLOAD_TYPE_UNKNOWN"}
-	Size        int64              `json:"size,omitempty"`
-	UploadType  string             `json:"upload_type,omitempty"` // "UPLOAD_TYPE_FORM" or "UPLOAD_TYPE_RESUMABLE"
+	Hash       string             `json:"hash,omitempty"`      // sha1sum
+	Resumable  *map[string]string `json:"resumable,omitempty"` // {"provider": "PROVIDER_ALIYUN"}
+	Size       int64              `json:"size,omitempty"`
+	UploadType string             `json:"upload_type,omitempty"` // "UPLOAD_TYPE_FORM" or "UPLOAD_TYPE_RESUMABLE"
 }
 
 // async request for a new task uploading (offline downloading) files by Urls
