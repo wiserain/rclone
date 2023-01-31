@@ -96,21 +96,17 @@ func (f *Fs) requestNewTask(ctx context.Context, req *api.RequestNewTask) (info 
 }
 
 // requestNewFile requests a new api.NewFile and returns api.File
-func (f *Fs) requestNewFile(ctx context.Context, req *api.RequestNewFile) (info *api.File, err error) {
+func (f *Fs) requestNewFile(ctx context.Context, req *api.RequestNewFile) (info *api.NewFile, err error) {
 	opts := rest.Opts{
 		Method: "POST",
 		Path:   "/drive/v1/files",
 	}
-	var newFile api.NewFile
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, &req, &newFile)
+		resp, err = f.srv.CallJSON(ctx, &opts, &req, &info)
 		return f.shouldRetry(ctx, resp, err)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return newFile.File, nil
+	return
 }
 
 // getFile gets api.File from API for the ID passed
@@ -168,20 +164,6 @@ func (f *Fs) requestShare(ctx context.Context, req *api.RequestShare) (info *api
 	opts := rest.Opts{
 		Method: "POST",
 		Path:   "/drive/v1/share",
-	}
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, &req, &info)
-		return f.shouldRetry(ctx, resp, err)
-	})
-	return
-}
-
-// requestNewResumable creates an resumable session for uploading the object
-func (f *Fs) requestNewResumable(ctx context.Context, req *api.RequestNewResumable) (info *api.NewResumable, err error) {
-	opts := rest.Opts{
-		Method: "POST",
-		Path:   "/drive/v1/files",
 	}
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {

@@ -755,7 +755,7 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 	if err != nil {
 		return "", err
 	}
-	return info.Id, nil
+	return info.File.Id, nil
 }
 
 // Mkdir creates the container if it doesn't exist
@@ -1214,16 +1214,16 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	in = wrap(in)
 
 	// request upload ticket to API
-	req := api.RequestNewResumable{
+	req := api.RequestNewFile{
 		Kind:        api.KindOfFile,
 		Name:        f.opt.Enc.FromStandardName(leaf),
 		Size:        size,
 		Hash:        strings.ToUpper(sha1Str),
 		UploadType:  "UPLOAD_TYPE_RESUMABLE",
 		ObjProvider: &map[string]string{"provider": "UPLOAD_TYPE_UNKNOWN"},
-		ParentId:    dirID,
+		ParentId:    parentIdForRequest(dirID),
 	}
-	resumable, err := f.requestNewResumable(ctx, &req)
+	resumable, err := f.requestNewFile(ctx, &req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resumable: %w", err)
 	}

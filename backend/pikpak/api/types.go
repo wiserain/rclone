@@ -315,16 +315,10 @@ type FileInArchive struct {
 // ------------------------------------------------------------
 
 type NewFile struct {
-	UploadType string `json:"upload_type,omitempty"`
-	File       *File  `json:"file,omitempty"`
-	Task       *Task  `json:"task,omitempty"` // null in this case
-}
-
-type NewResumable struct {
-	UploadType string     `json:"upload_type,omitempty"` // "UPLOAD_TYPE_RESUMABLE"
-	Resumable  *Resumable `json:"resumable,omitempty"`
 	File       *File      `json:"file,omitempty"`
-	Task       *Task      `json:"task,omitempty"` // null in this case
+	Resumable  *Resumable `json:"resumable,omitempty"`
+	Task       *Task      `json:"task,omitempty"`        // null in this case
+	UploadType string     `json:"upload_type,omitempty"` // "UPLOAD_TYPE_FORM" or "UPLOAD_TYPE_RESUMABLE"
 }
 
 type NewTask struct {
@@ -403,20 +397,15 @@ type RequestBatch struct {
 
 // used for creating `drive#folder`
 type RequestNewFile struct {
-	Kind     string `json:"kind,omitempty"` // "drive#folder"
+	// always required
+	Kind     string `json:"kind,omitempty"` // "drive#folder" or "drive#file"
 	Name     string `json:"name,omitempty"`
 	ParentId string `json:"parent_id,omitempty"`
-}
-
-// async request for preparing new resumable file upload
-type RequestNewResumable struct {
-	Kind        string             `json:"kind,omitempty"` // "drive#file"
-	Name        string             `json:"name,omitempty"`
-	ParentId    string             `json:"parent_id,omitempty"`
-	UploadType  string             `json:"upload_type,omitempty"` // "UPLOAD_TYPE_RESUMABLE"
-	Size        int64              `json:"size,omitempty"`
+	// only when uploading a new file
 	Hash        string             `json:"hash,omitempty"`        // sha1sum
 	ObjProvider *map[string]string `json:"objProvider,omitempty"` // {"provider": "UPLOAD_TYPE_UNKNOWN"}
+	Size        int64              `json:"size,omitempty"`
+	UploadType  string             `json:"upload_type,omitempty"` // "UPLOAD_TYPE_FORM" or "UPLOAD_TYPE_RESUMABLE"
 }
 
 // async request for a new task uploading (offline downloading) files by Urls
