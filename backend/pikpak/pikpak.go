@@ -627,9 +627,9 @@ func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAl
 
 	// Construct filter string
 	filters := &api.Filters{}
-	filters.Set("Phase", api.PhaseTypeComplete)
-	filters.Set("Trashed", trashed)
-	filters.Set("Kind", kind)
+	filters.Set("Phase", "eq", api.PhaseTypeComplete)
+	filters.Set("Trashed", "eq", trashed)
+	filters.Set("Kind", "eq", kind)
 	if *filters != (api.Filters{}) {
 		if filterStr, err := json.Marshal(filters); err == nil {
 			params.Set("filters", string(filterStr))

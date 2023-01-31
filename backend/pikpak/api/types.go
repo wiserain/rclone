@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -50,6 +49,7 @@ const (
 	PhaseTypeComplete = "PHASE_TYPE_COMPLETE"
 	PhaseTypeRunning  = "PHASE_TYPE_RUNNING"
 	PhaseTypeError    = "PHASE_TYPE_ERROR"
+	PhaseTypePending  = "PHASE_TYPE_PENDING"
 	ListLimit         = 100
 )
 
@@ -91,14 +91,21 @@ var _ error = (*Error)(nil)
 
 // ------------------------------------------------------------
 
+// Filters contains parameters for filters when listing.
+//
+// possible operators
+// * in: a list of comma-separated string
+// * eq: "true" or "false"
+// * gt or lt: time format string, e.g. "2023-01-28T15:28:45.902+08:00"
 type Filters struct {
-	Phase   *map[string]string `json:"phase,omitempty"`
-	Trashed *map[string]bool   `json:"trashed,omitempty"`
-	Kind    *map[string]string `json:"kind,omitempty"`
-	Starred *map[string]bool   `json:"starred,omitempty"`
+	Phase        *map[string]string `json:"phase,omitempty"`         // "in" or "eq"
+	Trashed      *map[string]bool   `json:"trashed,omitempty"`       // "eq"
+	Kind         *map[string]string `json:"kind,omitempty"`          // "eq"
+	Starred      *map[string]bool   `json:"starred,omitempty"`       // "eq"
+	ModifiedTime *map[string]string `json:"modified_time,omitempty"` // "gt" or "lt"
 }
 
-func (f *Filters) Set(field, value string) {
+func (f *Filters) Set(field, operator, value string) {
 	if value == "" {
 		// UNSET for empty values
 		return
@@ -106,13 +113,9 @@ func (f *Filters) Set(field, value string) {
 	r := reflect.ValueOf(f)
 	fd := reflect.Indirect(r).FieldByName(field)
 	if v, err := strconv.ParseBool(value); err == nil {
-		fd.Set(reflect.ValueOf(&map[string]bool{"eq": v}))
+		fd.Set(reflect.ValueOf(&map[string]bool{operator: v}))
 	} else {
-		if len(strings.Split(value, ",")) > 1 {
-			fd.Set(reflect.ValueOf(&map[string]string{"in": value}))
-		} else {
-			fd.Set(reflect.ValueOf(&map[string]string{"eq": value}))
-		}
+		fd.Set(reflect.ValueOf(&map[string]string{operator: value}))
 	}
 }
 
