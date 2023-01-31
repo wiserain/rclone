@@ -1224,15 +1224,15 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new file: %w", err)
 	}
+	if newfile.File != nil {
+		if newfile.File.Phase == api.PhaseTypeComplete {
+			// handling of zero-sized objects
+			return newfile.File, nil
+		}
+	}
 	if newfile.Resumable == nil {
 		// sometimes api doesn't return Resumable field
-		if newfile.File == nil {
-			return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
-		}
-		if newfile.File.Phase != api.PhaseTypeComplete {
-			return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
-		}
-		return newfile.File, nil
+		return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
 	}
 	r := newfile.Resumable
 
