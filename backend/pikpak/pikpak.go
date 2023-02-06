@@ -1656,9 +1656,6 @@ func (o *Object) httpResponse(ctx context.Context, url, method string, options [
 	}
 	fs.FixRangeOption(options, o.size)
 	fs.OpenOptionAddHTTPHeaders(req.Header, options)
-	if o.link.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+o.link.Token)
-	}
 	if o.size == 0 {
 		// Don't supply range requests for 0 length objects as they always fail
 		delete(req.Header, "Range")

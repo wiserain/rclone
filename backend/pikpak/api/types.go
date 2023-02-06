@@ -145,6 +145,12 @@ type FileList struct {
 	VersionOutdated bool    `json:"version_outdated,omitempty"`
 }
 
+// There are two types of download links,
+// 1) one from api.WebContentLink or api.Links.ApplicationOctetStream.Url and
+// 2) the other from api.Medias[].Link.Url.
+// Empirically, 2) is less restrictive to multiple concurrent range-requests
+// for a single file, i.e. supports for higher `--multi-thread-streams=N`.
+// However, it is not generally applicable as it is only for meadia.
 type File struct {
 	Apps              []*FileApp    `json:"apps,omitempty"`
 	Audit             *FileAudit    `json:"audit,omitempty"`
