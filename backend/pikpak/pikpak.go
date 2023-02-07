@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -215,7 +216,7 @@ type Options struct {
 	UseTrash            bool                 `config:"use_trash"`
 	TrashedOnly         bool                 `config:"trashed_only"`
 	StarredOnly         bool                 `config:"starred_only"`
-	HashMemoryThreshold fs.SizeSuffix        `config:"md5_memory_limit"`
+	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -1194,6 +1195,68 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 	return nil
 }
 
+func (f *Fs) uploadByForm(ctx context.Context, in io.Reader, name string, size int64, form *api.Form, options ...fs.OpenOption) (err error) {
+	// struct to map. transferring values from MultParts to url parameter
+	params := url.Values{}
+	iVal := reflect.ValueOf(&form.MultiParts).Elem()
+	iTyp := iVal.Type()
+	for i := 0; i < iVal.NumField(); i++ {
+		params.Set(iTyp.Field(i).Tag.Get("json"), iVal.Field(i).String())
+	}
+	formReader, contentType, overhead, err := rest.MultipartUpload(ctx, in, params, "file", name)
+	if err != nil {
+		return fmt.Errorf("failed to make multipart upload: %w", err)
+	}
+
+	contentLength := overhead + size
+	opts := rest.Opts{
+		Method:           form.Method,
+		RootURL:          form.Url,
+		Body:             formReader,
+		ContentType:      contentType,
+		ContentLength:    &contentLength,
+		Options:          options,
+		TransferEncoding: []string{"identity"},
+		NoResponse:       true,
+	}
+
+	var resp *http.Response
+	err = f.pacer.CallNoRetry(func() (bool, error) {
+		resp, err = f.srv.Call(ctx, &opts)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
+}
+
+func (f *Fs) uploadByResumable(ctx context.Context, in io.Reader, resumable *api.Resumable, options ...fs.OpenOption) (err error) {
+	p := resumable.Params
+	endpoint := strings.Join(strings.Split(p.Endpoint, ".")[1:], ".") // "mypikpak.com"
+
+	cfg := &aws.Config{
+		Credentials: credentials.NewStaticCredentials(p.AccessKeyId, p.AccessKeySecret, p.SecurityToken),
+		Region:      aws.String("pikpak"),
+		Endpoint:    &endpoint,
+	}
+	sess, err := session.NewSession(cfg)
+	if err != nil {
+		return
+	}
+
+	uploader := s3manager.NewUploader(sess)
+	// Upload input parameters
+	uParams := &s3manager.UploadInput{
+		Bucket: &p.Bucket,
+		Key:    &p.Key,
+		Body:   in,
+	}
+	// Perform upload with options different than the those in the Uploader.
+	_, err = uploader.UploadWithContext(ctx, uParams, func(u *s3manager.Uploader) {
+		// TODO can be user-configurable
+		u.PartSize = 10 * 1024 * 1024 // 10MB part size
+	})
+	return
+}
+
 func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size int64, options ...fs.OpenOption) (*api.File, error) {
 	// Calculate sha1sum; grabbed from package jottacloud
 	//
@@ -1210,62 +1273,48 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	// Wrap the accounting back onto the stream
 	in = wrap(in)
 
+	// determine upload type
+	uploadType := api.UploadTypeResumable
+	if size >= 0 && size < int64(5*fs.Mebi) {
+		uploadType = api.UploadTypeForm
+	}
+
 	// request upload ticket to API
 	req := api.RequestNewFile{
 		Kind:       api.KindOfFile,
 		Name:       f.opt.Enc.FromStandardName(leaf),
+		ParentId:   parentIdForRequest(dirID),
 		Size:       size,
 		Hash:       strings.ToUpper(sha1Str),
-		UploadType: "UPLOAD_TYPE_RESUMABLE",
-		Resumable:  &map[string]string{"provider": "PROVIDER_ALIYUN"},
-		ParentId:   parentIdForRequest(dirID),
+		UploadType: uploadType,
+	}
+	if uploadType == api.UploadTypeResumable {
+		req.Resumable = &map[string]string{"provider": "PROVIDER_ALIYUN"}
 	}
 	newfile, err := f.requestNewFile(ctx, &req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new file: %w", err)
 	}
-	if newfile.File != nil {
-		if newfile.File.Phase == api.PhaseTypeComplete {
-			// handling of zero-sized objects
-			return newfile.File, nil
-		}
+	if newfile.File == nil {
+		return nil, fmt.Errorf("invalid response: %+v", newfile)
+	} else if newfile.File.Phase == api.PhaseTypeComplete {
+		// early return; in case of zero-length objects
+		return newfile.File, nil
 	}
-	if newfile.Resumable == nil {
-		// sometimes api doesn't return Resumable field
-		return nil, fmt.Errorf("failed to create resumable: %+v", newfile)
-	}
-	r := newfile.Resumable
 
-	p := r.Params
-	endpointSplit := strings.Split(p.Endpoint, ".")
-	endpoint := strings.Join(endpointSplit[1:], ".")
-
-	cfg := &aws.Config{
-		Credentials: credentials.NewStaticCredentials(p.AccessKeyId, p.AccessKeySecret, p.SecurityToken),
-		Region:      aws.String("pikpak"),
-		Endpoint:    &endpoint,
+	if uploadType == api.UploadTypeForm && newfile.Form != nil {
+		err = f.uploadByForm(ctx, in, req.Name, size, newfile.Form, options...)
+	} else if uploadType == api.UploadTypeResumable && newfile.Resumable != nil {
+		err = f.uploadByResumable(ctx, in, newfile.Resumable, options...)
+	} else {
+		return nil, fmt.Errorf("unable to proceed upload: %+v", newfile)
 	}
-	sess, err := session.NewSession(cfg)
+
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to upload: %w", err)
 	}
-
-	uploader := s3manager.NewUploader(sess)
-	// Upload input parameters
-	uParams := &s3manager.UploadInput{
-		Bucket: &p.Bucket,
-		Key:    &p.Key,
-		Body:   in,
-	}
-	// Perform upload with options different than the those in the Uploader.
-	_, err = uploader.UploadWithContext(ctx, uParams, func(u *s3manager.Uploader) {
-		// TODO can be user-configurable
-		u.PartSize = 10 * 1024 * 1024 // 10MB part size
-	})
-	if err != nil {
-		return nil, err
-	}
-	return newfile.File, nil
+	// refresh uploaded file info
+	return f.getFile(ctx, newfile.File.Id)
 }
 
 // PutUnchecked the object into the container

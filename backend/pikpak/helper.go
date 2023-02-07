@@ -123,6 +123,10 @@ func (f *Fs) getFile(ctx context.Context, ID string) (info *api.File, err error)
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		if err == nil && info.Phase != api.PhaseTypeComplete {
+			// could be pending right after file is created/uploaded.
+			return true, nil
+		}
 		return f.shouldRetry(ctx, resp, err)
 	})
 	return

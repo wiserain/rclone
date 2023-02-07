@@ -39,18 +39,21 @@ func (t *Time) UnmarshalJSON(data []byte) error {
 
 // Types of things in Item
 const (
-	KindOfFolder      = "drive#folder"
-	KindOfFile        = "drive#file"
-	KindOfFileList    = "drive#fileList"
-	KindOfResumable   = "drive#resumable"
-	ThumbnailSizeS    = "SIZE_SMALL"
-	ThumbnailSizeM    = "SIZE_MEDIUM"
-	ThumbnailSizeL    = "SIZE_LARGE"
-	PhaseTypeComplete = "PHASE_TYPE_COMPLETE"
-	PhaseTypeRunning  = "PHASE_TYPE_RUNNING"
-	PhaseTypeError    = "PHASE_TYPE_ERROR"
-	PhaseTypePending  = "PHASE_TYPE_PENDING"
-	ListLimit         = 200
+	KindOfFolder        = "drive#folder"
+	KindOfFile          = "drive#file"
+	KindOfFileList      = "drive#fileList"
+	KindOfResumable     = "drive#resumable"
+	KindOfForm          = "drive#form"
+	ThumbnailSizeS      = "SIZE_SMALL"
+	ThumbnailSizeM      = "SIZE_MEDIUM"
+	ThumbnailSizeL      = "SIZE_LARGE"
+	PhaseTypeComplete   = "PHASE_TYPE_COMPLETE"
+	PhaseTypeRunning    = "PHASE_TYPE_RUNNING"
+	PhaseTypeError      = "PHASE_TYPE_ERROR"
+	PhaseTypePending    = "PHASE_TYPE_PENDING"
+	UploadTypeForm      = "UPLOAD_TYPE_FORM"
+	UploadTypeResumable = "UPLOAD_TYPE_RESUMABLE"
+	ListLimit           = 200
 )
 
 // ------------------------------------------------------------
@@ -157,9 +160,10 @@ type File struct {
 	Collection        string        `json:"collection,omitempty"` // TODO
 	CreatedTime       Time          `json:"created_time,omitempty"`
 	DeleteTime        Time          `json:"delete_time,omitempty"`
+	FileCategory      string        `json:"file_category,omitempty"`
 	FileExtension     string        `json:"file_extension,omitempty"`
 	FolderType        string        `json:"folder_type,omitempty"`
-	Hash              string        `json:"hash,omitempty"` // sha1 but NOT a valid file hash.
+	Hash              string        `json:"hash,omitempty"` // sha1 but NOT a valid file hash. looks like a torrent hash
 	IconLink          string        `json:"icon_link,omitempty"`
 	Id                string        `json:"id,omitempty"`
 	Kind              string        `json:"kind,omitempty"` // "drive#file"
@@ -167,7 +171,7 @@ type File struct {
 	Md5Checksum       string        `json:"md5_checksum,omitempty"`
 	Medias            []*Media      `json:"medias,omitempty"`
 	MimeType          string        `json:"mime_type,omitempty"`
-	ModifiedTime      Time          `json:"modified_time,omitempty"`
+	ModifiedTime      Time          `json:"modified_time,omitempty"` // updated when renamed or moved
 	Name              string        `json:"name,omitempty"`
 	OriginalFileIndex int           `json:"original_file_index,omitempty"` // TODO
 	OriginalUrl       string        `json:"original_url,omitempty"`
@@ -291,6 +295,21 @@ type TaskParams struct {
 	Url          string `json:"url,omitempty"`
 }
 
+type Form struct {
+	Headers    struct{} `json:"headers"`
+	Kind       string   `json:"kind"`   // "drive#form"
+	Method     string   `json:"method"` // "POST"
+	MultiParts struct {
+		OSSAccessKeyId string `json:"OSSAccessKeyId"`
+		Signature      string `json:"Signature"`
+		Callback       string `json:"callback"`
+		Key            string `json:"key"`
+		Policy         string `json:"policy"`
+		XUserData      string `json:"x:user_data"`
+	} `json:"multi_parts"`
+	Url string `json:"url"`
+}
+
 type Resumable struct {
 	Kind     string           `json:"kind,omitempty"`     // "drive#resumable"
 	Provider string           `json:"provider,omitempty"` // e.g. "PROVIDER_ALIYUN"
@@ -322,6 +341,7 @@ type FileInArchive struct {
 
 type NewFile struct {
 	File       *File      `json:"file,omitempty"`
+	Form       *Form      `json:"form,omitempty"`
 	Resumable  *Resumable `json:"resumable,omitempty"`
 	Task       *Task      `json:"task,omitempty"`        // null in this case
 	UploadType string     `json:"upload_type,omitempty"` // "UPLOAD_TYPE_FORM" or "UPLOAD_TYPE_RESUMABLE"
