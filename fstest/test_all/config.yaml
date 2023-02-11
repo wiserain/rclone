@@ -305,14 +305,15 @@ backends:
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false
+   oneonly:  true
    ignore:
     #  fs/operations
      - TestHashSums/Md5
-     - TestCopyFileMaxTransfer
+  #    - TestCopyFileMaxTransfer
     #  fs/sync
      - TestSyncWithTrackRenames
-    #  backend
-     - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
+  #   #  backend
+  #    - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:

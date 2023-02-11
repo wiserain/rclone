@@ -5,16 +5,10 @@ package pikpak
 // NOTE
 // ------------------------------------------------------------
 
-// PikPak doesn't allow multipart copy.
-// Thus,`--multi-thread-streams=1` is forced for a temporary workaround.
-
 // md5sum is not always available, sometimes given empty.
 
 // Size and/or Md5Checksum from api.File are sometimes incorrect.
 // In such rare cases, it might need `--ignore-checksum` and/or `--ignore-size`.
-
-// There are some cases with no downloadUrl/md5sum for Open().
-// e.g. 0byte or very small size(<100byte) of files
 
 // Trashed files are not restored to the original location when using `batchUntrash`
 
@@ -25,10 +19,10 @@ package pikpak
 // TODO
 // ------------------------------------------------------------
 
-// * List() with options starred-only and completed-only
+// * List() with options starred-only
 // * PublicLink() with more user-configurable options
-// * upload() with configurable chunk-size
-// * backend command: untrash
+// * uploadByResumable() with configurable chunk-size
+// * backend command: untrash, iscached
 // * api(event,task)
 
 import (
@@ -247,7 +241,6 @@ type Object struct {
 	md5sum      string    // md5sum of the object
 	hasMetaData bool      // whether info below has been set
 	link        *api.Link // download links
-	linkMu      *sync.Mutex
 }
 
 // ------------------------------------------------------------
@@ -444,11 +437,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		return nil, fmt.Errorf("pikpak: failed when making oauth client: %w", err)
 	}
 
-	ci := fs.GetConfig(ctx)
-	// multipart copy doesn't seem to be allowed.
-	// temporary workaround by forcing `--multi-thread-streams=1`
-	ci.MultiThreadStreams = 1
-
 	f := &Fs{
 		name:    name,
 		root:    root,
@@ -567,7 +555,6 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	o := &Object{
 		fs:     f,
 		remote: remote,
-		linkMu: new(sync.Mutex),
 	}
 	var err error
 	if info != nil {
@@ -995,7 +982,6 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		remote:  remote,
 		size:    size,
 		modTime: modTime,
-		linkMu:  new(sync.Mutex),
 	}
 	return o, leaf, dirID, nil
 }
@@ -1298,7 +1284,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 	if newfile.File == nil {
 		return nil, fmt.Errorf("invalid response: %+v", newfile)
 	} else if newfile.File.Phase == api.PhaseTypeComplete {
-		// early return; in case of zero-length objects
+		// early return; in case of zero-byte objects
 		return newfile.File, nil
 	}
 
@@ -1593,27 +1579,6 @@ func (o *Object) readMetaData(ctx context.Context) (err error) {
 	return o.setMetaData(info)
 }
 
-// setMetaDataWithLink sets links containing download url for Open()
-func (o *Object) setMetaDataWithLink(ctx context.Context) error {
-	o.linkMu.Lock()
-	defer o.linkMu.Unlock()
-
-	if o.link != nil {
-		url := o.link.Url
-		expiry := time.Time(o.link.Expire)
-		if url != "" && time.Now().Before(expiry) {
-			return nil
-		}
-	}
-
-	// fetch from server
-	info, err := o.fs.getFile(ctx, o.id)
-	if err != nil {
-		return err
-	}
-	return o.setMetaData(info)
-}
-
 // Fs returns the parent Fs
 func (o *Object) Fs() fs.Info {
 	return o.fs
@@ -1733,12 +1698,16 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if o.id == "" {
 		return nil, errors.New("can't download - no id")
 	}
-	if err = o.setMetaDataWithLink(ctx); err != nil {
+	info, err := o.fs.getFile(ctx, o.id)
+	if err != nil {
+		return nil, fmt.Errorf("can't fetch download link: %w", err)
+	}
+	if err = o.setMetaData(info); err != nil {
 		return nil, err
 	}
 	if o.link == nil {
 		if o.size == 0 {
-			// zero-sized object may have no download link
+			// zero-byte objects may have no download link
 			return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 		}
 		return nil, errors.New("can't download - no link to download")
