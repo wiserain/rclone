@@ -1011,17 +1011,12 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		}
 	} else {
 		// Update info
-		info, err = f.getFile(ctx, srcObj.id)
+		info, err = f.getFile(ctx, dstObj.id)
 		if err != nil {
 			return nil, fmt.Errorf("move: couldn't update moved file: %w", err)
 		}
 	}
-
-	err = dstObj.setMetaData(info)
-	if err != nil {
-		return nil, err
-	}
-	return dstObj, nil
+	return dstObj, dstObj.setMetaData(info)
 }
 
 // copy objects
@@ -1060,17 +1055,17 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 
 	// Create temporary object
-	dstObj, dstLeaf, dirID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
-	if srcObj.parent == dirID {
+	if srcObj.parent == dstParentID {
 		// api restriction
 		fs.Debugf(src, "Can't copy - same parent")
 		return nil, fs.ErrorCantCopy
 	}
 	// Copy the object
-	if err := f.copyObjects(ctx, []string{srcObj.id}, dirID); err != nil {
+	if err := f.copyObjects(ctx, []string{srcObj.id}, dstParentID); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
 	}
 
@@ -1081,24 +1076,22 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	var info *api.File
 	if srcLeaf != dstLeaf {
 		// Rename
-		info, err = f.renameObject(ctx, dstObj.id, dstLeaf)
+		info, err := f.renameObject(ctx, dstObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
+		err = dstObj.setMetaData(info)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		// Update info
-		info, err = f.getFile(ctx, srcObj.id)
+		err = dstObj.readMetaData(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("copy: couldn't update copied file: %w", err)
+			return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
 		}
-	}
-
-	err = dstObj.setMetaData(info)
-	if err != nil {
-		return nil, err
 	}
 	return dstObj, nil
 }
