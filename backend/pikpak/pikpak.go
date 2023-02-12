@@ -15,6 +15,8 @@ package pikpak
 // Even after emptied trash, files are still visible with `--pikpak-trashed-only`.
 // This goes away after few days.
 
+// Can't stream without `--vfs-cache-mode=full`
+
 // ------------------------------------------------------------
 // TODO
 // ------------------------------------------------------------
@@ -22,6 +24,8 @@ package pikpak
 // * List() with options starred-only
 // * PublicLink() with more user-configurable options
 // * uploadByResumable() with configurable chunk-size
+// * user-configurable list chunk
+// * Prefer api.Medias[].Link.Url for opening media
 // * backend command: untrash, iscached
 // * api(event,task)
 
@@ -368,7 +372,13 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (b
 	case *api.Error:
 		if apiErr.Reason == "file_rename_uncompleted" {
 			// "file_rename_uncompleted" (9): Renaming uncompleted file or folder is not supported
-			// This error occurs when you attempt to rename objects right after some server-side changes.
+			// This error occurs when you attempt to rename objects
+			// right after some server-side changes, e.g. DirMove, Move, Copy
+			return true, nil
+		} else if apiErr.Reason == "file_duplicated_name" {
+			// "file_duplicated_name" (3): File name cannot be repeated
+			// This error may occur when attempting to rename temp object (newly uploaded)
+			// right after the old one is removed.
 			return true, nil
 		} else if apiErr.Reason == "task_daily_create_limit_vip" {
 			// "task_daily_create_limit_vip" (11): Sorry, you have submitted too many tasks and have exceeded the current processing capacity, please try again tomorrow
@@ -1704,12 +1714,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if err = o.Remove(ctx); err != nil {
 		return fmt.Errorf("failed to remove old object: %w", err)
 	}
-	if err = o.setMetaData(info); err != nil {
-		return err
-	}
 
 	// rename also updates metadata
-	if info, err = o.fs.renameObject(ctx, o.id, leaf); err != nil {
+	if info, err = o.fs.renameObject(ctx, info.Id, leaf); err != nil {
 		return fmt.Errorf("failed to rename temp object: %w", err)
 	}
 	return o.setMetaData(info)
