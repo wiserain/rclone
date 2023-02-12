@@ -309,11 +309,8 @@ backends:
    ignore:
     #  fs/operations
      - TestHashSums/Md5
-  #    - TestCopyFileMaxTransfer
     #  fs/sync
      - TestSyncWithTrackRenames
-  #   #  backend
-  #    - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:

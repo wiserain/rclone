@@ -7,13 +7,9 @@ package pikpak
 
 // md5sum is not always available, sometimes given empty.
 
-// Size and/or Md5Checksum from api.File are sometimes incorrect.
-// In such rare cases, it might need `--ignore-checksum` and/or `--ignore-size`.
+// sha1sum used for upload differs from the one with official apps.
 
 // Trashed files are not restored to the original location when using `batchUntrash`
-
-// Even after emptied trash, files are still visible with `--pikpak-trashed-only`.
-// This goes away after few days.
 
 // Can't stream without `--vfs-cache-mode=full`
 
@@ -1466,6 +1462,14 @@ An optional argument 'filename' can be specified for a file located in
 'pikpak:dirpath'. You may want to pass '-o password=password' for a 
 password-protected files. Also, pass '-o delete-src-file' to delete 
 source files after decompression finished.
+
+Result:
+
+    {
+        "Decompressed": 17,
+        "SourceDeleted": 0,
+        "Errors": 0
+    }
 `,
 }}
 

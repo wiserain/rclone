@@ -44,7 +44,7 @@ Here is an overview of the major features of each cloud storage system.
 | OpenStack Swift              | MD5              | R/W     | No               | No              | R/W       | -        |
 | Oracle Object Storage        | MD5              | R/W     | No               | No              | R/W       | -        |
 | pCloud                       | MD5, SHA1 ⁷      | R       | No               | No              | W         | -        |
-| PikPak                       | MD5 ¹³           | R       | No               | No              | R         | -        |
+| PikPak                       | MD5              | R       | No               | No              | R         | -        |
 | premiumize.me                | -                | -       | Yes              | No              | R         | -        |
 | put.io                       | CRC-32           | R/W     | No               | Yes             | R         | -        |
 | QingStor                     | MD5              | - ⁹     | No               | No              | R/W       | -        |
@@ -100,8 +100,6 @@ for full modtime support.
 hash](https://static.hidrive.com/dev/0001).
 It combines SHA1 sums for each 4 KiB block hierarchically to a single
 top-level sum.
-
-¹³ PikPak supports MD5 but it is occasionally given empty.
 
 ### Hash ###
 
