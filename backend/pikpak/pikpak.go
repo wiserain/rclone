@@ -606,7 +606,7 @@ func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAl
 			params.Set("filters", string(filterStr))
 		}
 	}
-	fs.Debugf(f, "list params: %v", params)
+	// fs.Debugf(f, "list params: %v", params)
 
 	opts := rest.Opts{
 		Method:     "GET",
@@ -683,7 +683,7 @@ func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) 
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
-	fs.Debugf(f, "List(%q)\n", dir)
+	// fs.Debugf(f, "List(%q)\n", dir)
 	dirID, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return nil, err
@@ -716,7 +716,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	fs.Debugf(f, "CreateDir(%q, %q)\n", pathID, leaf)
+	// fs.Debugf(f, "CreateDir(%q, %q)\n", pathID, leaf)
 	req := api.RequestNewFile{
 		Name:     f.opt.Enc.FromStandardName(leaf),
 		Kind:     api.KindOfFolder,
