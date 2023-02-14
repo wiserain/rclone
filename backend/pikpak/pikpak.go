@@ -1246,6 +1246,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 		Kind:       api.KindOfFile,
 		Name:       f.opt.Enc.FromStandardName(leaf),
 		ParentId:   parentIdForRequest(dirID),
+		FolderType: "NORMAL",
 		Size:       size,
 		Hash:       strings.ToUpper(sha1Str),
 		UploadType: uploadType,

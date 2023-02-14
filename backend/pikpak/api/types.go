@@ -424,9 +424,10 @@ type RequestBatch struct {
 // used for creating `drive#folder`
 type RequestNewFile struct {
 	// always required
-	Kind     string `json:"kind"` // "drive#folder" or "drive#file"
-	Name     string `json:"name"`
-	ParentId string `json:"parent_id"`
+	Kind       string `json:"kind"` // "drive#folder" or "drive#file"
+	Name       string `json:"name"`
+	ParentId   string `json:"parent_id"`
+	FolderType string `json:"folder_type"`
 	// only when uploading a new file
 	Hash       string             `json:"hash,omitempty"`      // sha1sum
 	Resumable  *map[string]string `json:"resumable,omitempty"` // {"provider": "PROVIDER_ALIYUN"}
