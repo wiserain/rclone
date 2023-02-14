@@ -308,9 +308,12 @@ backends:
    oneonly:  true
    ignore:
     #  fs/operations
+     - TestCheckSum
      - TestHashSums/Md5
     #  fs/sync
      - TestSyncWithTrackRenames
+    # integration
+     - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:

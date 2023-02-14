@@ -318,4 +318,4 @@ PikPak supports MD5 hash, but sometimes given empty especially for user-uploaded
 
 ### Deleted files ###
 
-Deleted files will be still visible with `--pikpak-trashed-only` even after trash emptied. This goes away after few days.
+Deleted files will still be visible with `--pikpak-trashed-only` even after the trash emptied. This goes away after few days.
