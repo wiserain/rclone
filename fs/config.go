@@ -71,6 +71,7 @@ type ConfigInfo struct {
 	InsecureSkipVerify      bool // Skip server certificate verification
 	DeleteMode              DeleteMode
 	MaxDelete               int64
+	MaxDeleteSize           SizeSuffix
 	TrackRenames            bool   // Track file renames.
 	TrackRenamesStrategy    string // Comma separated list of strategies used to track renames
 	LowLevelRetries         int
@@ -120,9 +121,9 @@ type ConfigInfo struct {
 	ProgressTerminalTitle   bool
 	Cookie                  bool
 	UseMmap                 bool
-	CaCert                  string // Client Side CA
-	ClientCert              string // Client Side Cert
-	ClientKey               string // Client Side Key
+	CaCert                  []string // Client Side CA
+	ClientCert              string   // Client Side Cert
+	ClientKey               string   // Client Side Key
 	MultiThreadCutoff       SizeSuffix
 	MultiThreadStreams      int
 	MultiThreadSet          bool   // whether MultiThreadStreams was set (set in fs/config/configflags)
@@ -162,6 +163,7 @@ func NewConfig() *ConfigInfo {
 	c.ExpectContinueTimeout = 1 * time.Second
 	c.DeleteMode = DeleteModeDefault
 	c.MaxDelete = -1
+	c.MaxDeleteSize = SizeSuffix(-1)
 	c.LowLevelRetries = 10
 	c.MaxDepth = -1
 	c.DataRateUnit = "bytes"

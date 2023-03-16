@@ -10,7 +10,7 @@ This file describes how to make the various kinds of releases
 ## Making a release
 
   * git checkout master # see below for stable branch
-  * git pull
+  * git pull # IMPORTANT
   * git status - make sure everything is checked in
   * Check GitHub actions build for master is Green
   * make test # see integration test server or run locally
@@ -21,6 +21,7 @@ This file describes how to make the various kinds of releases
   * git status - to check for new man pages - git add them
   * git commit -a -v -m "Version v1.XX.0"
   * make retag
+  * git push origin # without --follow-tags so it doesn't push the tag if it fails
   * git push --follow-tags origin
   * # Wait for the GitHub builds to complete then...
   * make fetch_binaries
@@ -74,8 +75,7 @@ Set vars
 First make the release branch.  If this is a second point release then
 this will be done already.
 
-  * git branch ${BASE_TAG} ${BASE_TAG}-stable
-  * git co ${BASE_TAG}-stable
+  * git co -b ${BASE_TAG}-stable ${BASE_TAG}.0
   * make startstable
 
 Now

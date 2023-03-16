@@ -673,3 +673,25 @@ put them back in again.` >}}
   * vanplus <60313789+vanplus@users.noreply.github.com>
   * Jack <16779171+jkpe@users.noreply.github.com>
   * Abdullah Saglam <abdullah.saglam@stonebranch.com>
+  * Marks Polakovs <github@markspolakovs.me>
+  * piyushgarg <piyushgarg80@gmail.com>
+  * Kaloyan Raev <kaloyan-raev@users.noreply.github.com>
+  * IMTheNachoMan <imthenachoman@gmail.com>
+  * alankrit <alankrit@google.com>
+  * Bryan Kaplan <#@bryankaplan.com>
+  * LXY <767763591@qq.com>
+  * Simmon Li (he/him) <li.simmon@gmail.com>
+  * happyxhw <44490504+happyxhw@users.noreply.github.com>
+  * Simmon Li (he/him) <hello@crespire.dev>
+  * Matthias Baur <baurmatt@users.noreply.github.com>
+  * Hunter Wittenborn <hunter@hunterwittenborn.com>
+  * logopk <peter@kreuser.name>
+  * Gerard Bosch <30733556+gerardbosch@users.noreply.github.com>
+  * ToBeFree <github@tfrei.de>
+  * NodudeWasTaken <75137537+NodudeWasTaken@users.noreply.github.com>
+  * Peter Brunner <peter@lugoues.net>
+  * Ninh Pham <dongian.rapclubkhtn@gmail.com>
+  * Ryan Caezar Itang <sitiom@proton.me>
+  * Peter Brunner <peter@psykhe.com>
+  * Leandro Sacchet <leandro.sacchet@animati.com.br>
+  * dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>

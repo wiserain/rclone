@@ -501,7 +501,11 @@ If downloading a file returns the error "This file has been identified
 as malware or spam and cannot be downloaded" with the error code
 "cannotDownloadAbusiveFile" then supply this flag to rclone to
 indicate you acknowledge the risks of downloading the file and rclone
-will download it anyway.`,
+will download it anyway.
+
+Note that if you are using service account it will need Manager
+permission (not Content Manager) to for this flag to work. If the SA
+does not have the right permission, Google will just ignore the flag.`,
 			Advanced: true,
 		}, {
 			Name:     "keep_revision_forever",
@@ -828,7 +832,7 @@ func (f *Fs) shouldRetry(ctx context.Context, err error) (bool, error) {
 			} else if f.opt.StopOnDownloadLimit && reason == "downloadQuotaExceeded" {
 				fs.Errorf(f, "Received download limit error: %v", err)
 				return false, fserrors.FatalError(err)
-			} else if f.opt.StopOnUploadLimit && reason == "quotaExceeded" {
+			} else if f.opt.StopOnUploadLimit && (reason == "quotaExceeded" || reason == "storageQuotaExceeded") {
 				fs.Errorf(f, "Received upload limit error: %v", err)
 				return false, fserrors.FatalError(err)
 			} else if f.opt.StopOnUploadLimit && reason == "teamDriveFileLimitExceeded" {
@@ -3499,9 +3503,9 @@ This takes an optional directory to trash which make this easier to
 use via the API.
 
     rclone backend untrash drive:directory
-    rclone backend -i untrash drive:directory subdir
+    rclone backend --interactive untrash drive:directory subdir
 
-Use the -i flag to see what would be restored before restoring it.
+Use the --interactive/-i or --dry-run flag to see what would be restored before restoring it.
 
 Result:
 
@@ -3573,7 +3577,7 @@ component will be used as the file name.
 If the destination is a drive backend then server-side copying will be
 attempted if possible.
 
-Use the -i flag to see what would be copied before copying.
+Use the --interactive/-i or --dry-run flag to see what would be copied before copying.
 `,
 }, {
 	Name:  "exportformats",

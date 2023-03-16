@@ -4,32 +4,6 @@
 // Package azureblob provides an interface to the Microsoft Azure blob object storage system
 package azureblob
 
-/* FIXME
-
-Note these Azure SDK bugs which are affecting the backend
-
-azblob UploadStream produces panic: send on closed channel if input stream has error #19612
-https://github.com/Azure/azure-sdk-for-go/issues/19612
-   - FIXED by re-implementing UploadStream
-
-azblob: when using SharedKey credentials, can't reference some blob names with ? in #19613
-https://github.com/Azure/azure-sdk-for-go/issues/19613
-   - FIXED by url encoding getBlobSVC and getBlockBlobSVC
-
-Azure Blob Storage paths are not URL-escaped #19475
-https://github.com/Azure/azure-sdk-for-go/issues/19475
-   - FIXED by url encoding getBlobSVC and getBlockBlobSVC
-
-Controlling TransferManager #19579
-https://github.com/Azure/azure-sdk-for-go/issues/19579
-   - FIXED by re-implementing UploadStream
-
-azblob: blob.StartCopyFromURL doesn't work with UTF-8 characters in the source blob #19614
-https://github.com/Azure/azure-sdk-for-go/issues/19614
-   - FIXED by url encoding getBlobSVC and getBlockBlobSVC
-
-*/
-
 import (
 	"bytes"
 	"context"
@@ -959,18 +933,12 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 // getBlobSVC creates a blob client
 func (f *Fs) getBlobSVC(container, containerPath string) *blob.Client {
-	// FIXME the urlEncode here is a workaround for
-	// https://github.com/Azure/azure-sdk-for-go/issues/19613
-	// https://github.com/Azure/azure-sdk-for-go/issues/19475
-	return f.cntSVC(container).NewBlobClient(urlEncode(containerPath))
+	return f.cntSVC(container).NewBlobClient(containerPath)
 }
 
 // getBlockBlobSVC creates a block blob client
 func (f *Fs) getBlockBlobSVC(container, containerPath string) *blockblob.Client {
-	// FIXME the urlEncode here is a workaround for
-	// https://github.com/Azure/azure-sdk-for-go/issues/19613
-	// https://github.com/Azure/azure-sdk-for-go/issues/19475
-	return f.cntSVC(container).NewBlockBlobClient(urlEncode(containerPath))
+	return f.cntSVC(container).NewBlockBlobClient(containerPath)
 }
 
 // updateMetadataWithModTime adds the modTime passed in to o.meta.
@@ -985,7 +953,7 @@ func (o *Object) updateMetadataWithModTime(modTime time.Time) {
 }
 
 // Returns whether file is a directory marker or not
-func isDirectoryMarker(size int64, metadata map[string]string, remote string) bool {
+func isDirectoryMarker(size int64, metadata map[string]*string, remote string) bool {
 	// Directory markers are 0 length
 	if size == 0 {
 		endsWithSlash := strings.HasSuffix(remote, "/")
@@ -996,7 +964,7 @@ func isDirectoryMarker(size int64, metadata map[string]string, remote string) bo
 		// defacto standard for marking blobs as directories.
 		// Note also that the metadata hasn't been normalised to lower case yet
 		for k, v := range metadata {
-			if strings.EqualFold(k, "hdi_isfolder") && v == "true" {
+			if v != nil && strings.EqualFold(k, "hdi_isfolder") && *v == "true" {
 				return true
 			}
 		}
@@ -1584,12 +1552,15 @@ func (o *Object) Size() int64 {
 	return o.size
 }
 
-func (o *Object) setMetadata(metadata map[string]string) {
+// Set o.metadata from metadata
+func (o *Object) setMetadata(metadata map[string]*string) {
 	if len(metadata) > 0 {
 		// Lower case the metadata
 		o.meta = make(map[string]string, len(metadata))
 		for k, v := range metadata {
-			o.meta[strings.ToLower(k)] = v
+			if v != nil {
+				o.meta[strings.ToLower(k)] = *v
+			}
 		}
 		// Set o.modTime from metadata if it exists and
 		// UseServerModTime isn't in use.
@@ -1605,20 +1576,16 @@ func (o *Object) setMetadata(metadata map[string]string) {
 	}
 }
 
-// Duplicte of setMetadata but taking pointers to strings
-func (o *Object) setMetadataP(metadata map[string]*string) {
-	if len(metadata) > 0 {
-		// Convert the format of the metadata
-		newMeta := make(map[string]string, len(metadata))
-		for k, v := range metadata {
-			if v != nil {
-				newMeta[k] = *v
-			}
-		}
-		o.setMetadata(newMeta)
-	} else {
-		o.meta = nil
+// Get metadata from o.meta
+func (o *Object) getMetadata() (metadata map[string]*string) {
+	if len(o.meta) == 0 {
+		return nil
 	}
+	metadata = make(map[string]*string, len(o.meta))
+	for k, v := range o.meta {
+		metadata[k] = &v
+	}
+	return metadata
 }
 
 // decodeMetaDataFromPropertiesResponse sets the metadata from the data passed in
@@ -1750,7 +1717,7 @@ func (o *Object) decodeMetaDataFromBlob(info *container.BlobItem) (err error) {
 	} else {
 		o.accessTier = *info.Properties.AccessTier
 	}
-	o.setMetadataP(metadata)
+	o.setMetadata(metadata)
 
 	return nil
 }
@@ -1832,7 +1799,7 @@ func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 	blb := o.getBlobSVC()
 	opt := blob.SetMetadataOptions{}
 	err := o.fs.pacer.Call(func() (bool, error) {
-		_, err := blb.SetMetadata(ctx, o.meta, &opt)
+		_, err := blb.SetMetadata(ctx, o.getMetadata(), &opt)
 		return o.fs.shouldRetry(ctx, err)
 	})
 	if err != nil {
@@ -1901,41 +1868,6 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, fmt.Errorf("failed to decode metadata for download: %w", err)
 	}
 	return downloadResponse.Body, nil
-}
-
-// dontEncode is the characters that do not need percent-encoding
-//
-// The characters that do not need percent-encoding are a subset of
-// the printable ASCII characters: upper-case letters, lower-case
-// letters, digits, ".", "_", "-", "/", "~", "!", "$", "'", "(", ")",
-// "*", ";", "=", ":", and "@". All other byte values in a UTF-8 must
-// be replaced with "%" and the two-digit hex value of the byte.
-const dontEncode = (`abcdefghijklmnopqrstuvwxyz` +
-	`ABCDEFGHIJKLMNOPQRSTUVWXYZ` +
-	`0123456789` +
-	`._-/~!$'()*;=:@`)
-
-// noNeedToEncode is a bitmap of characters which don't need % encoding
-var noNeedToEncode [256]bool
-
-func init() {
-	for _, c := range dontEncode {
-		noNeedToEncode[c] = true
-	}
-}
-
-// urlEncode encodes in with % encoding
-func urlEncode(in string) string {
-	var out bytes.Buffer
-	for i := 0; i < len(in); i++ {
-		c := in[i]
-		if noNeedToEncode[c] {
-			_ = out.WriteByte(c)
-		} else {
-			_, _ = out.WriteString(fmt.Sprintf("%%%02X", c))
-		}
-	}
-	return out.String()
 }
 
 // poolWrapper wraps a pool.Pool as an azblob.TransferManager
@@ -2139,7 +2071,7 @@ func (o *Object) uploadMultipart(ctx context.Context, in io.Reader, size int64, 
 				rs := readSeekCloser{wrappedReader, bufferReader}
 				options := blockblob.StageBlockOptions{
 					// Specify the transactional md5 for the body, to be validated by the service.
-					TransactionalContentMD5: transactionalMD5,
+					TransactionalValidation: blob.TransferValidationTypeMD5(transactionalMD5),
 				}
 				_, err = blb.StageBlock(ctx, blockID, &rs, &options)
 				return o.fs.shouldRetry(ctx, err)
@@ -2163,7 +2095,7 @@ func (o *Object) uploadMultipart(ctx context.Context, in io.Reader, size int64, 
 
 	tier := blob.AccessTier(o.fs.opt.AccessTier)
 	options := blockblob.CommitBlockListOptions{
-		Metadata:    o.meta,
+		Metadata:    o.getMetadata(),
 		Tier:        &tier,
 		HTTPHeaders: httpHeaders,
 	}
@@ -2210,7 +2142,7 @@ func (o *Object) uploadSinglepart(ctx context.Context, in io.Reader, size int64,
 
 	tier := blob.AccessTier(o.fs.opt.AccessTier)
 	options := blockblob.UploadOptions{
-		Metadata:    o.meta,
+		Metadata:    o.getMetadata(),
 		Tier:        &tier,
 		HTTPHeaders: httpHeaders,
 	}

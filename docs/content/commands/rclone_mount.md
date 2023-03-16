@@ -170,38 +170,59 @@ group "Everyone" will be used to represent others. The user/group can be customi
 with FUSE options "UserName" and "GroupName",
 e.g. `-o UserName=user123 -o GroupName="Authenticated Users"`.
 The permissions on each entry will be set according to [options](#options)
-`--dir-perms` and `--file-perms`, which takes a value in traditional
+`--dir-perms` and `--file-perms`, which takes a value in traditional Unix
 [numeric notation](https://en.wikipedia.org/wiki/File-system_permissions#Numeric_notation).
 
 The default permissions corresponds to `--file-perms 0666 --dir-perms 0777`,
 i.e. read and write permissions to everyone. This means you will not be able
 to start any programs from the mount. To be able to do that you must add
 execute permissions, e.g. `--file-perms 0777 --dir-perms 0777` to add it
-to everyone. If the program needs to write files, chances are you will have
-to enable [VFS File Caching](#vfs-file-caching) as well (see also [limitations](#limitations)).
+to everyone. If the program needs to write files, chances are you will
+have to enable [VFS File Caching](#vfs-file-caching) as well (see also
+[limitations](#limitations)). Note that the default write permission have
+some restrictions for accounts other than the owner, specifically it lacks
+the "write extended attributes", as explained next.
 
-Note that the mapping of permissions is not always trivial, and the result
-you see in Windows Explorer may not be exactly like you expected.
-For example, when setting a value that includes write access, this will be
-mapped to individual permissions "write attributes", "write data" and "append data",
-but not "write extended attributes". Windows will then show this as basic
-permission "Special" instead of "Write", because "Write" includes the
-"write extended attributes" permission.
+The mapping of permissions is not always trivial, and the result you see in
+Windows Explorer may not be exactly like you expected. For example, when setting
+a value that includes write access for the group or others scope, this will be
+mapped to individual permissions "write attributes", "write data" and
+"append data", but not "write extended attributes". Windows will then show this
+as basic permission "Special" instead of "Write", because "Write" also covers
+the "write extended attributes" permission. When setting digit 0 for group or
+others, to indicate no permissions, they will still get individual permissions
+"read attributes", "read extended attributes" and "read permissions". This is
+done for compatibility reasons, e.g. to allow users without additional
+permissions to be able to read basic metadata about files like in Unix.
 
-If you set POSIX permissions for only allowing access to the owner, using
-`--file-perms 0600 --dir-perms 0700`, the user group and the built-in "Everyone"
-group will still be given some special permissions, such as "read attributes"
-and "read permissions", in Windows. This is done for compatibility reasons,
-e.g. to allow users without additional permissions to be able to read basic
-metadata about files like in UNIX. One case that may arise is that other programs
-(incorrectly) interprets this as the file being accessible by everyone. For example
-an SSH client may warn about "unprotected private key file".
-
-WinFsp 2021 (version 1.9) introduces a new FUSE option "FileSecurity",
+WinFsp 2021 (version 1.9) introduced a new FUSE option "FileSecurity",
 that allows the complete specification of file security descriptors using
 [SDDL](https://docs.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-string-format).
-With this you can work around issues such as the mentioned "unprotected private key file"
-by specifying `-o FileSecurity="D:P(A;;FA;;;OW)"`, for file all access (FA) to the owner (OW).
+With this you get detailed control of the resulting permissions, compared
+to use of the POSIX permissions described above, and no additional permissions
+will be added automatically for compatibility with Unix. Some example use
+cases will following.
+
+If you set POSIX permissions for only allowing access to the owner,
+using `--file-perms 0600 --dir-perms 0700`, the user group and the built-in
+"Everyone" group will still be given some special permissions, as described
+above. Some programs may then (incorrectly) interpret this as the file being
+accessible by everyone, for example an SSH client may warn about "unprotected
+private key file". You can work around this by specifying
+`-o FileSecurity="D:P(A;;FA;;;OW)"`, which sets file all access (FA) to the
+owner (OW), and nothing else.
+
+When setting write permissions then, except for the owner, this does not
+include the "write extended attributes" permission, as mentioned above.
+This may prevent applications from writing to files, giving permission denied
+error instead. To set working write permissions for the built-in "Everyone"
+group, similar to what it gets by default but with the addition of the
+"write extended attributes", you can specify
+`-o FileSecurity="D:P(A;;FRFW;;;WD)"`, which sets file read (FR) and file
+write (FW) to everyone (WD). If file execute (FX) is also needed, then change
+to `-o FileSecurity="D:P(A;;FRFWFX;;;WD)"`, or set file all access (FA) to
+get full access permissions, including delete, with
+`-o FileSecurity="D:P(A;;FA;;;WD)"`.
 
 ### Windows caveats
 
@@ -230,13 +251,57 @@ processes as the SYSTEM account. Another alternative is to run the mount
 command from a Windows Scheduled Task, or a Windows Service, configured
 to run as the SYSTEM account. A third alternative is to use the
 [WinFsp.Launcher infrastructure](https://github.com/winfsp/winfsp/wiki/WinFsp-Service-Architecture)).
+Read more in the [install documentation](https://rclone.org/install/).
 Note that when running rclone as another user, it will not use
 the configuration file from your profile unless you tell it to
 with the [`--config`](https://rclone.org/docs/#config-config-file) option.
-Read more in the [install documentation](https://rclone.org/install/).
+Note also that it is now the SYSTEM account that will have the owner
+permissions, and other accounts will have permissions according to the
+group or others scopes. As mentioned above, these will then not get the
+"write extended attributes" permission, and this may prevent writing to
+files. You can work around this with the FileSecurity option, see
+example above.
 
 Note that mapping to a directory path, instead of a drive letter,
 does not suffer from the same limitations.
+
+## Mounting on macOS
+
+Mounting on macOS can be done either via [macFUSE](https://osxfuse.github.io/) 
+(also known as osxfuse) or [FUSE-T](https://www.fuse-t.org/). macFUSE is a traditional
+FUSE driver utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE system
+which "mounts" via an NFSv4 local server.
+
+### FUSE-T Limitations, Caveats, and Notes
+
+There are some limitations, caveats, and notes about how it works. These are current as 
+of FUSE-T version 1.0.14.
+
+#### ModTime update on read
+
+As per the [FUSE-T wiki](https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
+
+> File access and modification times cannot be set separately as it seems to be an 
+> issue with the NFS client which always modifies both. Can be reproduced with 
+> 'touch -m' and 'touch -a' commands
+
+This means that viewing files with various tools, notably macOS Finder, will cause rlcone
+to update the modification time of the file. This may make rclone upload a full new copy
+of the file.
+
+#### Unicode Normalization
+
+Rclone includes flags for unicode normalization with macFUSE that should be updated
+for FUSE-T. See [this forum post](https://forum.rclone.org/t/some-unicode-forms-break-mount-on-macos-with-fuse-t/36403)
+and [FUSE-T issue #16](https://github.com/macos-fuse-t/fuse-t/issues/16). The following
+flag should be added to the `rclone mount` command.
+
+    -o modules=iconv,from_code=UTF-8,to_code=UTF-8
+    
+#### Read Only mounts
+
+When mounting with `--read-only`, attempts to write to files will fail *silently* as
+opposed to with a clear warning as in macFUSE.
 
 ## Limitations
 

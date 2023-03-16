@@ -168,9 +168,18 @@ OneDrive allows modification times to be set on objects accurate to 1
 second.  These will be used to detect whether objects need syncing or
 not.
 
-OneDrive personal supports SHA1 type hashes. OneDrive for business and
-Sharepoint Server support
+OneDrive Personal, OneDrive for Business and Sharepoint Server support
 [QuickXorHash](https://docs.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash).
+
+Before rclone 1.62 the default hash for Onedrive Personal was `SHA1`.
+For rclone 1.62 and above the default for all Onedrive backends is
+`QuickXorHash`.
+
+Starting from July 2023 `SHA1` support is being phased out in Onedrive
+Personal in favour of `QuickXorHash`. If necessary the
+`--onedrive-hash-type` flag (or `hash_type` config option) can be used
+to select `SHA1` during the transition period if this is important
+your workflow.
 
 For all types of OneDrive you can use the `--checksum` flag.
 
@@ -517,6 +526,48 @@ Properties:
 - Type:        string
 - Required:    false
 
+#### --onedrive-hash-type
+
+Specify the hash in use for the backend.
+
+This specifies the hash type in use. If set to "auto" it will use the
+default hash which is is QuickXorHash.
+
+Before rclone 1.62 an SHA1 hash was used by default for Onedrive
+Personal. For 1.62 and later the default is to use a QuickXorHash for
+all onedrive types. If an SHA1 hash is desired then set this option
+accordingly.
+
+From July 2023 QuickXorHash will be the only available hash for
+both OneDrive for Business and OneDriver Personal.
+
+This can be set to "none" to not use any hashes.
+
+If the hash requested does not exist on the object, it will be
+returned as an empty string which is treated as a missing hash by
+rclone.
+
+
+Properties:
+
+- Config:      hash_type
+- Env Var:     RCLONE_ONEDRIVE_HASH_TYPE
+- Type:        string
+- Default:     "auto"
+- Examples:
+    - "auto"
+        - Rclone chooses the best hash
+    - "quickxor"
+        - QuickXor
+    - "sha1"
+        - SHA1
+    - "sha256"
+        - SHA256
+    - "crc32"
+        - CRC32
+    - "none"
+        - None - don't use any hashes
+
 #### --onedrive-encoding
 
 The encoding for the backend.
@@ -629,11 +680,11 @@ OneDrive supports `rclone cleanup` which causes rclone to look through
 every file under the path supplied and delete all version but the
 current version. Because this involves traversing all the files, then
 querying each file for versions it can be quite slow. Rclone does
-`--checkers` tests in parallel. The command also supports `-i` which
-is a great way to see what it would do.
+`--checkers` tests in parallel. The command also supports `--interactive`/`i`
+or `--dry-run` which is a great way to see what it would do.
 
-    rclone cleanup -i remote:path/subdir # interactively remove all old version for path/subdir
-    rclone cleanup remote:path/subdir    # unconditionally remove all old version for path/subdir
+    rclone cleanup --interactive remote:path/subdir # interactively remove all old version for path/subdir
+    rclone cleanup remote:path/subdir               # unconditionally remove all old version for path/subdir
 
 **NB** Onedrive personal can't currently delete versions
 
@@ -725,3 +776,38 @@ Shared with me files is not supported by rclone [currently](https://github.com/r
 3. The shortcut will appear in `My files`, you can access it with rclone, it behaves like a normal folder/file.
     ![in_my_files](https://i.imgur.com/0S8H3li.png "Screenshot (My Files)")
     ![rclone_mount](https://i.imgur.com/2Iq66sW.png "Screenshot (rclone mount)")
+
+### Live Photos uploaded from iOS (small video clips in .heic files)
+
+The iOS OneDrive app introduced [upload and storage](https://techcommunity.microsoft.com/t5/microsoft-onedrive-blog/live-photos-come-to-onedrive/ba-p/1953452) 
+of [Live Photos](https://support.apple.com/en-gb/HT207310) in 2020. 
+The usage and download of these uploaded Live Photos is unfortunately still work-in-progress 
+and this introduces several issues when copying, synchronising and mounting – both in rclone and in the native OneDrive client on Windows.
+
+The root cause can easily be seen if you locate one of your Live Photos in the OneDrive web interface. 
+Then download the photo from the web interface. You will then see that the size of downloaded .heic file is smaller than the size displayed in the web interface. 
+The downloaded file is smaller because it only contains a single frame (still photo) extracted from the Live Photo (movie) stored in OneDrive.
+
+The different sizes will cause `rclone copy/sync` to repeatedly recopy unmodified photos something like this:
+
+    DEBUG : 20230203_123826234_iOS.heic: Sizes differ (src 4470314 vs dst 1298667)
+    DEBUG : 20230203_123826234_iOS.heic: sha1 = fc2edde7863b7a7c93ca6771498ac797f8460750 OK
+    INFO  : 20230203_123826234_iOS.heic: Copied (replaced existing)
+
+These recopies can be worked around by adding `--ignore-size`. Please note that this workaround only syncs the still-picture not the movie clip, 
+and relies on modification dates being correctly updated on all files in all situations.
+
+The different sizes will also cause `rclone check` to report size errors something like this:
+
+    ERROR : 20230203_123826234_iOS.heic: sizes differ
+
+These check errors can be suppressed by adding `--ignore-size`.
+
+The different sizes will also cause `rclone mount` to fail downloading with an error something like this:
+
+    ERROR : 20230203_123826234_iOS.heic: ReadFileHandle.Read error: low level retry 1/10: unexpected EOF
+
+or like this when using `--cache-mode=full`:
+
+    INFO  : 20230203_123826234_iOS.heic: vfs cache: downloader: error count now 1: vfs reader: failed to write to cache file: 416 Requested Range Not Satisfiable:
+    ERROR : 20230203_123826234_iOS.heic: vfs cache: failed to download: vfs reader: failed to write to cache file: 416 Requested Range Not Satisfiable:

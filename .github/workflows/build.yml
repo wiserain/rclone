@@ -15,6 +15,8 @@ on:
   workflow_dispatch:
     inputs:
       manual:
+        description: Manual run (bypass default conditions)
+        type: boolean
         required: true
         default: true
 
@@ -44,17 +46,18 @@ jobs:
   build:
     needs:
       - create-release
+    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows']
-        # job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows', 'other_os', 'go1.17', 'go1.18']
+        # job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows', 'other_os', 'go1.18', 'go1.19']
 
         include:
           - job_name: linux
             os: ubuntu-latest
-            go: '1.19'
+            go: '1.20'
             gotags: cmount,noselfupdate
             build_flags: '-include "^linux/"'
             check: true
@@ -65,14 +68,14 @@ jobs:
 
           - job_name: linux_386
             os: ubuntu-latest
-            go: '1.19'
+            go: '1.20'
             goarch: 386
             gotags: cmount,noselfupdate
             quicktest: true
 
           - job_name: mac_amd64
             os: macos-11
-            go: '1.19'
+            go: '1.20'
             gotags: 'cmount,noselfupdate'
             build_flags: '-include "^darwin/amd64" -cgo'
             quicktest: true
@@ -81,14 +84,14 @@ jobs:
 
           - job_name: mac_arm64
             os: macos-11
-            go: '1.19'
+            go: '1.20'
             gotags: 'cmount,noselfupdate'
             build_flags: '-include "^darwin/arm64" -cgo -macos-arch arm64 -cgo-cflags=-I/usr/local/include -cgo-ldflags=-L/usr/local/lib'
             deploy: true
 
           - job_name: windows
             os: windows-latest
-            go: '1.19'
+            go: '1.20'
             gotags: cmount,noselfupdate
             cgo: '0'
             build_flags: '-include "^windows/"'
@@ -98,20 +101,20 @@ jobs:
 
           # - job_name: other_os
           #   os: ubuntu-latest
-          #   go: '1.19'
+          #   go: '1.20'
           #   build_flags: '-exclude "^(windows/|darwin/|linux/)"'
           #   compile_all: true
           #   deploy: true
 
-          # - job_name: go1.17
-          #   os: ubuntu-latest
-          #   go: '1.17'
-          #   quicktest: true
-          #   racequicktest: true
-
           # - job_name: go1.18
           #   os: ubuntu-latest
           #   go: '1.18'
+          #   quicktest: true
+          #   racequicktest: true
+
+          # - job_name: go1.19
+          #   os: ubuntu-latest
+          #   go: '1.19'
           #   quicktest: true
           #   racequicktest: true
 
@@ -146,7 +149,7 @@ jobs:
           sudo modprobe fuse
           sudo chmod 666 /dev/fuse
           sudo chown root:$USER /etc/fuse.conf
-          sudo apt-get install fuse libfuse-dev rpm pkg-config
+          sudo apt-get install fuse3 libfuse-dev rpm pkg-config
         if: matrix.os == 'ubuntu-latest'
 
       - name: Install Libraries on macOS
@@ -258,7 +261,7 @@ jobs:
           done
 
   lint:
-    if: ${{ github.repository == 'rclone/rclone' || github.event.inputs.manual }}
+    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
     timeout-minutes: 30
     name: "lint"
     runs-on: ubuntu-latest
@@ -277,7 +280,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: '1.20'
           check-latest: true
 
       - name: Install govulncheck
@@ -287,7 +290,7 @@ jobs:
         run: govulncheck ./...
 
   android:
-    if: ${{ github.repository == 'rclone/rclone' || github.event.inputs.manual }}
+    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
     timeout-minutes: 30
     name: "android-all"
     runs-on: ubuntu-latest
@@ -302,7 +305,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: '1.20'
 
       - name: Go module cache
         uses: actions/cache@v3

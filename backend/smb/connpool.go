@@ -34,9 +34,10 @@ func (f *Fs) dial(ctx context.Context, network, addr string) (*conn, error) {
 
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
-			User:     f.opt.User,
-			Password: pass,
-			Domain:   f.opt.Domain,
+			User:      f.opt.User,
+			Password:  pass,
+			Domain:    f.opt.Domain,
+			TargetSPN: f.opt.SPN,
 		},
 	}
 
@@ -81,7 +82,7 @@ func (c *conn) closed() bool {
 		// list the shares
 		_, nopErr = c.smbSession.ListSharenames()
 	}
-	return nopErr == nil
+	return nopErr != nil
 }
 
 // Show that we are using a SMB session

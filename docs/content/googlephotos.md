@@ -117,11 +117,11 @@ List the contents of an album
 Sync `/home/local/images` to the Google Photos, removing any excess
 files in the album.
 
-    rclone sync -i /home/local/image remote:album/newAlbum
+    rclone sync --interactive /home/local/image remote:album/newAlbum
 
 ### Layout
 
-As Google Photos is not a general purpose cloud storage system the
+As Google Photos is not a general purpose cloud storage system, the
 backend is laid out to help you navigate it.
 
 The directories under `media` show different ways of categorizing the

@@ -988,6 +988,10 @@ as malware or spam and cannot be downloaded" with the error code
 indicate you acknowledge the risks of downloading the file and rclone
 will download it anyway.
 
+Note that if you are using service account it will need Manager
+permission (not Content Manager) to for this flag to work. If the SA
+does not have the right permission, Google will just ignore the flag.
+
 Properties:
 
 - Config:      acknowledge_abuse
@@ -1362,9 +1366,9 @@ This takes an optional directory to trash which make this easier to
 use via the API.
 
     rclone backend untrash drive:directory
-    rclone backend -i untrash drive:directory subdir
+    rclone backend --interactive untrash drive:directory subdir
 
-Use the -i flag to see what would be restored before restoring it.
+Use the --interactive/-i or --dry-run flag to see what would be restored before restoring it.
 
 Result:
 
@@ -1398,7 +1402,7 @@ component will be used as the file name.
 If the destination is a drive backend then server-side copying will be
 attempted if possible.
 
-Use the -i flag to see what would be copied before copying.
+Use the --interactive/-i or --dry-run flag to see what would be copied before copying.
 
 
 ### exportformats
@@ -1508,9 +1512,15 @@ to the next step; if not, click on "CONFIGURE CONSENT SCREEN" button
 (near the top right corner of the right panel), then select "External"
 and click on "CREATE"; on the next screen, enter an "Application name"
 ("rclone" is OK); enter "User Support Email" (your own email is OK); 
-enter "Developer Contact Email" (your own email is OK); then click on "Save" (all other data is optional). 
-Click again on "Credentials" on the left panel to go back to the 
-"Credentials" screen.
+enter "Developer Contact Email" (your own email is OK); then click on
+"Save" (all other data is optional). You will also have to add some scopes,
+including `.../auth/docs` and `.../auth/drive` in order to be able to edit,
+create and delete files with RClone. You may also want to include the
+`../auth/drive.metadata.readonly` scope. After adding scopes, click
+"Save and continue" to add test users. Be sure to add your own account to
+the test users. Once you've added yourself as a test user and saved the
+changes, click again on "Credentials" on the left panel to go back to
+the "Credentials" screen.
 
    (PS: if you are a GSuite user, you could also select "Internal" instead
 of "External" above, but this will restrict API use to Google Workspace 
@@ -1523,16 +1533,14 @@ then select "OAuth client ID".
 
 8. It will show you a client ID and client secret. Make a note of these.
    
-   (If you selected "External" at Step 5 continue to "Publish App" in the Steps 9 and 10. 
+   (If you selected "External" at Step 5 continue to Step 9. 
    If you chose "Internal" you don't need to publish and can skip straight to
-   Step 11.)
+   Step 10 but your destination drive must be part of the same Google Workspace.)
 
-9. Go to "Oauth consent screen" and press "Publish App"
+9. Go to "Oauth consent screen" and then click "PUBLISH APP" button and confirm.
+   You will also want to add yourself as a test user.
 
-10. Click "OAuth consent screen", then click "PUBLISH APP" button and 
-confirm, or add your account under "Test users".
-
-11. Provide the noted client ID and client secret to rclone.
+10. Provide the noted client ID and client secret to rclone.
 
 Be aware that, due to the "enhanced security" recently introduced by
 Google, you are theoretically expected to "submit your app for verification"
@@ -1540,7 +1548,11 @@ and then wait a few weeks(!) for their response; in practice, you can go right
 ahead and use the client ID and client secret with rclone, the only issue will
 be a very scary confirmation screen shown when you connect via your browser 
 for rclone to be able to get its token-id (but as this only happens during 
-the remote configuration, it's not such a big deal). 
+the remote configuration, it's not such a big deal). Keeping the application in
+"Testing" will work as well, but the limitation is that any grants will expire
+after a week, which can be annoying to refresh constantly. If, for whatever
+reason, a short grant time is not a problem, then keeping the application in
+testing mode would also be sufficient.
 
 (Thanks to @balazer on github for these instructions.)
 

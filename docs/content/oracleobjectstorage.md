@@ -5,13 +5,12 @@ versionIntroduced: "v1.60"
 ---
 
 # {{< icon "fa fa-cloud" >}} Oracle Object Storage
-
 [Oracle Object Storage Overview](https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/objectstorageoverview.htm)
 
 [Oracle Object Storage FAQ](https://www.oracle.com/cloud/storage/object-storage/faq/)
 
-Paths are specified as `remote:bucket` (or `remote:` for the `lsd`
-command.)  You may put subdirectories in too, e.g. `remote:bucket/path/to/dir`.
+Paths are specified as `remote:bucket` (or `remote:` for the `lsd` command.)  You may put subdirectories in 
+too, e.g. `remote:bucket/path/to/dir`.
 
 ## Configuration
 
@@ -87,7 +86,7 @@ Enter a value. Press Enter to leave empty.
 endpoint> 
 
 Option config_file.
-Path to OCI config file
+Full Path to OCI config file
 Choose a number from below, or type in your own string value.
 Press Enter for the default (~/.oci/config).
  1 / oci configuration file location
@@ -136,6 +135,99 @@ List the contents of a bucket
     rclone ls remote:bucket
     rclone ls remote:bucket --max-depth 1
 
+### OCI Authentication Provider 
+
+OCI has various authentication methods. To learn more about authentication methods please refer [oci authentication 
+methods](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdk_authentication_methods.htm) 
+These choices can be specified in the rclone config file.
+
+Rclone supports the following OCI authentication provider.
+
+    User Principal
+    Instance Principal
+    Resource Principal
+    No authentication
+
+#### Authentication provider choice: User Principal
+Sample rclone config file for Authentication Provider User Principal:
+
+    [oos]
+    type = oracleobjectstorage
+    namespace = id<redacted>34
+    compartment = ocid1.compartment.oc1..aa<redacted>ba
+    region = us-ashburn-1
+    provider = user_principal_auth
+    config_file = /home/opc/.oci/config
+    config_profile = Default
+
+Advantages:
+- One can use this method from any server within OCI or on-premises or from other cloud provider.
+
+Considerations:
+- you need to configure user’s privileges / policy to allow access to object storage
+- Overhead of managing users and keys.
+- If the user is deleted, the config file will no longer work and may cause automation regressions that use the user's credentials.
+
+####  Authentication provider choice: Instance Principal
+An OCI compute instance can be authorized to use rclone by using it's identity and certificates as an instance principal. 
+With this approach no credentials have to be stored and managed.
+
+Sample rclone configuration file for Authentication Provider Instance Principal:
+
+    [opc@rclone ~]$ cat ~/.config/rclone/rclone.conf
+    [oos]
+    type = oracleobjectstorage
+    namespace = id<redacted>fn
+    compartment = ocid1.compartment.oc1..aa<redacted>k7a
+    region = us-ashburn-1
+    provider = instance_principal_auth
+
+Advantages:
+
+- With instance principals, you don't need to configure user credentials and transfer/ save it to disk in your compute 
+  instances or rotate the credentials.
+- You don’t need to deal with users and keys.
+- Greatly helps in automation as you don't have to manage access keys, user private keys, storing them in vault, 
+  using kms etc.
+
+Considerations:
+
+- You need to configure a dynamic group having this instance as member and add policy to read object storage to that 
+  dynamic group.
+- Everyone who has access to this machine can execute the CLI commands.
+- It is applicable for oci compute instances only. It cannot be used on external instance or resources.
+
+#### Authentication provider choice: Resource Principal
+Resource principal auth is very similar to instance principal auth but used for resources that are not 
+compute instances such as [serverless functions](https://docs.oracle.com/en-us/iaas/Content/Functions/Concepts/functionsoverview.htm). 
+To use resource principal ensure Rclone process is started with these environment variables set in its process.
+
+    export OCI_RESOURCE_PRINCIPAL_VERSION=2.2
+    export OCI_RESOURCE_PRINCIPAL_REGION=us-ashburn-1
+    export OCI_RESOURCE_PRINCIPAL_PRIVATE_PEM=/usr/share/model-server/key.pem
+    export OCI_RESOURCE_PRINCIPAL_RPST=/usr/share/model-server/security_token
+
+Sample rclone configuration file for Authentication Provider Resource Principal:
+
+    [oos]
+    type = oracleobjectstorage
+    namespace = id<redacted>34
+    compartment = ocid1.compartment.oc1..aa<redacted>ba
+    region = us-ashburn-1
+    provider = resource_principal_auth
+
+#### Authentication provider choice: No authentication
+Public buckets do not require any authentication mechanism to read objects.
+Sample rclone configuration file for No authentication:
+    
+    [oos]
+    type = oracleobjectstorage
+    namespace = id<redacted>34
+    compartment = ocid1.compartment.oc1..aa<redacted>ba
+    region = us-ashburn-1
+    provider = no_auth
+
+## Options
 ### Modified time
 
 The modified time is stored as metadata on the object as
@@ -289,6 +381,24 @@ Properties:
 ### Advanced options
 
 Here are the Advanced options specific to oracleobjectstorage (Oracle Cloud Infrastructure Object Storage).
+
+#### --oos-storage-tier
+
+The storage class to use when storing new objects in storage. https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/understandingstoragetiers.htm
+
+Properties:
+
+- Config:      storage_tier
+- Env Var:     RCLONE_OOS_STORAGE_TIER
+- Type:        string
+- Default:     "Standard"
+- Examples:
+    - "Standard"
+        - Standard storage tier, this is the default tier
+    - "InfrequentAccess"
+        - InfrequentAccess storage tier
+    - "Archive"
+        - Archive storage tier
 
 #### --oos-upload-cutoff
 
@@ -451,6 +561,89 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --oos-sse-customer-key-file
+
+To use SSE-C, a file containing the base64-encoded string of the AES-256 encryption key associated
+with the object. Please note only one of sse_customer_key_file|sse_customer_key|sse_kms_key_id is needed.'
+
+Properties:
+
+- Config:      sse_customer_key_file
+- Env Var:     RCLONE_OOS_SSE_CUSTOMER_KEY_FILE
+- Type:        string
+- Required:    false
+- Examples:
+    - ""
+        - None
+
+#### --oos-sse-customer-key
+
+To use SSE-C, the optional header that specifies the base64-encoded 256-bit encryption key to use to
+encrypt or  decrypt the data. Please note only one of sse_customer_key_file|sse_customer_key|sse_kms_key_id is
+needed. For more information, see Using Your Own Keys for Server-Side Encryption 
+(https://docs.cloud.oracle.com/Content/Object/Tasks/usingyourencryptionkeys.htm)
+
+Properties:
+
+- Config:      sse_customer_key
+- Env Var:     RCLONE_OOS_SSE_CUSTOMER_KEY
+- Type:        string
+- Required:    false
+- Examples:
+    - ""
+        - None
+
+#### --oos-sse-customer-key-sha256
+
+If using SSE-C, The optional header that specifies the base64-encoded SHA256 hash of the encryption
+key. This value is used to check the integrity of the encryption key. see Using Your Own Keys for 
+Server-Side Encryption (https://docs.cloud.oracle.com/Content/Object/Tasks/usingyourencryptionkeys.htm).
+
+Properties:
+
+- Config:      sse_customer_key_sha256
+- Env Var:     RCLONE_OOS_SSE_CUSTOMER_KEY_SHA256
+- Type:        string
+- Required:    false
+- Examples:
+    - ""
+        - None
+
+#### --oos-sse-kms-key-id
+
+if using using your own master key in vault, this header specifies the 
+OCID (https://docs.cloud.oracle.com/Content/General/Concepts/identifiers.htm) of a master encryption key used to call
+the Key Management service to generate a data encryption key or to encrypt or decrypt a data encryption key.
+Please note only one of sse_customer_key_file|sse_customer_key|sse_kms_key_id is needed.
+
+Properties:
+
+- Config:      sse_kms_key_id
+- Env Var:     RCLONE_OOS_SSE_KMS_KEY_ID
+- Type:        string
+- Required:    false
+- Examples:
+    - ""
+        - None
+
+#### --oos-sse-customer-algorithm
+
+If using SSE-C, the optional header that specifies "AES256" as the encryption algorithm.
+Object Storage supports "AES256" as the encryption algorithm. For more information, see
+Using Your Own Keys for Server-Side Encryption (https://docs.cloud.oracle.com/Content/Object/Tasks/usingyourencryptionkeys.htm).
+
+Properties:
+
+- Config:      sse_customer_algorithm
+- Env Var:     RCLONE_OOS_SSE_CUSTOMER_ALGORITHM
+- Type:        string
+- Required:    false
+- Examples:
+    - ""
+        - None
+    - "AES256"
+        - AES256
+
 ## Backend commands
 
 Here are the commands specific to the oracleobjectstorage backend.
@@ -518,8 +711,8 @@ Remove unfinished multipart uploads.
 This command removes unfinished multipart uploads of age greater than
 max-age which defaults to 24 hours.
 
-Note that you can use -i/--dry-run with this command to see what it
-would do.
+Note that you can use --interactive/-i or --dry-run with this command to see what
+it would do.
 
     rclone backend cleanup oos:bucket/path/to/object
     rclone backend cleanup -o max-age=7w oos:bucket/path/to/object

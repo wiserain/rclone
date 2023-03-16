@@ -172,7 +172,7 @@ List the contents of a bucket
 Sync `/home/local/directory` to the remote bucket, deleting any excess
 files in the bucket.
 
-    rclone sync -i /home/local/directory remote:bucket
+    rclone sync --interactive /home/local/directory remote:bucket
 
 ### Service Account support
 
@@ -551,6 +551,24 @@ Properties:
         - Archive storage class
     - "DURABLE_REDUCED_AVAILABILITY"
         - Durable reduced availability storage class
+
+#### --gcs-env-auth
+
+Get GCP IAM credentials from runtime (environment variables or instance meta data if no env vars).
+
+Only applies if service_account_file and service_account_credentials is blank.
+
+Properties:
+
+- Config:      env_auth
+- Env Var:     RCLONE_GCS_ENV_AUTH
+- Type:        bool
+- Default:     false
+- Examples:
+    - "false"
+        - Enter credentials in the next step.
+    - "true"
+        - Get GCP IAM credentials from the environment (env vars or IAM).
 
 ### Advanced options
 

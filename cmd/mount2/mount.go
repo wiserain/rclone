@@ -95,9 +95,6 @@ func mountOptions(fsys *FS, f fs.Fs, opt *mountlib.Options) (mountOpts *fuse.Mou
 	}
 	var opts []string
 	// FIXME doesn't work opts = append(opts, fmt.Sprintf("max_readahead=%d", maxReadAhead))
-	if fsys.opt.AllowNonEmpty {
-		opts = append(opts, "nonempty")
-	}
 	if fsys.opt.AllowOther {
 		opts = append(opts, "allow_other")
 	}
@@ -148,9 +145,16 @@ func mountOptions(fsys *FS, f fs.Fs, opt *mountlib.Options) (mountOpts *fuse.Mou
 // report an error when fusermount is called.
 func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error, func() error, error) {
 	f := VFS.Fs()
+	if err := mountlib.CheckOverlap(f, mountpoint); err != nil {
+		return nil, nil, err
+	}
+	if err := mountlib.CheckAllowNonEmpty(mountpoint, opt); err != nil {
+		return nil, nil, err
+	}
 	fs.Debugf(f, "Mounting on %q", mountpoint)
 
 	fsys := NewFS(VFS, opt)
+
 	// nodeFsOpts := &fusefs.PathNodeFsOptions{
 	// 	ClientInodes: false,
 	// 	Debug:        mountlib.DebugFUSE,

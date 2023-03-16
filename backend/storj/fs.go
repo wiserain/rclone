@@ -23,6 +23,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"storj.io/uplink"
+	"storj.io/uplink/edge"
 )
 
 const (
@@ -31,9 +32,9 @@ const (
 )
 
 var satMap = map[string]string{
-	"us-central-1.storj.io":  "12EayRS2V1kEsWESU9QMRseFhdxYxKicsiFmxrsLZHeLUtdps3S@us-central-1.tardigrade.io:7777",
-	"europe-west-1.storj.io": "12L9ZFwhzVpuEKMUNUqkaTLGzwY9G24tbiigLiXpmZWKwmcNDDs@europe-west-1.tardigrade.io:7777",
-	"asia-east-1.storj.io":   "121RTSDpyNZVcEU84Ticf2L1ntiuUimbWgfATz21tuvgk3vzoA6@asia-east-1.tardigrade.io:7777",
+	"us1.storj.io": "12EayRS2V1kEsWESU9QMRseFhdxYxKicsiFmxrsLZHeLUtdps3S@us1.storj.io:7777",
+	"eu1.storj.io": "12L9ZFwhzVpuEKMUNUqkaTLGzwY9G24tbiigLiXpmZWKwmcNDDs@eu1.storj.io:7777",
+	"ap1.storj.io": "121RTSDpyNZVcEU84Ticf2L1ntiuUimbWgfATz21tuvgk3vzoA6@ap1.storj.io:7777",
 }
 
 // Register with Fs
@@ -105,16 +106,16 @@ func init() {
 				Name:     "satellite_address",
 				Help:     "Satellite address.\n\nCustom satellite address should match the format: `<nodeid>@<address>:<port>`.",
 				Provider: newProvider,
-				Default:  "us-central-1.storj.io",
+				Default:  "us1.storj.io",
 				Examples: []fs.OptionExample{{
-					Value: "us-central-1.storj.io",
-					Help:  "US Central 1",
+					Value: "us1.storj.io",
+					Help:  "US1",
 				}, {
-					Value: "europe-west-1.storj.io",
-					Help:  "Europe West 1",
+					Value: "eu1.storj.io",
+					Help:  "EU1",
 				}, {
-					Value: "asia-east-1.storj.io",
-					Help:  "Asia East 1",
+					Value: "ap1.storj.io",
+					Help:  "AP1",
 				},
 				},
 			},
@@ -156,11 +157,13 @@ type Fs struct {
 
 // Check the interfaces are satisfied.
 var (
-	_ fs.Fs          = &Fs{}
-	_ fs.ListRer     = &Fs{}
-	_ fs.PutStreamer = &Fs{}
-	_ fs.Mover       = &Fs{}
-	_ fs.Copier      = &Fs{}
+	_ fs.Fs           = &Fs{}
+	_ fs.ListRer      = &Fs{}
+	_ fs.PutStreamer  = &Fs{}
+	_ fs.Mover        = &Fs{}
+	_ fs.Copier       = &Fs{}
+	_ fs.Purger       = &Fs{}
+	_ fs.PublicLinker = &Fs{}
 )
 
 // NewFs creates a filesystem backed by Storj.
@@ -545,7 +548,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	defer func() {
 		if err != nil {
 			aerr := upload.Abort()
-			if aerr != nil {
+			if aerr != nil && !errors.Is(aerr, uplink.ErrUploadDone) {
 				fs.Errorf(f, "cp input ./%s %+v: %+v", src.Remote(), options, aerr)
 			}
 		}
@@ -560,6 +563,16 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 
 	_, err = io.Copy(upload, in)
 	if err != nil {
+		if errors.Is(err, uplink.ErrBucketNotFound) {
+			// Rclone assumes the backend will create the bucket if not existing yet.
+			// Here we create the bucket and return a retry error for rclone to retry the upload.
+			_, err = f.project.EnsureBucket(ctx, bucketName)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fserrors.RetryError(errors.New("bucket was not available, now created, the upload must be retried"))
+		}
+
 		err = fserrors.RetryError(err)
 		fs.Errorf(f, "cp input ./%s %+v: %+v\n", src.Remote(), options, err)
 
@@ -760,4 +773,104 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	// Return the new object
 	return newObjectFromUplink(f, remote, newObject), nil
+}
+
+// Purge all files in the directory specified
+//
+// Implement this if you have a way of deleting all the files
+// quicker than just running Remove() on the result of List()
+//
+// Return an error if it doesn't exist
+func (f *Fs) Purge(ctx context.Context, dir string) error {
+	bucket, directory := f.absolute(dir)
+	if bucket == "" {
+		return errors.New("can't purge from root")
+	}
+
+	if directory == "" {
+		_, err := f.project.DeleteBucketWithObjects(ctx, bucket)
+		if errors.Is(err, uplink.ErrBucketNotFound) {
+			return fs.ErrorDirNotFound
+		}
+		return err
+	}
+
+	fs.Infof(directory, "Quick delete is available only for entire bucket. Falling back to list and delete.")
+	objects := f.project.ListObjects(ctx, bucket,
+		&uplink.ListObjectsOptions{
+			Prefix:    directory + "/",
+			Recursive: true,
+		},
+	)
+	if err := objects.Err(); err != nil {
+		return err
+	}
+
+	empty := true
+	for objects.Next() {
+		empty = false
+		_, err := f.project.DeleteObject(ctx, bucket, objects.Item().Key)
+		if err != nil {
+			return err
+		}
+		fs.Infof(objects.Item().Key, "Deleted")
+	}
+
+	if empty {
+		return fs.ErrorDirNotFound
+	}
+
+	return nil
+}
+
+// PublicLink generates a public link to the remote path (usually readable by anyone)
+func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, unlink bool) (string, error) {
+	bucket, key := f.absolute(remote)
+	if bucket == "" {
+		return "", errors.New("path must be specified")
+	}
+
+	// Rclone requires that a link is only generated if the remote path exists
+	if key == "" {
+		_, err := f.project.StatBucket(ctx, bucket)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		_, err := f.project.StatObject(ctx, bucket, key)
+		if err != nil {
+			if !errors.Is(err, uplink.ErrObjectNotFound) {
+				return "", err
+			}
+			// No object found, check if there is such a prefix
+			iter := f.project.ListObjects(ctx, bucket, &uplink.ListObjectsOptions{Prefix: key + "/"})
+			if iter.Err() != nil {
+				return "", iter.Err()
+			}
+			if !iter.Next() {
+				return "", err
+			}
+		}
+	}
+
+	sharedPrefix := uplink.SharePrefix{Bucket: bucket, Prefix: key}
+
+	permission := uplink.ReadOnlyPermission()
+	if expire.IsSet() {
+		permission.NotAfter = time.Now().Add(time.Duration(expire))
+	}
+
+	sharedAccess, err := f.access.Share(permission, sharedPrefix)
+	if err != nil {
+		return "", fmt.Errorf("sharing access to object failed: %w", err)
+	}
+
+	creds, err := (&edge.Config{
+		AuthServiceAddress: "auth.storjshare.io:7777",
+	}).RegisterAccess(ctx, sharedAccess, &edge.RegisterAccessOptions{Public: true})
+	if err != nil {
+		return "", fmt.Errorf("creating public link failed: %w", err)
+	}
+
+	return edge.JoinShareURL("https://link.storjshare.io", creds.AccessKeyID, bucket, key, nil)
 }

@@ -73,11 +73,13 @@ func ShowVersion() {
 
 	linking, tagString := buildinfo.GetLinkingAndTags()
 
+	arch := buildinfo.GetArch()
+
 	fmt.Printf("rclone %s\n", fs.Version)
 	fmt.Printf("- os/version: %s\n", osVersion)
 	fmt.Printf("- os/kernel: %s\n", osKernel)
 	fmt.Printf("- os/type: %s\n", runtime.GOOS)
-	fmt.Printf("- os/arch: %s\n", runtime.GOARCH)
+	fmt.Printf("- os/arch: %s\n", arch)
 	fmt.Printf("- go/version: %s\n", runtime.Version())
 	fmt.Printf("- go/linking: %s\n", linking)
 	fmt.Printf("- go/tags: %s\n", tagString)
@@ -399,9 +401,15 @@ func initConfig() {
 	// Start accounting
 	accounting.Start(ctx)
 
-	// Hide console window
+	// Configure console
 	if ci.NoConsole {
+		// Hide the console window
 		terminal.HideConsole()
+	} else {
+		// Enable color support on stdout if possible.
+		// This enables virtual terminal processing on Windows 10,
+		// adding native support for ANSI/VT100 escape sequences.
+		terminal.EnableColorsStdout()
 	}
 
 	// Load filters

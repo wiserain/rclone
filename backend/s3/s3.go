@@ -2266,6 +2266,11 @@ rclone's choice here.
 			Help:     `Suppress setting and reading of system metadata`,
 			Advanced: true,
 			Default:  false,
+		}, {
+			Name:     "sts_endpoint",
+			Help:     "Endpoint for STS.\n\nLeave blank if using AWS to use the default endpoint for the region.",
+			Provider: "AWS",
+			Advanced: true,
 		},
 		}})
 }
@@ -2352,6 +2357,7 @@ type Options struct {
 	SecretAccessKey       string               `config:"secret_access_key"`
 	Region                string               `config:"region"`
 	Endpoint              string               `config:"endpoint"`
+	STSEndpoint           string               `config:"sts_endpoint"`
 	LocationConstraint    string               `config:"location_constraint"`
 	ACL                   string               `config:"acl"`
 	BucketACL             string               `config:"bucket_acl"`
@@ -2528,7 +2534,7 @@ func parsePath(path string) (root string) {
 // split returns bucket and bucketPath from the rootRelativePath
 // relative to f.root
 func (f *Fs) split(rootRelativePath string) (bucketName, bucketPath string) {
-	bucketName, bucketPath = bucket.Split(path.Join(f.root, rootRelativePath))
+	bucketName, bucketPath = bucket.Split(bucket.Join(f.root, rootRelativePath))
 	return f.opt.Enc.FromStandardName(bucketName), f.opt.Enc.FromStandardPath(bucketPath)
 }
 
@@ -2558,6 +2564,38 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 	return &http.Client{
 		Transport: t,
 	}
+}
+
+// Default name resolver
+var defaultResolver = endpoints.DefaultResolver()
+
+// resolve (service, region) to endpoint
+//
+// Used to set endpoint for s3 services and not for other services
+type resolver map[string]string
+
+// Add a service to the resolver, ignoring empty urls
+func (r resolver) addService(service, url string) {
+	if url == "" {
+		return
+	}
+	if !strings.HasPrefix(url, "http") {
+		url = "https://" + url
+	}
+	r[service] = url
+}
+
+// EndpointFor return the endpoint for s3 if set or the default if not
+func (r resolver) EndpointFor(service, region string, opts ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
+	fs.Debugf(nil, "Resolving service %q region %q", service, region)
+	url, ok := r[service]
+	if ok {
+		return endpoints.ResolvedEndpoint{
+			URL:           url,
+			SigningRegion: region,
+		}, nil
+	}
+	return defaultResolver.EndpointFor(service, region, opts...)
 }
 
 // s3Connection makes a connection to s3
@@ -2638,8 +2676,12 @@ func s3Connection(ctx context.Context, opt *Options, client *http.Client) (*s3.S
 	if opt.Region != "" {
 		awsConfig.WithRegion(opt.Region)
 	}
-	if opt.Endpoint != "" {
-		awsConfig.WithEndpoint(opt.Endpoint)
+	if opt.Endpoint != "" || opt.STSEndpoint != "" {
+		// If endpoints are set, override the relevant services only
+		r := make(resolver)
+		r.addService("s3", opt.Endpoint)
+		r.addService("sts", opt.STSEndpoint)
+		awsConfig.WithEndpointResolver(r)
 	}
 
 	// awsConfig.WithLogLevel(aws.LogDebugWithSigning)
@@ -2989,6 +3031,15 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		GetTier:           true,
 		SlowModTime:       true,
 	}).Fill(ctx, f)
+	if opt.Provider == "Storj" {
+		f.features.SetTier = false
+		f.features.GetTier = false
+	}
+	if opt.Provider == "IDrive" {
+		f.features.SetTier = false
+	}
+	// f.listMultipartUploads()
+
 	if f.rootBucket != "" && f.rootDirectory != "" && !opt.NoHeadObject && !strings.HasSuffix(root, "/") {
 		// Check to see if the (bucket,directory) is actually an existing file
 		oldRoot := f.root
@@ -3003,14 +3054,6 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		// return an error with an fs which points to the parent
 		return f, fs.ErrorIsFile
 	}
-	if opt.Provider == "Storj" {
-		f.features.SetTier = false
-		f.features.GetTier = false
-	}
-	if opt.Provider == "IDrive" {
-		f.features.SetTier = false
-	}
-	// f.listMultipartUploads()
 	return f, nil
 }
 
@@ -3425,15 +3468,16 @@ var errEndList = errors.New("end list")
 
 // list options
 type listOpt struct {
-	bucket       string  // bucket to list
-	directory    string  // directory with bucket
-	prefix       string  // prefix to remove from listing
-	addBucket    bool    // if set, the bucket is added to the start of the remote
-	recurse      bool    // if set, recurse to read sub directories
-	withVersions bool    // if set, versions are produced
-	hidden       bool    // if set, return delete markers as objects with size == isDeleteMarker
-	findFile     bool    // if set, it will look for files called (bucket, directory)
-	versionAt    fs.Time // if set only show versions <= this time
+	bucket        string  // bucket to list
+	directory     string  // directory with bucket
+	prefix        string  // prefix to remove from listing
+	addBucket     bool    // if set, the bucket is added to the start of the remote
+	recurse       bool    // if set, recurse to read sub directories
+	withVersions  bool    // if set, versions are produced
+	hidden        bool    // if set, return delete markers as objects with size == isDeleteMarker
+	findFile      bool    // if set, it will look for files called (bucket, directory)
+	versionAt     fs.Time // if set only show versions <= this time
+	noSkipMarkers bool    // if set return dir marker objects
 }
 
 // list lists the objects into the function supplied with the opt
@@ -3546,7 +3590,7 @@ func (f *Fs) list(ctx context.Context, opt listOpt, fn listFn) error {
 				}
 				remote = remote[len(opt.prefix):]
 				if opt.addBucket {
-					remote = path.Join(opt.bucket, remote)
+					remote = bucket.Join(opt.bucket, remote)
 				}
 				remote = strings.TrimSuffix(remote, "/")
 				err = fn(remote, &s3.Object{Key: &remote}, nil, true)
@@ -3575,10 +3619,10 @@ func (f *Fs) list(ctx context.Context, opt listOpt, fn listFn) error {
 			remote = remote[len(opt.prefix):]
 			isDirectory := remote == "" || strings.HasSuffix(remote, "/")
 			if opt.addBucket {
-				remote = path.Join(opt.bucket, remote)
+				remote = bucket.Join(opt.bucket, remote)
 			}
 			// is this a directory marker?
-			if isDirectory && object.Size != nil && *object.Size == 0 {
+			if isDirectory && object.Size != nil && *object.Size == 0 && !opt.noSkipMarkers {
 				continue // skip directory marker
 			}
 			if versionIDs != nil {
@@ -3868,7 +3912,7 @@ func (f *Fs) copy(ctx context.Context, req *s3.CopyObjectInput, dstBucket, dstPa
 	req.Bucket = &dstBucket
 	req.ACL = stringPointerOrNil(f.opt.ACL)
 	req.Key = &dstPath
-	source := pathEscape(path.Join(srcBucket, srcPath))
+	source := pathEscape(bucket.Join(srcBucket, srcPath))
 	if src.versionID != nil {
 		source += fmt.Sprintf("?versionId=%s", *src.versionID)
 	}
@@ -4103,9 +4147,9 @@ Usage Examples:
     rclone backend restore s3:bucket/path/to/directory [-o priority=PRIORITY] [-o lifetime=DAYS]
     rclone backend restore s3:bucket [-o priority=PRIORITY] [-o lifetime=DAYS]
 
-This flag also obeys the filters. Test first with -i/--interactive or --dry-run flags
+This flag also obeys the filters. Test first with --interactive/-i or --dry-run flags
 
-    rclone -i backend restore --include "*.txt" s3:bucket/path -o priority=Standard
+    rclone --interactive backend restore --include "*.txt" s3:bucket/path -o priority=Standard
 
 All the objects shown will be marked for restore, then
 
@@ -4173,8 +4217,8 @@ a bucket or with a bucket and path.
 	Long: `This command removes unfinished multipart uploads of age greater than
 max-age which defaults to 24 hours.
 
-Note that you can use -i/--dry-run with this command to see what it
-would do.
+Note that you can use --interactive/-i or --dry-run with this command to see what
+it would do.
 
     rclone backend cleanup s3:bucket/path/to/object
     rclone backend cleanup -o max-age=7w s3:bucket/path/to/object
@@ -4190,8 +4234,8 @@ Durations are parsed as per the rest of rclone, 2h, 7d, 7w etc.
 	Long: `This command removes any old hidden versions of files
 on a versions enabled bucket.
 
-Note that you can use -i/--dry-run with this command to see what it
-would do.
+Note that you can use --interactive/-i or --dry-run with this command to see what
+it would do.
 
     rclone backend cleanup-hidden s3:bucket/path/to/dir
 `,
@@ -4525,13 +4569,14 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 		delErr <- operations.DeleteFiles(ctx, delChan)
 	}()
 	checkErr(f.list(ctx, listOpt{
-		bucket:       bucket,
-		directory:    directory,
-		prefix:       f.rootDirectory,
-		addBucket:    f.rootBucket == "",
-		recurse:      true,
-		withVersions: versioned,
-		hidden:       true,
+		bucket:        bucket,
+		directory:     directory,
+		prefix:        f.rootDirectory,
+		addBucket:     f.rootBucket == "",
+		recurse:       true,
+		withVersions:  versioned,
+		hidden:        true,
+		noSkipMarkers: true,
 	}, func(remote string, object *s3.Object, versionID *string, isDirectory bool) error {
 		if isDirectory {
 			return nil
@@ -4541,7 +4586,7 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool) error {
 			fs.Errorf(object, "Can't create object %+v", err)
 			return nil
 		}
-		tr := accounting.Stats(ctx).NewCheckingTransfer(oi)
+		tr := accounting.Stats(ctx).NewCheckingTransfer(oi, "checking")
 		// Work out whether the file is the current version or not
 		isCurrentVersion := !versioned || !version.Match(remote)
 		fs.Debugf(nil, "%q version %v", remote, version.Match(remote))
@@ -4985,7 +5030,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 var warnStreamUpload sync.Once
 
-func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, size int64, in io.Reader) (etag string, versionID *string, err error) {
+func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, size int64, in io.Reader) (wantETag, gotETag string, versionID *string, err error) {
 	f := o.fs
 
 	// make concurrency machinery
@@ -5029,7 +5074,7 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 		return f.shouldRetry(ctx, err)
 	})
 	if err != nil {
-		return etag, nil, fmt.Errorf("multipart upload failed to initialise: %w", err)
+		return wantETag, gotETag, nil, fmt.Errorf("multipart upload failed to initialise: %w", err)
 	}
 	uid := cout.UploadId
 
@@ -5102,7 +5147,7 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 			finished = true
 		} else if err != nil {
 			free()
-			return etag, nil, fmt.Errorf("multipart upload failed to read source: %w", err)
+			return wantETag, gotETag, nil, fmt.Errorf("multipart upload failed to read source: %w", err)
 		}
 		buf = buf[:n]
 
@@ -5157,7 +5202,7 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 	}
 	err = g.Wait()
 	if err != nil {
-		return etag, nil, err
+		return wantETag, gotETag, nil, err
 	}
 
 	// sort the completed parts by part number
@@ -5179,14 +5224,17 @@ func (o *Object) uploadMultipart(ctx context.Context, req *s3.PutObjectInput, si
 		return f.shouldRetry(ctx, err)
 	})
 	if err != nil {
-		return etag, nil, fmt.Errorf("multipart upload failed to finalise: %w", err)
+		return wantETag, gotETag, nil, fmt.Errorf("multipart upload failed to finalise: %w", err)
 	}
 	hashOfHashes := md5.Sum(md5s)
-	etag = fmt.Sprintf("%s-%d", hex.EncodeToString(hashOfHashes[:]), len(parts))
+	wantETag = fmt.Sprintf("%s-%d", hex.EncodeToString(hashOfHashes[:]), len(parts))
 	if resp != nil {
+		if resp.ETag != nil {
+			gotETag = *resp.ETag
+		}
 		versionID = resp.VersionId
 	}
-	return etag, versionID, nil
+	return wantETag, gotETag, versionID, nil
 }
 
 // unWrapAwsError unwraps AWS errors, looking for a non AWS error
@@ -5486,16 +5534,16 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	var wantETag string        // Multipart upload Etag to check
-	var gotEtag string         // Etag we got from the upload
+	var gotETag string         // Etag we got from the upload
 	var lastModified time.Time // Time we got from the upload
 	var versionID *string      // versionID we got from the upload
 	if multipart {
-		wantETag, versionID, err = o.uploadMultipart(ctx, &req, size, in)
+		wantETag, gotETag, versionID, err = o.uploadMultipart(ctx, &req, size, in)
 	} else {
 		if o.fs.opt.UsePresignedRequest {
-			gotEtag, lastModified, versionID, err = o.uploadSinglepartPresignedRequest(ctx, &req, size, in)
+			gotETag, lastModified, versionID, err = o.uploadSinglepartPresignedRequest(ctx, &req, size, in)
 		} else {
-			gotEtag, lastModified, versionID, err = o.uploadSinglepartPutObject(ctx, &req, size, in)
+			gotETag, lastModified, versionID, err = o.uploadSinglepartPutObject(ctx, &req, size, in)
 		}
 	}
 	if err != nil {
@@ -5511,32 +5559,33 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	// User requested we don't HEAD the object after uploading it
 	// so make up the object as best we can assuming it got
 	// uploaded properly. If size < 0 then we need to do the HEAD.
+	var head *s3.HeadObjectOutput
 	if o.fs.opt.NoHead && size >= 0 {
-		var head s3.HeadObjectOutput
-		//structs.SetFrom(&head, &req)
-		setFrom_s3HeadObjectOutput_s3PutObjectInput(&head, &req)
+		head = new(s3.HeadObjectOutput)
+		//structs.SetFrom(head, &req)
+		setFrom_s3HeadObjectOutput_s3PutObjectInput(head, &req)
 		head.ETag = &md5sumHex // doesn't matter quotes are missing
 		head.ContentLength = &size
-		// If we have done a single part PUT request then we can read these
-		if gotEtag != "" {
-			head.ETag = &gotEtag
+		// We get etag back from single and multipart upload so fill it in here
+		if gotETag != "" {
+			head.ETag = &gotETag
 		}
 		if lastModified.IsZero() {
 			lastModified = time.Now()
 		}
 		head.LastModified = &lastModified
 		head.VersionId = versionID
-		o.setMetaData(&head)
-		return nil
-	}
-
-	// Read the metadata from the newly created object
-	o.meta = nil // wipe old metadata
-	head, err := o.headObject(ctx)
-	if err != nil {
-		return err
+	} else {
+		// Read the metadata from the newly created object
+		o.meta = nil // wipe old metadata
+		head, err = o.headObject(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	o.setMetaData(head)
+
+	// Check multipart upload ETag if required
 	if o.fs.opt.UseMultipartEtag.Value && !o.fs.etagIsNotMD5 && wantETag != "" && head.ETag != nil && *head.ETag != "" {
 		gotETag := strings.Trim(strings.ToLower(*head.ETag), `"`)
 		if wantETag != gotETag {
