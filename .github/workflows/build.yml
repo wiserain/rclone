@@ -244,21 +244,10 @@ jobs:
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
         name: Upload Assets to Release
-        shell: bash
-        run: |
-          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
-          for FILE in build/*; do
-            [ ! -f "$FILE" ] && continue
-            echo "Uploading \"$FILE\"..."
-            curl -sX POST \
-              --output /dev/null \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: $(file -b --mime-type ${FILE})" \
-              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
-              -T "${FILE}" \
-              "${UPLOAD_URL}?name=$(basename ${FILE})"
-          done
+        uses: shogo82148/actions-upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: 'build/*'
 
   lint:
     if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
