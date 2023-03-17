@@ -25,11 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      upload_url: ${{ steps.set_upload_url.outputs.upload_url }}
     steps:
       - 
         name: Create Release
-        id: create_release
+        if: ${{ contains(github.ref, 'refs/tags/') }}
+        id: new_release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref }}
@@ -43,6 +44,25 @@ jobs:
             ```
           draft: true
           prerelease: false
+      - 
+        name: Create Beta
+        if: ${{ ! contains(github.ref, 'refs/tags/') }}
+        id: new_beta
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref }}
+          name: rclone mod - beta
+          draft: true
+          prerelease: false
+      -
+        name: Set Upload URL
+        id: set_upload_url
+        run: |
+          if [ "${{ contains(github.ref, 'refs/tags/') }}" = "true" ]; then
+            echo "upload_url=${{ steps.new_release.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload_url=${{ steps.new_beta.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
+          fi
   build:
     needs:
       - create-release
