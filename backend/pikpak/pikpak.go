@@ -2,48 +2,26 @@
 package pikpak
 
 // ------------------------------------------------------------
-// NOTE for backend
+// NOTE
 // ------------------------------------------------------------
 
-// Multipart copy doesn't seem to be allowed. `--multi-thread-streams=1` is forced for temporary workaround.
+// md5sum is not always available, sometimes given empty.
 
-// SetModTime doesn't seem to be supported
-
-// Usage in trash seems not working in About()
-
-// Size and/or Hash from api.File are sometimes incorrect. It might need `--ignore-checksum` and/or `--ignore-size`.
-
-// There are some cases with no downloadUrl for Open(). e.g. 0byte file
+// sha1sum used for upload differs from the one with official apps.
 
 // Trashed files are not restored to the original location when using `batchUntrash`
 
-// result of `rclone test info --all -vv --write-json remote.json remote:test`
-// stringNeedsEscaping = []rune{
-// 	' ', '!', '$', ''', '(', '*', '+', '.', '/', '0', '3', '4', '6', '8', '9', ':', '<', '>', '?', 'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'X', 'Z', '\"', '\\', '\a', '\b', '\f', '\n', '\r', '\t', '\u007f', '\u00a0', '\v', '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f', '\xbf', '\xfe', '^', 'a', 'b', 'c', 'd', 'l', 'm', 'n', 'o', 'q', 'r', 'v', 'w', '|', '＼'
-// }
-// maxFileLength = 1024 // for 1 byte unicode characters
-// maxFileLength = 512 // for 2 byte unicode characters
-// maxFileLength = 341 // for 3 byte unicode characters
-// maxFileLength = 256 // for 4 byte unicode characters
-// canWriteUnnormalized = true
-// canReadUnnormalized   = true
-// canReadRenormalized   = false
-// canStream = false
-
-// ------------------------------------------------------------
-// FIXME
-// ------------------------------------------------------------
-
-// * Even after emptied trash, files are still visible with `--pikpak-trashed-only`. This goes aways after few days.
+// Can't stream without `--vfs-cache-mode=full`
 
 // ------------------------------------------------------------
 // TODO
 // ------------------------------------------------------------
 
-// * List() with options starred-only and completed-only
-// * PublicLink() with more user-configurable options
-// * upload() with configurable chunk-size
-// * backend command: untrash
+// * List() with options starred-only
+// * uploadByResumable() with configurable chunk-size
+// * user-configurable list chunk
+// * Prefer api.Medias[].Link.Url for opening media
+// * backend command: untrash, iscached
 // * api(event,task)
 
 import (
@@ -53,10 +31,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
-	"regexp"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,13 +65,12 @@ import (
 
 // Constants
 const (
-	rcloneClientID     = "YNxT9w7GMdWvEOKa"
-	rcloneClientSecret = "dbw2OtmVEeuUvIptb1Coygx"
-	minSleep           = 10 * time.Millisecond
-	maxSleep           = 2 * time.Second
-	decayConstant      = 2 // bigger for slower decay, exponential
-	rootURL            = "https://api-drive.mypikpak.com"
-	userAgent          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 Edg/107.0.1418.35"
+	rcloneClientID              = "YcrttD06T9PIkqAY"
+	rcloneEncryptedClientSecret = "LWuiaQ-Ddj0aOK7V11pCaemYcR65sHJTDRew16OfiSYEUl0DG3g"
+	minSleep                    = 10 * time.Millisecond
+	maxSleep                    = 2 * time.Second
+	decayConstant               = 2 // bigger for slower decay, exponential
+	rootURL                     = "https://api-drive.mypikpak.com"
 )
 
 // Globals
@@ -106,7 +84,7 @@ var (
 			AuthStyle: oauth2.AuthStyleInParams,
 		},
 		ClientID:     rcloneClientID,
-		ClientSecret: rcloneClientSecret,
+		ClientSecret: obscure.MustReveal(rcloneEncryptedClientSecret),
 		RedirectURL:  oauthutil.RedirectURL,
 	}
 )
@@ -127,7 +105,10 @@ func pikpakOAuthOptions() []fs.Option {
 
 // pikpakAutorize retrieves OAuth token using user/pass and save it to rclone.conf
 func pikpakAuthorize(ctx context.Context, opt *Options, name string, m configmap.Mapper) error {
-	pass := obscure.MustReveal(opt.Password)
+	pass, err := obscure.Reveal(opt.Password)
+	if err != nil {
+		return fmt.Errorf("failed to decode password - did you obscure it?: %w", err)
+	}
 	t, err := oauthConfig.PasswordCredentialsToken(ctx, opt.Username, pass)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve token using username/password: %w", err)
@@ -198,12 +179,6 @@ Fill in for rclone to use a non root folder as its starting point.
 			Help:     "Only show files that are in the trash.\n\nThis will show trashed files in their original directory structure.",
 			Advanced: true,
 		}, {
-			// TODO not implemented yet
-			Name:     "starred_only",
-			Default:  false,
-			Help:     "Only show files that are starred.",
-			Advanced: true,
-		}, {
 			Name:     "hash_memory_limit",
 			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
@@ -212,9 +187,20 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
-			Default:  encoder.EncodeInvalidUtf8,
-			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
-			// TODO: elaborate more on this option
+			Default: (encoder.EncodeCtl |
+				encoder.EncodeDot |
+				encoder.EncodeBackSlash |
+				encoder.EncodeSlash |
+				encoder.EncodeDoubleQuote |
+				encoder.EncodeAsterisk |
+				encoder.EncodeColon |
+				encoder.EncodeLtGt |
+				encoder.EncodeQuestion |
+				encoder.EncodePipe |
+				encoder.EncodeLeftSpace |
+				encoder.EncodeRightSpace |
+				encoder.EncodeRightPeriod |
+				encoder.EncodeInvalidUtf8),
 		}}...),
 	})
 }
@@ -226,8 +212,7 @@ type Options struct {
 	RootFolderID        string               `config:"root_folder_id"`
 	UseTrash            bool                 `config:"use_trash"`
 	TrashedOnly         bool                 `config:"trashed_only"`
-	StarredOnly         bool                 `config:"starred_only"`
-	HashMemoryThreshold fs.SizeSuffix        `config:"md5_memory_limit"`
+	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -244,7 +229,7 @@ type Fs struct {
 	client       *http.Client       // authorized client
 	fileObj      *fs.Object         // mod
 	m            configmap.Mapper
-	tokenMu      *sync.Mutex // mod
+	tokenMu      *sync.Mutex // when renewing tokens
 }
 
 // Object describes a pikpak object
@@ -259,7 +244,6 @@ type Object struct {
 	md5sum      string    // md5sum of the object
 	hasMetaData bool      // whether info below has been set
 	link        *api.Link // download links
-	linkMu      *sync.Mutex
 }
 
 // ------------------------------------------------------------
@@ -286,7 +270,9 @@ func (f *Fs) Features() *fs.Features {
 
 // Precision return the precision of this Fs
 func (f *Fs) Precision() time.Duration {
-	return time.Millisecond
+	return fs.ModTimeNotSupported
+	// meaning that the modification times from the backend shouldn't be used for syncing
+	// as they can't be set.
 }
 
 // DirCacheFlush resets the directory cache - used in testing as an
@@ -306,35 +292,12 @@ func parsePath(path string) (root string) {
 	return
 }
 
-// parseRootID parses RootID from path
-func parseRootID(s string) (rootID string, err error) {
-	re := regexp.MustCompile(`\{([^}]{5,})\}`)
-	m := re.FindStringSubmatch(s)
-	if m == nil {
-		return "", fmt.Errorf("%s does not contain a valid id", s)
-	}
-	rootID = m[1]
-
-	if strings.HasPrefix(rootID, "http") {
-		// https://mypikpak.com/drive/all/{ID}
-		// https://mypikpak.com/drive/recent/{ID}
-		// https://mypikpak.com/s/{ID}
-		re := regexp.MustCompile(`\/drive\/(all|recent)(\/([A-Za-z0-9_-]{6,}))+\/?`)
-		if m := re.FindStringSubmatch(rootID); m != nil {
-			rootID = m[len(m)-1]
-			return
-		}
-	}
-	return
-}
-
-// parentIdForRequest returns ParentId for api requests
-func parentIdForRequest(Id string) string {
-	if Id == "root" {
+// parentIDForRequest returns ParentId for api requests
+func parentIDForRequest(dirID string) string {
+	if dirID == "root" {
 		return ""
-	} else {
-		return Id
 	}
+	return dirID
 }
 
 // retryErrorCodes is a slice of error codes that we will retry
@@ -404,15 +367,26 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (b
 		}
 	}
 
-	// switch apiErr := err.(type) {
-	// case *api.Error:
-	// 	if apiErr.Reason == "unauthenticated" || apiErr.Reason == "invalid_grant" {
-	// 		if err := f.doAuthorize(ctx); err != nil {
-	// 			return false, fserrors.FatalError(err)
-	// 		}
-	// 		return true, nil
-	// 	}
-	// }
+	switch apiErr := err.(type) {
+	case *api.Error:
+		if apiErr.Reason == "file_rename_uncompleted" {
+			// "file_rename_uncompleted" (9): Renaming uncompleted file or folder is not supported
+			// This error occurs when you attempt to rename objects
+			// right after some server-side changes, e.g. DirMove, Move, Copy
+			return true, nil
+		} else if apiErr.Reason == "file_duplicated_name" {
+			// "file_duplicated_name" (3): File name cannot be repeated
+			// This error may occur when attempting to rename temp object (newly uploaded)
+			// right after the old one is removed.
+			return true, nil
+		} else if apiErr.Reason == "task_daily_create_limit_vip" {
+			// "task_daily_create_limit_vip" (11): Sorry, you have submitted too many tasks and have exceeded the current processing capacity, please try again tomorrow
+			return false, fserrors.FatalError(err)
+		} else if apiErr.Reason == "file_space_not_enough" {
+			// "file_space_not_enough" (8): Storage space is not enough
+			return false, fserrors.FatalError(err)
+		}
+	}
 
 	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
@@ -445,7 +419,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		return nil, err
 	}
 
-	// override rootID from path remote:{ID}
+	// mod - override rootID from path remote:{ID}
 	if rootID, _ := parseRootID(path); len(rootID) > 6 {
 		name += rootID
 		path = path[strings.Index(path, "}")+1:]
@@ -457,13 +431,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	if err != nil {
 		return nil, fmt.Errorf("pikpak: failed when making oauth client: %w", err)
 	}
-
-	ci := fs.GetConfig(ctx)
-	// multipart copy doesn't seem to be allowed when opening an object for download
-	// temporary workaround by forcing `--multi-thread-streams=1`
-	ci.MultiThreadStreams = 1
-	// override user-agent
-	ci.UserAgent = userAgent
 
 	f := &Fs{
 		name:    name,
@@ -530,7 +497,7 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
 
-	// in case parsed rootID is pointing to a file
+	// mod - in case parsed rootID is pointing to a file
 	if srcFile != nil {
 		tempF := *f
 		newRoot := ""
@@ -617,7 +584,6 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	o := &Object{
 		fs:     f,
 		remote: remote,
-		linkMu: new(sync.Mutex),
 	}
 	var err error
 	if info != nil {
@@ -634,7 +600,7 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 // NewObject finds the Object at remote.  If it can't be found
 // it returns the error fs.ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
-	// in case parsed rootID is pointing to a file
+	// mod - in case parsed rootID is pointing to a file
 	if f.fileObj != nil {
 		return *f.fileObj, nil
 	}
@@ -651,7 +617,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 	}
 	found, err = f.listAll(ctx, pathID, api.KindOfFolder, trashed, func(item *api.File) bool {
 		if item.Name == leaf {
-			pathIDOut = item.Id
+			pathIDOut = item.ID
 			return true
 		}
 		return false
@@ -673,26 +639,22 @@ type listAllFn func(*api.File) bool
 func (f *Fs) listAll(ctx context.Context, dirID, kind, trashed string, fn listAllFn) (found bool, err error) {
 	// Url Parameters
 	params := url.Values{}
-	params.Set("thumbnail_size", api.ThumbnaleSizeM)
+	params.Set("thumbnail_size", api.ThumbnailSizeM)
 	params.Set("limit", strconv.Itoa(api.ListLimit))
 	params.Set("with_audit", strconv.FormatBool(true))
-	if parentId := parentIdForRequest(dirID); parentId != "" {
-		params.Set("parent_id", parentId)
+	if parentID := parentIDForRequest(dirID); parentID != "" {
+		params.Set("parent_id", parentID)
 	}
 
 	// Construct filter string
 	filters := &api.Filters{}
-	filters.Set("Phase", api.PhaseTypeComplete)
-	filters.Set("Trashed", trashed)
-	// TODO: starred only
-	// TODO: completed only
-	filters.Set("Kind", kind)
-	if *filters != (api.Filters{}) {
-		if filterStr, err := json.Marshal(filters); err == nil {
-			params.Set("filters", string(filterStr))
-		}
+	filters.Set("Phase", "eq", api.PhaseTypeComplete)
+	filters.Set("Trashed", "eq", trashed)
+	filters.Set("Kind", "eq", kind)
+	if filterStr, err := json.Marshal(filters); err == nil {
+		params.Set("filters", string(filterStr))
 	}
-	fs.Debugf(f, "list params: %v", params)
+	// fs.Debugf(f, "list params: %v", params)
 
 	opts := rest.Opts{
 		Method:     "GET",
@@ -739,12 +701,12 @@ func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) 
 	switch {
 	case item.Kind == api.KindOfFolder:
 		// cache the directory ID for later lookups
-		f.dirCache.Put(remote, item.Id)
-		d := fs.NewDir(remote, time.Time(item.ModifiedTime)).SetID(item.Id)
-		if item.ParentId == "" {
+		f.dirCache.Put(remote, item.ID)
+		d := fs.NewDir(remote, time.Time(item.ModifiedTime)).SetID(item.ID)
+		if item.ParentID == "" {
 			d.SetParentID("root")
 		} else {
-			d.SetParentID(item.ParentId)
+			d.SetParentID(item.ParentID)
 		}
 		return d, nil
 	case f.opt.TrashedOnly && !item.Trashed:
@@ -769,7 +731,7 @@ func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) 
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
-	fs.Debugf(f, "List(%q)\n", dir)
+	// fs.Debugf(f, "List(%q)\n", dir)
 	dirID, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return nil, err
@@ -802,17 +764,17 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	fs.Debugf(f, "CreateDir(%q, %q)\n", pathID, leaf)
+	// fs.Debugf(f, "CreateDir(%q, %q)\n", pathID, leaf)
 	req := api.RequestNewFile{
 		Name:     f.opt.Enc.FromStandardName(leaf),
 		Kind:     api.KindOfFolder,
-		ParentId: parentIdForRequest(pathID),
+		ParentID: parentIDForRequest(pathID),
 	}
 	info, err := f.requestNewFile(ctx, &req)
 	if err != nil {
 		return "", err
 	}
-	return info.Id, nil
+	return info.File.ID, nil
 }
 
 // Mkdir creates the container if it doesn't exist
@@ -825,12 +787,12 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 	info, err := f.getAbout(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get drive#quota: %w", err)
+		return nil, fmt.Errorf("failed to get drive quota: %w", err)
 	}
 	q := info.Quota
 	usage = &fs.Usage{
-		Used:    fs.NewUsageValue(q.Usage),        // bytes in use
-		Trashed: fs.NewUsageValue(q.UsageInTrash), // bytes in trash but this seems not working
+		Used: fs.NewUsageValue(q.Usage), // bytes in use
+		// Trashed: fs.NewUsageValue(q.UsageInTrash), // bytes in trash but this seems not working
 	}
 	if q.Limit > 0 {
 		usage.Total = fs.NewUsageValue(q.Limit)          // quota of bytes that can be used
@@ -841,7 +803,6 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 
 // PublicLink adds a "readable by anyone with link" permission on the given file or folder.
 func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, unlink bool) (string, error) {
-	// TODO: can be improved further; expiration days, passcode, and ...
 	id, err := f.dirCache.FindDir(ctx, remote, false)
 	if err == nil {
 		fs.Debugf(f, "attempting to share directory '%s'", remote)
@@ -853,17 +814,21 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 		}
 		id = o.(*Object).id
 	}
+	expiry := -1
+	if expire < fs.DurationOff {
+		expiry = int(math.Ceil(time.Duration(expire).Hours() / 24))
+	}
 	req := api.RequestShare{
 		FileIds:        []string{id},
 		ShareTo:        "publiclink",
-		ExpirationDays: -1,
+		ExpirationDays: expiry,
 		PassCodeOption: "NOT_REQUIRED",
 	}
 	info, err := f.requestShare(ctx, &req)
 	if err != nil {
 		return "", err
 	}
-	return info.ShareUrl, err
+	return info.ShareURL, err
 }
 
 // delete a file or directory by ID w/o using trash
@@ -950,23 +915,20 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 
 // CleanUp empties the trash
 func (f *Fs) CleanUp(ctx context.Context) (err error) {
-	var IDs []string
-	_, err = f.listAll(ctx, "*", "", "true", func(item *api.File) bool {
-		IDs = append(IDs, item.Id)
-		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
-		if len(IDs) >= api.ListLimit {
-			if err = f.deleteObjects(ctx, IDs, false); err != nil {
-				return true
-			} else {
-				IDs = nil
-			}
-		}
-		return false
+	opts := rest.Opts{
+		Method:     "PATCH",
+		Path:       "/drive/v1/files/trash:empty",
+		NoResponse: true, // Only returns `{"task_id":""}
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.Call(ctx, &opts)
+		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
-		return fmt.Errorf("couldn't list trashed items: %w", err)
+		return fmt.Errorf("couldn't empty trash: %w", err)
 	}
-	return f.deleteObjects(ctx, IDs, false)
+	return nil
 }
 
 // Move the object
@@ -976,7 +938,7 @@ func (f *Fs) moveObjects(ctx context.Context, IDs []string, dirID string) (err e
 	}
 	req := api.RequestBatch{
 		Ids: IDs,
-		To:  &map[string]string{"parent_id": parentIdForRequest(dirID)},
+		To:  map[string]string{"parent_id": parentIDForRequest(dirID)},
 	}
 	if err := f.requestBatchAction(ctx, "batchMove", &req); err != nil {
 		return fmt.Errorf("move object failed: %w", err)
@@ -1054,7 +1016,6 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		remote:  remote,
 		size:    size,
 		modTime: modTime,
-		linkMu:  new(sync.Mutex),
 	}
 	return o, leaf, dirID, nil
 }
@@ -1107,17 +1068,12 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		}
 	} else {
 		// Update info
-		info, err = f.getFile(ctx, srcObj.id)
+		info, err = f.getFile(ctx, dstObj.id)
 		if err != nil {
 			return nil, fmt.Errorf("move: couldn't update moved file: %w", err)
 		}
 	}
-
-	err = dstObj.setMetaData(info)
-	if err != nil {
-		return nil, err
-	}
-	return dstObj, nil
+	return dstObj, dstObj.setMetaData(info)
 }
 
 // copy objects
@@ -1127,7 +1083,7 @@ func (f *Fs) copyObjects(ctx context.Context, IDs []string, dirID string) (err e
 	}
 	req := api.RequestBatch{
 		Ids: IDs,
-		To:  &map[string]string{"parent_id": parentIdForRequest(dirID)},
+		To:  map[string]string{"parent_id": parentIDForRequest(dirID)},
 	}
 	if err := f.requestBatchAction(ctx, "batchCopy", &req); err != nil {
 		return fmt.Errorf("copy object failed: %w", err)
@@ -1156,12 +1112,17 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 
 	// Create temporary object
-	dstObj, dstLeaf, dirID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
+	if srcObj.parent == dstParentID {
+		// api restriction
+		fs.Debugf(src, "Can't copy - same parent")
+		return nil, fs.ErrorCantCopy
+	}
 	// Copy the object
-	if err := f.copyObjects(ctx, []string{srcObj.id}, dirID); err != nil {
+	if err := f.copyObjects(ctx, []string{srcObj.id}, dstParentID); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
 	}
 
@@ -1172,127 +1133,71 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	var info *api.File
 	if srcLeaf != dstLeaf {
 		// Rename
-		info, err = f.renameObject(ctx, dstObj.id, dstLeaf)
+		info, err := f.renameObject(ctx, dstObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
+		err = dstObj.setMetaData(info)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		// Update info
-		info, err = f.getFile(ctx, srcObj.id)
+		err = dstObj.readMetaData(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("copy: couldn't update copied file: %w", err)
+			return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
 		}
-	}
-
-	err = dstObj.setMetaData(info)
-	if err != nil {
-		return nil, err
 	}
 	return dstObj, nil
 }
 
-// MergeDirs merges the contents of all the directories passed
-// in into the first one and rmdirs the other directories.
-func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
-	if len(dirs) < 2 {
-		return nil
+func (f *Fs) uploadByForm(ctx context.Context, in io.Reader, name string, size int64, form *api.Form, options ...fs.OpenOption) (err error) {
+	// struct to map. transferring values from MultParts to url parameter
+	params := url.Values{}
+	iVal := reflect.ValueOf(&form.MultiParts).Elem()
+	iTyp := iVal.Type()
+	for i := 0; i < iVal.NumField(); i++ {
+		params.Set(iTyp.Field(i).Tag.Get("json"), iVal.Field(i).String())
 	}
-	dstDir := dirs[0]
-	for _, srcDir := range dirs[1:] {
-		// list the objects that are NOT marked as trashed
-		//
-		// Moving objects in recycler throws following error:
-		// file_move_from_recycle_bin (9): "Moving in recycler is not allowed"
-		var IDs []string
-		_, err = f.listAll(ctx, srcDir.ID(), "", "false", func(item *api.File) bool {
-			fs.Infof(srcDir, "listing for merging %q", item.Name)
-			IDs = append(IDs, item.Id)
-			// API doesn't allow to move a large number of objects at once, so doing it in chunked
-			if len(IDs) >= api.ListLimit {
-				if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
-					return true
-				} else {
-					IDs = nil
-				}
-			}
-			return false
-		})
-		if err != nil {
-			return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
-		}
-		// move them into place
-		if err = f.moveObjects(ctx, IDs, dstDir.ID()); err != nil {
-			return fmt.Errorf("MergeDirs move failed in %v: %w", srcDir, err)
-		}
+	formReader, contentType, overhead, err := rest.MultipartUpload(ctx, in, params, "file", name)
+	if err != nil {
+		return fmt.Errorf("failed to make multipart upload: %w", err)
 	}
 
-	// rmdir (into trash) the now empty source directory
-	var IDs []string
-	for _, srcDir := range dirs[1:] {
-		fs.Infof(srcDir, "removing empty directory")
-		IDs = append(IDs, srcDir.ID())
-		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
-		if len(IDs) >= api.ListLimit {
-			if err = f.deleteObjects(ctx, IDs, true); err != nil {
-				return err
-			} else {
-				IDs = nil
-			}
-		}
+	contentLength := overhead + size
+	opts := rest.Opts{
+		Method:           form.Method,
+		RootURL:          form.URL,
+		Body:             formReader,
+		ContentType:      contentType,
+		ContentLength:    &contentLength,
+		Options:          options,
+		TransferEncoding: []string{"identity"},
+		NoResponse:       true,
 	}
-	if err := f.deleteObjects(ctx, IDs, true); err != nil {
-		return fmt.Errorf("MergeDirs failed to rmdir: %w", err)
-	}
-	return nil
+
+	var resp *http.Response
+	err = f.pacer.CallNoRetry(func() (bool, error) {
+		resp, err = f.srv.Call(ctx, &opts)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
 }
 
-func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size int64, options ...fs.OpenOption) (*api.File, error) {
-	// Calculate sha1sum; grabbed from package jottacloud
-	//
-	// unwrap the accounting from the input, we use wrap to put it
-	// back on after the buffering
-	var wrap accounting.WrapFn
-	in, wrap = accounting.UnWrap(in)
-	var cleanup func()
-	sha1Str, in, cleanup, err := readSHA1(in, size, int64(f.opt.HashMemoryThreshold))
-	defer cleanup()
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
-	}
-	// Wrap the accounting back onto the stream
-	in = wrap(in)
-
-	// request upload ticket to API
-	req := api.RequestNewResumable{
-		Kind:        api.KindOfFile,
-		Name:        f.opt.Enc.FromStandardName(leaf),
-		Size:        size,
-		Hash:        strings.ToUpper(sha1Str),
-		UploadType:  "UPLOAD_TYPE_RESUMABLE",
-		ObjProvider: &map[string]string{"provider": "UPLOAD_TYPE_UNKNOWN"},
-		ParentId:    dirID,
-	}
-	resumable, err := f.requestNewResumable(ctx, &req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resumable: %w", err)
-	}
-	r := resumable.Resumable
-
-	p := r.Params
-	endpointSplit := strings.Split(p.Endpoint, ".")
-	endpoint := strings.Join(endpointSplit[1:], ".")
+func (f *Fs) uploadByResumable(ctx context.Context, in io.Reader, resumable *api.Resumable, options ...fs.OpenOption) (err error) {
+	p := resumable.Params
+	endpoint := strings.Join(strings.Split(p.Endpoint, ".")[1:], ".") // "mypikpak.com"
 
 	cfg := &aws.Config{
-		Credentials: credentials.NewStaticCredentials(p.AccessKeyId, p.AccessKeySecret, p.SecurityToken),
+		Credentials: credentials.NewStaticCredentials(p.AccessKeyID, p.AccessKeySecret, p.SecurityToken),
 		Region:      aws.String("pikpak"),
 		Endpoint:    &endpoint,
 	}
 	sess, err := session.NewSession(cfg)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	uploader := s3manager.NewUploader(sess)
@@ -1303,38 +1208,57 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID string, size 
 		Body:   in,
 	}
 	// Perform upload with options different than the those in the Uploader.
-	_, err = uploader.Upload(uParams, func(u *s3manager.Uploader) {
+	_, err = uploader.UploadWithContext(ctx, uParams, func(u *s3manager.Uploader) {
 		// TODO can be user-configurable
 		u.PartSize = 10 * 1024 * 1024 // 10MB part size
 	})
-	if err != nil {
-		return nil, err
-	}
-	return resumable.File, nil
+	return
 }
 
-// PutUnchecked the object into the container
-//
-// This will produce an error if the object already exists.
-//
-// Copy the reader in to the new object which is returned.
-//
-// The new object may have been created if an error is returned
-func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	remote := src.Remote()
-	size := src.Size()
-
-	// Create the directory for the object if it doesn't exist
-	leaf, dirID, err := f.dirCache.FindPath(ctx, remote, true)
-	if err != nil {
-		return nil, err
+func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID, sha1Str string, size int64, options ...fs.OpenOption) (*api.File, error) {
+	// determine upload type
+	uploadType := api.UploadTypeResumable
+	if size >= 0 && size < int64(5*fs.Mebi) {
+		uploadType = api.UploadTypeForm
 	}
 
-	info, err := f.upload(ctx, in, leaf, dirID, size, options...)
-	if err != nil {
-		return nil, err
+	// request upload ticket to API
+	req := api.RequestNewFile{
+		Kind:       api.KindOfFile,
+		Name:       f.opt.Enc.FromStandardName(leaf),
+		ParentID:   parentIDForRequest(dirID),
+		FolderType: "NORMAL",
+		Size:       size,
+		Hash:       strings.ToUpper(sha1Str),
+		UploadType: uploadType,
 	}
-	return f.newObjectWithInfo(ctx, remote, info)
+	if uploadType == api.UploadTypeResumable {
+		req.Resumable = map[string]string{"provider": "PROVIDER_ALIYUN"}
+	}
+	newfile, err := f.requestNewFile(ctx, &req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create a new file: %w", err)
+	}
+	if newfile.File == nil {
+		return nil, fmt.Errorf("invalid response: %+v", newfile)
+	} else if newfile.File.Phase == api.PhaseTypeComplete {
+		// early return; in case of zero-byte objects
+		return newfile.File, nil
+	}
+
+	if uploadType == api.UploadTypeForm && newfile.Form != nil {
+		err = f.uploadByForm(ctx, in, req.Name, size, newfile.Form, options...)
+	} else if uploadType == api.UploadTypeResumable && newfile.Resumable != nil {
+		err = f.uploadByResumable(ctx, in, newfile.Resumable, options...)
+	} else {
+		return nil, fmt.Errorf("unable to proceed upload: %+v", newfile)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload: %w", err)
+	}
+	// refresh uploaded file info
+	return f.getFile(ctx, newfile.File.ID)
 }
 
 // Put the object
@@ -1349,15 +1273,14 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 		return existingObj, existingObj.Update(ctx, in, src, options...)
 	case fs.ErrorObjectNotFound:
 		// Not found so create it
-		return f.PutUnchecked(ctx, in, src)
+		newObj := &Object{
+			fs:     f,
+			remote: src.Remote(),
+		}
+		return newObj, newObj.upload(ctx, in, src, false, options...)
 	default:
 		return nil, err
 	}
-}
-
-// PutStream uploads to the remote path with the modTime given of indeterminate size
-func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	return f.Put(ctx, in, src, options...)
 }
 
 // UserInfo fetches info about the current user
@@ -1380,39 +1303,18 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 
 // ------------------------------------------------------------
 
-// get an id of file or directory
-func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
-	if id, _ := parseRootID(path); len(id) > 6 {
-		info, err := f.getFile(ctx, id)
-		if err != nil {
-			return "", fmt.Errorf("no such object with id %q: %w", id, err)
-		}
-		return info.Id, nil
-	}
-	path = strings.Trim(path, "/")
-	id, err = f.dirCache.FindDir(ctx, path, false)
-	if err != nil {
-		o, err := f.NewObject(ctx, path)
-		if err != nil {
-			return "", err
-		}
-		id = o.(fs.IDer).ID()
-	}
-	return id, nil
-}
-
 // add offline download task for url
-func (f *Fs) addUrl(ctx context.Context, url, path string) (*api.Task, error) {
+func (f *Fs) addURL(ctx context.Context, url, path string) (*api.Task, error) {
 	req := api.RequestNewTask{
 		Kind:       api.KindOfFile,
 		UploadType: "UPLOAD_TYPE_URL",
-		Url: &api.Url{
-			Url: url,
+		URL: &api.URL{
+			URL: url,
 		},
 		FolderType: "DOWNLOAD",
 	}
-	if parentId, err := f.dirCache.FindDir(ctx, path, false); err == nil {
-		req.ParentId = parentIdForRequest(parentId)
+	if parentID, err := f.dirCache.FindDir(ctx, path, false); err == nil {
+		req.ParentID = parentIDForRequest(parentID)
 		req.FolderType = ""
 	}
 	return f.requestNewTask(ctx, &req)
@@ -1445,7 +1347,7 @@ func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, s
 					r.Decompressed++
 					fs.Infof(f, "%q: %d files: %s", item.Name, res.FilesNum, res.Status)
 					if srcDelete {
-						derr := f.deleteObjects(ctx, []string{item.Id}, f.opt.UseTrash)
+						derr := f.deleteObjects(ctx, []string{item.ID}, f.opt.UseTrash)
 						if derr != nil {
 							derr = fmt.Errorf("failed to delete %q: %w", item.Name, derr)
 							r.Errors++
@@ -1470,7 +1372,7 @@ func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, s
 	return r, nil
 }
 
-var commandHelp = []fs.CommandHelp{{
+var commandHelp = []fs.CommandHelp{{ // mod
 	Name:  "getid",
 	Short: "Get an ID of a file or directory",
 	Long: `This command is to obtain an ID of a file or directory.
@@ -1508,6 +1410,14 @@ An optional argument 'filename' can be specified for a file located in
 'pikpak:dirpath'. You may want to pass '-o password=password' for a 
 password-protected files. Also, pass '-o delete-src-file' to delete 
 source files after decompression finished.
+
+Result:
+
+    {
+        "Decompressed": 17,
+        "SourceDeleted": 0,
+        "Errors": 0
+    }
 `,
 }}
 
@@ -1523,6 +1433,7 @@ source files after decompression finished.
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
 	switch name {
 	case "getid":
+		// mod
 		path := ""
 		if len(arg) > 0 {
 			path = arg[0]
@@ -1532,7 +1443,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		if len(arg) != 1 {
 			return nil, errors.New("need exactly 1 argument")
 		}
-		return f.addUrl(ctx, arg[0], "")
+		return f.addURL(ctx, arg[0], "")
 	case "decompress":
 		filename := ""
 		if len(arg) > 0 {
@@ -1548,9 +1459,6 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		}
 		_, srcDelete := opt["delete-src-file"]
 		return f.decompressDir(ctx, filename, id, password, srcDelete)
-	case "untrash":
-		// TODO: untrash
-		return nil, nil
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}
@@ -1567,14 +1475,14 @@ func (o *Object) setMetaData(info *api.File) (err error) {
 		return fmt.Errorf("%q is %q: %w", o.remote, info.Kind, fs.ErrorNotAFile)
 	}
 	o.hasMetaData = true
-	o.id = info.Id
+	o.id = info.ID
 	o.size = info.Size
 	o.modTime = time.Time(info.ModifiedTime)
 	o.mimeType = info.MimeType
-	if info.ParentId == "" {
+	if info.ParentID == "" {
 		o.parent = "root"
 	} else {
-		o.parent = info.ParentId
+		o.parent = info.ParentID
 	}
 	o.md5sum = info.Md5Checksum
 	if info.Links != nil {
@@ -1591,27 +1499,6 @@ func (o *Object) readMetaData(ctx context.Context) (err error) {
 		return nil
 	}
 	info, err := o.fs.readMetaDataForPath(ctx, o.remote)
-	if err != nil {
-		return err
-	}
-	return o.setMetaData(info)
-}
-
-// setMetaDataWithLink sets links containing download url for Open()
-func (o *Object) setMetaDataWithLink(ctx context.Context) error {
-	o.linkMu.Lock()
-	defer o.linkMu.Unlock()
-
-	if o.link != nil {
-		url := o.link.Url
-		expiry := time.Time(o.link.Expire)
-		if url != "" && time.Now().Before(expiry) {
-			return nil
-		}
-	}
-
-	// fetch from server
-	info, err := o.fs.getFile(ctx, o.id)
 	if err != nil {
 		return err
 	}
@@ -1640,6 +1527,9 @@ func (o *Object) Remote() string {
 func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 	if t != hash.MD5 {
 		return "", hash.ErrUnsupported
+	}
+	if o.md5sum == "" {
+		return "", nil
 	}
 	return strings.ToLower(o.md5sum), nil
 }
@@ -1706,9 +1596,6 @@ func (o *Object) httpResponse(ctx context.Context, url, method string, options [
 	}
 	fs.FixRangeOption(options, o.size)
 	fs.OpenOptionAddHTTPHeaders(req.Header, options)
-	if o.link.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+o.link.Token)
-	}
 	if o.size == 0 {
 		// Don't supply range requests for 0 length objects as they always fail
 		delete(req.Header, "Range")
@@ -1737,17 +1624,21 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if o.id == "" {
 		return nil, errors.New("can't download - no id")
 	}
-	if err = o.setMetaDataWithLink(ctx); err != nil {
+	info, err := o.fs.getFile(ctx, o.id)
+	if err != nil {
+		return nil, fmt.Errorf("can't fetch download link: %w", err)
+	}
+	if err = o.setMetaData(info); err != nil {
 		return nil, err
 	}
 	if o.link == nil {
 		if o.size == 0 {
-			// zero-sized object may have no download link
+			// zero-byte objects may have no download link
 			return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 		}
 		return nil, errors.New("can't download - no link to download")
 	}
-	return o.open(ctx, o.link.Url, options...)
+	return o.open(ctx, o.link.URL, options...)
 }
 
 // Update the object with the contents of the io.Reader, modTime and size
@@ -1756,6 +1647,11 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 //
 // The new object may have been created if an error is returned
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (err error) {
+	return o.upload(ctx, in, src, true, options...)
+}
+
+// upload uploads the object with or without using a temporary file name
+func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, withTemp bool, options ...fs.OpenOption) (err error) {
 	size := src.Size()
 	remote := o.Remote()
 
@@ -1765,9 +1661,34 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
+	// Calculate sha1sum; grabbed from package jottacloud
+	hashStr, err := src.Hash(ctx, hash.SHA1)
+	if err != nil || hashStr == "" {
+		// unwrap the accounting from the input, we use wrap to put it
+		// back on after the buffering
+		var wrap accounting.WrapFn
+		in, wrap = accounting.UnWrap(in)
+		var cleanup func()
+		hashStr, in, cleanup, err = readSHA1(in, size, int64(o.fs.opt.HashMemoryThreshold))
+		defer cleanup()
+		if err != nil {
+			return fmt.Errorf("failed to calculate SHA1: %w", err)
+		}
+		// Wrap the accounting back onto the stream
+		in = wrap(in)
+	}
+
+	if !withTemp {
+		info, err := o.fs.upload(ctx, in, leaf, dirID, hashStr, size, options...)
+		if err != nil {
+			return err
+		}
+		return o.setMetaData(info)
+	}
+
 	// We have to fall back to upload + rename
 	tempName := "rcloneTemp" + random.String(8)
-	info, err := o.fs.upload(ctx, in, tempName, dirID, size, options...)
+	info, err := o.fs.upload(ctx, in, tempName, dirID, hashStr, size, options...)
 	if err != nil {
 		return err
 	}
@@ -1776,12 +1697,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if err = o.Remove(ctx); err != nil {
 		return fmt.Errorf("failed to remove old object: %w", err)
 	}
-	if err = o.setMetaData(info); err != nil {
-		return err
-	}
 
 	// rename also updates metadata
-	if info, err = o.fs.renameObject(ctx, o.id, leaf); err != nil {
+	if info, err = o.fs.renameObject(ctx, info.ID, leaf); err != nil {
 		return fmt.Errorf("failed to rename temp object: %w", err)
 	}
 	return o.setMetaData(info)
@@ -1791,18 +1709,16 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 var (
 	// _ fs.ListRer         = (*Fs)(nil)
 	// _ fs.ChangeNotifier  = (*Fs)(nil)
+	// _ fs.PutStreamer     = (*Fs)(nil)
 	_ fs.Fs              = (*Fs)(nil)
 	_ fs.Purger          = (*Fs)(nil)
 	_ fs.CleanUpper      = (*Fs)(nil)
-	_ fs.PutStreamer     = (*Fs)(nil)
 	_ fs.Copier          = (*Fs)(nil)
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.Commander       = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
-	_ fs.PutUncheckeder  = (*Fs)(nil)
 	_ fs.PublicLinker    = (*Fs)(nil)
-	_ fs.MergeDirser     = (*Fs)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.UserInfoer      = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
