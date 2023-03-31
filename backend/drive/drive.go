@@ -2660,9 +2660,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-		if saerr := f.changeServiceAccount(ctx); saerr == nil {
-			return nil, saerr
-		}
+		_ = f.changeServiceAccount(ctx) // ignore error
 	}
 	var info *drive.File
 	err = f.pacer.Call(func() (bool, error) {
