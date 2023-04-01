@@ -136,6 +136,11 @@ type Link struct {
 	Type   string `json:"type,omitempty"`
 }
 
+// Valid reports whether l is non-nil, has an URL, and is not expired.
+func (l *Link) Valid() bool {
+	return l != nil && l.URL != "" && time.Now().Add(10*time.Second).Before(time.Time(l.Expire))
+}
+
 // URL is a basic form of URL
 type URL struct {
 	Kind string `json:"kind,omitempty"` // e.g. "upload#url"
@@ -157,8 +162,8 @@ type FileList struct {
 // File is a basic element representing a single file object
 //
 // There are two types of download links,
-// 1) one from api.WebContentLink or api.Links.ApplicationOctetStream.Url and
-// 2) the other from api.Medias[].Link.Url.
+// 1) one from File.WebContentLink or File.Links.ApplicationOctetStream.URL and
+// 2) the other from File.Medias[].Link.URL.
 // Empirically, 2) is less restrictive to multiple concurrent range-requests
 // for a single file, i.e. supports for higher `--multi-thread-streams=N`.
 // However, it is not generally applicable as it is only for meadia.
@@ -428,6 +433,21 @@ type UserProvider struct {
 	Name           string `json:"name,omitempty"` // username
 }
 
+// VIP includes subscription details about premium account
+//
+// GET https://api-drive.mypikpak.com/drive/v1/privilege/vip
+type VIP struct {
+	Result      string `json:"result,omitempty"` // "ACCEPTED"
+	Message     string `json:"message,omitempty"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
+	Data        struct {
+		Expire Time   `json:"expire,omitempty"`
+		Status string `json:"status,omitempty"`  // "invalid" or "ok"
+		Type   string `json:"type,omitempty"`    // "novip" or "platinum"
+		UserID string `json:"user_id,omitempty"` // same as User.Sub
+	} `json:"data,omitempty"`
+}
+
 // DecompressResult is a response to RequestDecompress
 type DecompressResult struct {
 	Status       string `json:"status,omitempty"` // "OK"
@@ -491,21 +511,6 @@ type RequestDecompress struct {
 // ------------------------------------------------------------
 
 // NOT implemented YET
-
-// VIP includes subscription details about premium account
-//
-// GET https://api-drive.mypikpak.com/drive/v1/privilege/vip
-type VIP struct {
-	Result      string `json:"result,omitempty"` // "ACCEPTED"
-	Message     string `json:"message,omitempty"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
-	Data        struct {
-		Expire Time   `json:"expire,omitempty"`
-		Status string `json:"status,omitempty"`  // "invalid"
-		Type   string `json:"type,omitempty"`    // "novip"
-		UserID string `json:"user_id,omitempty"` // same as User.Sub
-	} `json:"data,omitempty"`
-}
 
 // RequestArchiveFileList is to request for a list of files in archive
 //

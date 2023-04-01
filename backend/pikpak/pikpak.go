@@ -20,7 +20,6 @@ package pikpak
 // * List() with options starred-only
 // * uploadByResumable() with configurable chunk-size
 // * user-configurable list chunk
-// * Prefer api.Medias[].Link.Url for opening media
 // * backend command: untrash, iscached
 // * api(event,task)
 
@@ -65,8 +64,8 @@ import (
 
 // Constants
 const (
-	rcloneClientID              = "YcrttD06T9PIkqAY"
-	rcloneEncryptedClientSecret = "LWuiaQ-Ddj0aOK7V11pCaemYcR65sHJTDRew16OfiSYEUl0DG3g"
+	rcloneClientID              = "YNxT9w7GMdWvEOKa"
+	rcloneEncryptedClientSecret = "aqrmB6M1YJ1DWCBxVxFSjFo7wzWEky494YMmkqgAl1do1WKOe2E"
 	minSleep                    = 10 * time.Millisecond
 	maxSleep                    = 2 * time.Second
 	decayConstant               = 2 // bigger for slower decay, exponential
@@ -105,6 +104,13 @@ func pikpakOAuthOptions() []fs.Option {
 
 // pikpakAutorize retrieves OAuth token using user/pass and save it to rclone.conf
 func pikpakAuthorize(ctx context.Context, opt *Options, name string, m configmap.Mapper) error {
+	// override default client id/secret
+	if id, ok := m.Get("client_id"); ok && id != "" {
+		oauthConfig.ClientID = id
+	}
+	if secret, ok := m.Get("client_secret"); ok && secret != "" {
+		oauthConfig.ClientSecret = secret
+	}
 	pass, err := obscure.Reveal(opt.Password)
 	if err != nil {
 		return fmt.Errorf("failed to decode password - did you obscure it?: %w", err)
@@ -184,6 +190,11 @@ Fill in for rclone to use a non root folder as its starting point.
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
 			Advanced: true,
 		}, {
+			Name:     "multi_thread_streams",
+			Help:     "Max number of streams to use for multi-thread downloads.\n\nThis will override global flag `--multi-thread-streams` and defaults to 1 to avoid rate limiting.",
+			Default:  1,
+			Advanced: true,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
@@ -213,6 +224,7 @@ type Options struct {
 	UseTrash            bool                 `config:"use_trash"`
 	TrashedOnly         bool                 `config:"trashed_only"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
+	MultiThreadStreams  int                  `config:"multi_thread_streams"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -222,7 +234,7 @@ type Fs struct {
 	root         string             // the path we are working on
 	opt          Options            // parsed options
 	features     *fs.Features       // optional features
-	srv          *rest.Client       // the connection to the server
+	rst          *rest.Client       // the connection to the server
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer          // pacer for API calls
 	rootFolderID string             // the id of the root folder
@@ -236,14 +248,15 @@ type Fs struct {
 type Object struct {
 	fs          *Fs       // what this object is part of
 	remote      string    // The remote path
+	hasMetaData bool      // whether info below has been set
 	id          string    // ID of the object
 	size        int64     // size of the object
 	modTime     time.Time // modification time of the object
 	mimeType    string    // The object MIME type
 	parent      string    // ID of the parent directories
 	md5sum      string    // md5sum of the object
-	hasMetaData bool      // whether info below has been set
-	link        *api.Link // download links
+	link        *api.Link // link to download the object
+	linkMu      *sync.Mutex
 }
 
 // ------------------------------------------------------------
@@ -310,25 +323,15 @@ var retryErrorCodes = []int{
 	509, // Bandwidth Limit Exceeded
 }
 
-func (f *Fs) doAuthorize(ctx context.Context) (err error) {
+// reAuthorize re-authorize oAuth token during runtime
+func (f *Fs) reAuthorize(ctx context.Context) (err error) {
 	f.tokenMu.Lock()
 	defer f.tokenMu.Unlock()
 
 	if err := pikpakAuthorize(ctx, &f.opt, f.name, f.m); err != nil {
 		return err
 	}
-	f.client, _, err = oauthutil.NewClient(ctx, f.name, f.m, oauthConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create oauth client: %w", err)
-	}
-	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
-	if err != nil {
-		return fmt.Errorf("couldn't create rest client: %w", err)
-	}
-	if err == nil {
-		f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
-	}
-	return err
+	return f.newClientWithPacer(ctx)
 }
 
 // shouldRetry returns a boolean as to whether this resp and err
@@ -351,15 +354,16 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (b
 	}
 
 	// traceback to possible api.Error wrapped in err, and re-authorize if necessary
-	// "unauthenticated" (16): when access_token is invalid
-	// "invalid_grant" (4126): when refresh_token is invalid
+	// "unauthenticated" (16): when access_token is invalid, but should be handled by oauthutil
 	var terr *oauth2.RetrieveError
 	if errors.As(err, &terr) {
 		apiErr := new(api.Error)
 		if err := json.Unmarshal(terr.Body, apiErr); err == nil {
 			if apiErr.Reason == "invalid_grant" {
-				fs.Debugf(f, "Token is invalid. Trying to get a new one using username/password...")
-				if err := f.doAuthorize(ctx); err != nil {
+				// "invalid_grant" (4126): The refresh token is incorrect or expired				//
+				// Invalid refresh token. It may have been refreshed by another process.
+				fs.Debugf(nil, "Invalid grant: Re-Authorizing...")
+				if err := f.reAuthorize(ctx); err != nil {
 					return false, fserrors.FatalError(err)
 				}
 				return true, nil
@@ -373,12 +377,12 @@ func (f *Fs) shouldRetry(ctx context.Context, resp *http.Response, err error) (b
 			// "file_rename_uncompleted" (9): Renaming uncompleted file or folder is not supported
 			// This error occurs when you attempt to rename objects
 			// right after some server-side changes, e.g. DirMove, Move, Copy
-			return true, nil
+			return true, err
 		} else if apiErr.Reason == "file_duplicated_name" {
 			// "file_duplicated_name" (3): File name cannot be repeated
 			// This error may occur when attempting to rename temp object (newly uploaded)
 			// right after the old one is removed.
-			return true, nil
+			return true, err
 		} else if apiErr.Reason == "task_daily_create_limit_vip" {
 			// "task_daily_create_limit_vip" (11): Sorry, you have submitted too many tasks and have exceeded the current processing capacity, please try again tomorrow
 			return false, fserrors.FatalError(err)
@@ -408,6 +412,17 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
+// newClientWithPacer sets a new http/rest client with a pacer to Fs
+func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
+	f.client, _, err = oauthutil.NewClient(ctx, f.name, f.m, oauthConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create oauth client: %w", err)
+	}
+	f.rst = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
+	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
+	return nil
+}
+
 // newFs partially constructs Fs from the path
 //
 // It constructs a valid Fs but doesn't attempt to figure out whether
@@ -427,10 +442,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 	root := parsePath(path)
 
-	client, _, err := oauthutil.NewClient(ctx, name, m, oauthConfig)
-	if err != nil {
-		return nil, fmt.Errorf("pikpak: failed when making oauth client: %w", err)
-	}
+	// overrides global `--multi-thread-streams` by local one
+	ci := fs.GetConfig(ctx)
+	ci.MultiThreadStreams = opt.MultiThreadStreams
 
 	f := &Fs{
 		name:    name,
@@ -438,21 +452,22 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		opt:     *opt,
 		m:       m,
 		tokenMu: new(sync.Mutex),
-		client:  client,
-		srv:     rest.NewClient(client).SetRoot(rootURL).SetErrorHandler(errorHandler),
-		pacer:   fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.features = (&fs.Features{
 		ReadMimeType:            true, // can read the mime type of objects
 		CanHaveEmptyDirectories: true, // can have empty directories
 	}).Fill(ctx, f)
 
+	if err := f.newClientWithPacer(ctx); err != nil {
+		return nil, err
+	}
+
 	// Check if current token is valid and re-authorize if necessary.
 	// It is somehow redundant since it is covered in shouldRetry().
 	// However it is a preemptive measure to avoid possible retries while validating a token.
 	if token, err := oauthutil.GetToken(name, m); err == nil && !token.Valid() {
-		fs.Debugf(f, "Token is invalid. Trying to get a new one using username/password...")
-		if err := f.doAuthorize(ctx); err != nil {
+		fs.Debugf(nil, "Invalid token: Re-Authorizing...")
+		if err := pikpakAuthorize(ctx, opt, name, m); err != nil {
 			return nil, fserrors.FatalError(err)
 		}
 	}
@@ -584,6 +599,7 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	o := &Object{
 		fs:     f,
 		remote: remote,
+		linkMu: new(sync.Mutex),
 	}
 	var err error
 	if info != nil {
@@ -670,7 +686,7 @@ OUTER:
 		var info api.FileList
 		var resp *http.Response
 		err = f.pacer.Call(func() (bool, error) {
-			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+			resp, err = f.rst.CallJSON(ctx, &opts, nil, &info)
 			return f.shouldRetry(ctx, resp, err)
 		})
 		if err != nil {
@@ -922,7 +938,7 @@ func (f *Fs) CleanUp(ctx context.Context) (err error) {
 	}
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.Call(ctx, &opts)
+		resp, err = f.rst.Call(ctx, &opts)
 		return f.shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
@@ -1016,6 +1032,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		remote:  remote,
 		size:    size,
 		modTime: modTime,
+		linkMu:  new(sync.Mutex),
 	}
 	return o, leaf, dirID, nil
 }
@@ -1180,7 +1197,7 @@ func (f *Fs) uploadByForm(ctx context.Context, in io.Reader, name string, size i
 
 	var resp *http.Response
 	err = f.pacer.CallNoRetry(func() (bool, error) {
-		resp, err = f.srv.Call(ctx, &opts)
+		resp, err = f.rst.Call(ctx, &opts)
 		return f.shouldRetry(ctx, resp, err)
 	})
 	return
@@ -1258,6 +1275,8 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, leaf, dirID, sha1Str stri
 		return nil, fmt.Errorf("failed to upload: %w", err)
 	}
 	// refresh uploaded file info
+	// Compared to `newfile.File` this upgrades several feilds...
+	// audit, links, modified_time, phase, revision, and web_content_link
 	return f.getFile(ctx, newfile.File.ID)
 }
 
@@ -1276,6 +1295,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 		newObj := &Object{
 			fs:     f,
 			remote: src.Remote(),
+			linkMu: new(sync.Mutex),
 		}
 		return newObj, newObj.upload(ctx, in, src, false, options...)
 	default:
@@ -1289,7 +1309,7 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
+	userInfo = map[string]string{
 		"Id":                user.Sub,
 		"Username":          user.Name,
 		"Email":             user.Email,
@@ -1298,7 +1318,13 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 		"Status":            user.Status,
 		"CreatedAt":         time.Time(user.CreatedAt).String(),
 		"PasswordUpdatedAt": time.Time(user.PasswordUpdatedAt).String(),
-	}, nil
+	}
+	if vip, err := f.getVIPInfo(ctx); err == nil && vip.Result == "ACCEPTED" {
+		userInfo["VIPExpiresAt"] = time.Time(vip.Data.Expire).String()
+		userInfo["VIPStatus"] = vip.Data.Status
+		userInfo["VIPType"] = vip.Data.Type
+	}
+	return userInfo, nil
 }
 
 // ------------------------------------------------------------
@@ -1485,10 +1511,42 @@ func (o *Object) setMetaData(info *api.File) (err error) {
 		o.parent = info.ParentID
 	}
 	o.md5sum = info.Md5Checksum
-	if info.Links != nil {
+	if info.Links.ApplicationOctetStream != nil {
 		o.link = info.Links.ApplicationOctetStream
 	}
+	if len(info.Medias) > 0 && info.Medias[0].Link != nil {
+		fs.Debugf(o, "Using a media link")
+		o.link = info.Medias[0].Link
+	}
 	return nil
+}
+
+// setMetaDataWithLink ensures a link for opening an object
+func (o *Object) setMetaDataWithLink(ctx context.Context) error {
+	o.linkMu.Lock()
+	defer o.linkMu.Unlock()
+
+	// check if the current link is valid
+	if o.link.Valid() {
+		return nil
+	}
+
+	// fetch download link with retry scheme
+	// 1 initial attempt and 2 retries are reasonable based on empirical analysis
+	retries := 2
+	for i := 1; i <= retries+1; i++ {
+		info, err := o.fs.getFile(ctx, o.id)
+		if err != nil {
+			return fmt.Errorf("can't fetch download link: %w", err)
+		}
+		if err = o.setMetaData(info); err == nil && o.link.Valid() {
+			return nil
+		}
+		if i <= retries {
+			time.Sleep(time.Duration(200*i) * time.Millisecond)
+		}
+	}
+	return errors.New("can't download - no link to download")
 }
 
 // readMetaData gets the metadata if it hasn't already been fetched
@@ -1624,19 +1682,12 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if o.id == "" {
 		return nil, errors.New("can't download - no id")
 	}
-	info, err := o.fs.getFile(ctx, o.id)
-	if err != nil {
-		return nil, fmt.Errorf("can't fetch download link: %w", err)
+	if o.size == 0 {
+		// zero-byte objects may have no download link
+		return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 	}
-	if err = o.setMetaData(info); err != nil {
+	if err = o.setMetaDataWithLink(ctx); err != nil {
 		return nil, err
-	}
-	if o.link == nil {
-		if o.size == 0 {
-			// zero-byte objects may have no download link
-			return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
-		}
-		return nil, errors.New("can't download - no link to download")
 	}
 	return o.open(ctx, o.link.URL, options...)
 }
