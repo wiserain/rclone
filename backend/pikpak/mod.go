@@ -3,10 +3,13 @@ package pikpak
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/rclone/rclone/backend/pikpak/api"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/lib/rest"
 )
 
 // ------------------------------------------------------------
@@ -52,4 +55,64 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 		id = o.(fs.IDer).ID()
 	}
 	return id, nil
+}
+
+type RedeemResult struct {
+	AddDays int    `json:"add_days"`
+	Code    string `json:"code"`
+	Data    struct {
+		Expire api.Time `json:"expire"`
+		Status string   `json:"status"`
+		Type   string   `json:"type"`
+		UserID string   `json:"user_id"`
+	} `json:"data"`
+	FreeDays    int `json:"free_days"`
+	InvitedDays int `json:"invited_days"`
+	Popup       struct {
+		ID    string `json:"id"`
+		Type  string `json:"type"`
+		Right string `json:"right"`
+		Title struct {
+			Text  string `json:"text"`
+			Color string `json:"color"`
+		} `json:"title"`
+		Description struct {
+			Text  string `json:"text"`
+			Color string `json:"color"`
+		} `json:"description"`
+		Image  string `json:"image"`
+		Button struct {
+			Text struct {
+				Text  string `json:"text"`
+				Color string `json:"color"`
+			} `json:"text"`
+			Color    string `json:"color"`
+			DeepLink string `json:"deepLink"`
+		} `json:"button"`
+		SecondaryButton interface{} `json:"secondaryButton"`
+		Icon            interface{} `json:"icon"`
+	} `json:"popup"`
+	Result  string `json:"result"`
+	Updated bool   `json:"updated"`
+}
+
+// requestRedeem requests for redeem
+func (f *Fs) requestRedeem(ctx context.Context, code string) (info *RedeemResult, err error) {
+	req := struct {
+		ActivationCode string `json:"activation_code"`
+		Data           struct {
+		} `json:"data,omitempty"`
+	}{
+		ActivationCode: code,
+	}
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/vip/v1/order/activation-code",
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.rst.CallJSON(ctx, &opts, &req, &info)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
 }

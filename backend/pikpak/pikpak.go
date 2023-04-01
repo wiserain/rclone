@@ -1398,19 +1398,7 @@ func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, s
 	return r, nil
 }
 
-var commandHelp = []fs.CommandHelp{{ // mod
-	Name:  "getid",
-	Short: "Get an ID of a file or directory",
-	Long: `This command is to obtain an ID of a file or directory.
-
-Usage:
-
-    rclone backend getid pikpak:path {subpath}
-
-The 'path' should point to a directory not a file. Use an extra argument
-'subpath' to get an ID of a file located in 'pikpak:path'.
-`,
-}, {
+var commandHelp = []fs.CommandHelp{{
 	Name:  "addurl",
 	Short: "Add offline download task for url",
 	Long: `This command adds offline download task for url.
@@ -1445,6 +1433,30 @@ Result:
         "Errors": 0
     }
 `,
+}, { // mod
+	Name:  "getid",
+	Short: "Get an ID of a file or directory",
+	Long: `This command is to obtain an ID of a file or directory.
+
+Usage:
+
+    rclone backend getid pikpak:path {subpath}
+
+The 'path' should point to a directory not a file. Use an extra argument
+'subpath' to get an ID of a file located in 'pikpak:path'.
+`,
+}, { // mod
+	Name:  "redeem",
+	Short: "Request redeem for the current account",
+	Long: `This command requests redeem for the current account.
+
+Usage:
+
+    rclone backend redeem pikpak: code
+
+The 'code' is an activation code for the redeem reqeust. The result 
+will be returned in json-formatted string.
+`,
 }}
 
 // Command the backend to run a named command
@@ -1458,13 +1470,6 @@ Result:
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
 	switch name {
-	case "getid":
-		// mod
-		path := ""
-		if len(arg) > 0 {
-			path = arg[0]
-		}
-		return f.getID(ctx, path)
 	case "addurl":
 		if len(arg) != 1 {
 			return nil, errors.New("need exactly 1 argument")
@@ -1485,6 +1490,19 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		}
 		_, srcDelete := opt["delete-src-file"]
 		return f.decompressDir(ctx, filename, id, password, srcDelete)
+	case "getid":
+		// mod
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		return f.getID(ctx, path)
+	case "redeem":
+		// mod
+		if len(arg) != 1 {
+			return nil, errors.New("need exactly 1 argument")
+		}
+		return f.requestRedeem(ctx, arg[0])
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}
