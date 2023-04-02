@@ -93,11 +93,8 @@ func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, 
 		if size >= 0 {
 			req.Header.Set("X-Upload-Content-Length", fmt.Sprintf("%v", size))
 		}
-		fmt.Println("before request upload")
 		res, err = f.client.Do(req)
-		fmt.Println("after request upload")
 		if err == nil {
-			fmt.Println("error nil")
 			defer googleapi.CloseBody(res)
 			err = googleapi.CheckResponse(res)
 		}
