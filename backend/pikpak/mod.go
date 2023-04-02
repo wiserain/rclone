@@ -116,3 +116,74 @@ func (f *Fs) requestRedeem(ctx context.Context, code string) (info *RedeemResult
 	})
 	return
 }
+
+// ResourceList contains a list of Resource elements
+type ResourceList struct {
+	ListID string `json:"list_id,omitempty"`
+	List   struct {
+		PageSize      int         `json:"page_size,omitempty"`
+		NextPageToken string      `json:"next_page_token,omitempty"`
+		Resources     []*Resource `json:"resources,omitempty"`
+	} `json:"list"`
+}
+
+type ResourceMeta struct {
+	Error         string `json:"error,omitempty"` // "403:E_PARSE_BT"
+	Icon          string `json:"icon,omitempty"`
+	Status        string `json:"status,omitempty"` // "1" if cached?
+	ThumbnailLink string `json:"thumbnail_link,omitempty"`
+	URL           string `json:"url,omitempty"`
+}
+
+type ResourceDir struct {
+	PageSize      int         `json:"page_size"`
+	NextPageToken string      `json:"next_page_token"`
+	Resources     []*Resource `json:"resources,omitempty"`
+}
+
+// Resource is a basic element of resources in server
+type Resource struct {
+	ID        string        `json:"id,omitempty"`
+	Name      string        `json:"name"`
+	FileSize  int64         `json:"file_size,string"`
+	FileCount int           `json:"file_count"`
+	FileIndex int           `json:"file_index"`
+	Meta      *ResourceMeta `json:"meta"`
+	IsDir     bool          `json:"is_dir"`
+	Dir       *ResourceDir  `json:"dir,omitempty"`
+	ParentID  string        `json:"parent_id,omitempty"`
+	Resolver  string        `json:"resolver,omitempty"` // "DIRECT"
+	// custom fields
+	IsCached  bool      `json:"is_cached"`
+	Task      *api.Task `json:"task,omitempty"`
+	TaskAdded bool      `json:"task_added"`
+}
+
+func (r *Resource) checkCached() {
+	if r.Meta.Error == "" && r.Meta.Status == "1" {
+		r.IsCached = true
+	}
+}
+
+// requestRedeem requests for redeem
+func (f *Fs) requestResourceList(ctx context.Context, urls []string) (info *ResourceList, err error) {
+	req := struct {
+		URLs          string `json:"urls"`
+		PageSize      int    `json:"page_size"`
+		ThumbnailType string `json:"thumbnail_type"`
+	}{
+		URLs:          strings.Join(urls, " "),
+		PageSize:      500,
+		ThumbnailType: "FROM_HASH",
+	}
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/drive/v1/resource/list",
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.rst.CallJSON(ctx, &opts, &req, &info)
+		return f.shouldRetry(ctx, resp, err)
+	})
+	return
+}

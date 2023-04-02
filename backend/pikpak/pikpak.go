@@ -1410,6 +1410,20 @@ Usage:
 Downloads will be stored in 'dirpath'. If 'dirpath' is invalid, 
 download will fallback to default 'My Pack' folder.
 `,
+}, { // mod
+	Name:  "checkurl",
+	Short: "Check the resource of url",
+	Long: `This command is used to check the status of resources on the server.
+
+Usage:
+
+    rclone backend checkurl pikpak:dirpath URL1 {URL2} {URL3}
+	rclone backend checkurl pikpak:dirpath URL1 -o add=all
+
+At least one URL must be specified. If you set '-o add=all', it will add an
+offline download task for all URLs depending on their cache status. Possible 
+choices for this option includes 'all', 'cached-only', and 'not-cached'.
+`,
 }, {
 	Name:  "decompress",
 	Short: "Request decompress of a file/files in a folder",
@@ -1475,6 +1489,57 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			return nil, errors.New("need exactly 1 argument")
 		}
 		return f.addURL(ctx, arg[0], "")
+	case "checkurl":
+		// mod
+		if len(arg) < 1 {
+			return nil, errors.New("need at least 1 argument")
+		}
+		_, debug := opt["debug"] // expose more fields if set
+		add, ok := opt["add"]
+		if ok {
+			switch add {
+			case "all":
+			case "cached-only":
+			case "not-cached":
+			default:
+				return nil, fmt.Errorf("unknown opt: -o add=%s", add)
+			}
+		}
+		rl, err := f.requestResourceList(ctx, arg)
+		if err != nil {
+			return nil, err
+		}
+		var resList []Resource
+		for _, item := range rl.List.Resources {
+			var res *Resource
+			if debug {
+				res = item
+
+			} else {
+				res = &Resource{
+					Name:      item.Name,
+					FileSize:  item.FileSize,
+					FileCount: item.FileCount,
+					Meta:      item.Meta,
+					IsDir:     item.IsDir,
+				}
+			}
+			res.checkCached()
+			if add == "all" || (add == "cached-only" && res.IsCached) || (add == "not-cached" && !res.IsCached) {
+				task, terr := f.addURL(ctx, res.Meta.URL, "")
+				if terr != nil {
+					err = fmt.Errorf("unexpected error while requesting offline download task for %q: %w", res.Meta.URL, terr)
+					fs.Errorf(f, "%v", err)
+				} else {
+					res.TaskAdded = true
+					if debug {
+						res.Task = task
+					}
+				}
+			}
+			resList = append(resList, *res)
+		}
+		return resList, nil
 	case "decompress":
 		filename := ""
 		if len(arg) > 0 {
