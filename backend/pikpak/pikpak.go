@@ -1490,9 +1490,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		add, ok := opt["add"]
 		if ok {
 			switch add {
-			case "all":
-			case "cached-only":
-			case "not-cached":
+			case "all", "cached-only", "not-cached":
 			default:
 				return nil, fmt.Errorf("unknown opt: -o add=%s", add)
 			}
