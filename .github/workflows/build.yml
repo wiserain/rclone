@@ -8,9 +8,9 @@ name: build
 on:
   push:
     branches:
-      - '*'
+      - '**'
     tags:
-      - '*'
+      - '**'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -149,7 +149,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -287,7 +287,7 @@ jobs:
 
       # Run govulncheck on the latest go version, the one we build binaries with
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: '1.20'
           check-latest: true
@@ -312,7 +312,7 @@ jobs:
 
       # Upgrade together with NDK version
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: '1.20'
 
@@ -402,7 +402,7 @@ jobs:
         env:
           RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
         # Upload artifacts if not a PR && not a fork
-        if: github.head_ref == '' && github.repository == 'rclone/rclone'
+        if: env.RCLONE_CONFIG_PASS != '' && github.head_ref == '' && github.repository == 'rclone/rclone'
 
   termux:
     needs:

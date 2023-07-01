@@ -72,6 +72,9 @@ you what happened to it. These are reminiscent of diff files.
 - |+ path| means path was missing on the destination, so only in the source
 - |* path| means path was present in source and destination but different.
 - |! path| means there was an error reading or hashing the source or dest.
+
+The default number of parallel checks is 8. See the [--checkers=N](/docs/#checkers-n)
+option for more information.
 `, "|", "`")
 
 // GetCheckOpt gets the options corresponding to the check flags
@@ -142,7 +145,7 @@ match.  It doesn't alter the source or destination.
 
 For the [crypt](/crypt/) remote there is a dedicated command,
 [cryptcheck](/commands/rclone_cryptcheck/), that are able to check
-the checksums of the crypted files.
+the checksums of the encrypted files.
 
 If you supply the |--size-only| flag, it will only compare the sizes not
 the hashes as well.  Use this for a quick check.

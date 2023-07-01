@@ -58,7 +58,7 @@ import (
 const (
 	rcloneClientID              = "5jcck7diasz0rqy"
 	rcloneEncryptedClientSecret = "fRS5vVLr2v6FbyXYnIgjwBuUAt0osq_QZTXAEcmZ7g"
-	minSleep                    = 10 * time.Millisecond
+	defaultMinSleep             = fs.Duration(10 * time.Millisecond)
 	maxSleep                    = 2 * time.Second
 	decayConstant               = 2 // bigger for slower decay, exponential
 	// Upload chunk size - setting too small makes uploads slow.
@@ -260,8 +260,8 @@ uploaded.
 The default for this is 0 which means rclone will choose a sensible
 default based on the batch_mode in use.
 
-- batch_mode: async - default batch_timeout is 500ms
-- batch_mode: sync - default batch_timeout is 10s
+- batch_mode: async - default batch_timeout is 10s
+- batch_mode: sync - default batch_timeout is 500ms
 - batch_mode: off - not in use
 `,
 			Default:  fs.Duration(0),
@@ -270,6 +270,11 @@ default based on the batch_mode in use.
 			Name:     "batch_commit_timeout",
 			Help:     `Max time to wait for a batch to finish committing`,
 			Default:  fs.Duration(10 * time.Minute),
+			Advanced: true,
+		}, {
+			Name:     "pacer_min_sleep",
+			Default:  defaultMinSleep,
+			Help:     "Minimum time to sleep between API calls.",
 			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
@@ -299,6 +304,7 @@ type Options struct {
 	BatchTimeout       fs.Duration          `config:"batch_timeout"`
 	BatchCommitTimeout fs.Duration          `config:"batch_commit_timeout"`
 	AsyncBatch         bool                 `config:"async_batch"`
+	PacerMinSleep      fs.Duration          `config:"pacer_min_sleep"`
 	Enc                encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -442,7 +448,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		name:  name,
 		opt:   *opt,
 		ci:    ci,
-		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(opt.PacerMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}
 	f.batcher, err = newBatcher(ctx, f, f.opt.BatchMode, f.opt.BatchSize, time.Duration(f.opt.BatchTimeout))
 	if err != nil {
@@ -536,7 +542,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			default:
 				return nil, err
 			}
-			// if the moint failed we have to abort here
+			// if the mount failed we have to abort here
 		}
 		// if the mount succeeded it's now a normal folder in the users root namespace
 		// we disable shared folder mode and proceed normally
@@ -719,7 +725,7 @@ func (f *Fs) listSharedFolders(ctx context.Context) (entries fs.DirEntries, err 
 		}
 		for _, entry := range res.Entries {
 			leaf := f.opt.Enc.ToStandardName(entry.Name)
-			d := fs.NewDir(leaf, time.Now()).SetID(entry.SharedFolderId)
+			d := fs.NewDir(leaf, time.Time{}).SetID(entry.SharedFolderId)
 			entries = append(entries, d)
 			if err != nil {
 				return nil, err
@@ -906,7 +912,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 			leaf := f.opt.Enc.ToStandardName(path.Base(entryPath))
 			remote := path.Join(dir, leaf)
 			if folderInfo != nil {
-				d := fs.NewDir(remote, time.Now()).SetID(folderInfo.Id)
+				d := fs.NewDir(remote, time.Time{}).SetID(folderInfo.Id)
 				entries = append(entries, d)
 			} else if fileInfo != nil {
 				o, err := f.newObjectWithInfo(ctx, remote, fileInfo)

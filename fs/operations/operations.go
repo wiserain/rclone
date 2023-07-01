@@ -254,11 +254,11 @@ func equal(ctx context.Context, src fs.ObjectInfo, dst fs.Object, opt equalOpt) 
 			}
 			// Update the mtime of the dst object here
 			err := dst.SetModTime(ctx, srcModTime)
-			if err == fs.ErrorCantSetModTime {
+			if errors.Is(err, fs.ErrorCantSetModTime) {
 				logModTimeUpload(dst)
 				fs.Infof(dst, "src and dst identical but can't set mod time without re-uploading")
 				return false
-			} else if err == fs.ErrorCantSetModTimeWithoutDelete {
+			} else if errors.Is(err, fs.ErrorCantSetModTimeWithoutDelete) {
 				logModTimeUpload(dst)
 				fs.Infof(dst, "src and dst identical but can't set mod time without deleting and re-uploading")
 				// Remove the file if BackupDir isn't set.  If BackupDir is set we would rather have the old file
@@ -295,6 +295,20 @@ func removeFailedCopy(ctx context.Context, dst fs.Object) bool {
 		return false
 	}
 	return true
+}
+
+// Used to remove a failed partial copy
+//
+// Returns whether the file was successfully removed or not
+func removeFailedPartialCopy(ctx context.Context, f fs.Fs, remotePartial string) bool {
+	o, err := f.NewObject(ctx, remotePartial)
+	if errors.Is(err, fs.ErrorObjectNotFound) {
+		return true
+	} else if err != nil {
+		fs.Infof(remotePartial, "Failed to remove failed partial copy: %s", err)
+		return false
+	}
+	return removeFailedCopy(ctx, o)
 }
 
 // CommonHash returns a single hash.Type and a HashOption with that
@@ -336,6 +350,27 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 	doUpdate := dst != nil
 	hashType, hashOption := CommonHash(ctx, f, src.Fs())
 
+	if dst != nil {
+		remote = dst.Remote()
+	}
+
+	var (
+		inplace       = true
+		remotePartial = remote
+	)
+	if !ci.Inplace && f.Features().Move != nil && f.Features().PartialUploads {
+		// Avoid making the leaf name longer if it's already lengthy to avoid
+		// trouble with file name length limits.
+		suffix := "." + random.String(8) + ".partial"
+		base := path.Base(remotePartial)
+		if len(base) > 100 {
+			remotePartial = remotePartial[:len(remotePartial)-len(suffix)] + suffix
+		} else {
+			remotePartial += suffix
+		}
+		inplace = false
+	}
+
 	var actionTaken string
 	for {
 		// Try server-side copy first - if has optional interface and
@@ -363,17 +398,26 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 				dst = newDst
 				in.ServerSideCopyEnd(dst.Size()) // account the bytes for the server-side transfer
 				_ = in.Close()
+				inplace = true
 			} else {
 				_ = in.Close()
 			}
-			if err == fs.ErrorCantCopy {
+			if errors.Is(err, fs.ErrorCantCopy) {
 				tr.Reset(ctx) // skip incomplete accounting - will be overwritten by the manual copy below
 			}
 		} else {
 			err = fs.ErrorCantCopy
 		}
 		// If can't server-side copy, do it manually
-		if err == fs.ErrorCantCopy {
+		if errors.Is(err, fs.ErrorCantCopy) {
+			// Remove partial files on premature exit
+			var atexitRemovePartial atexit.FnHandle
+			if !inplace {
+				atexitRemovePartial = atexit.Register(func() {
+					ctx := context.Background()
+					removeFailedPartialCopy(ctx, f, remotePartial)
+				})
+			}
 			if doMultiThreadCopy(ctx, f, src) {
 				// Number of streams proportional to size
 				streams := src.Size() / int64(ci.MultiThreadCutoff)
@@ -384,7 +428,10 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 				if streams < 2 {
 					streams = 2
 				}
-				dst, err = multiThreadCopy(ctx, f, remote, src, int(streams), tr)
+				dst, err = multiThreadCopy(ctx, f, remotePartial, src, int(streams), tr)
+				if err == nil {
+					newDst = dst
+				}
 				if doUpdate {
 					actionTaken = "Multi-thread Copied (replaced existing)"
 				} else {
@@ -396,7 +443,7 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 				for _, option := range ci.DownloadHeaders {
 					options = append(options, option)
 				}
-				in0, err = NewReOpen(ctx, src, ci.LowLevelRetries, options...)
+				in0, err = Open(ctx, src, options...)
 				if err != nil {
 					err = fmt.Errorf("failed to open source object: %w", err)
 				} else {
@@ -416,14 +463,14 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 							}
 						}
 						// NB Rcat closes in0
-						dst, err = Rcat(ctx, f, remote, in0, src.ModTime(ctx), meta)
+						dst, err = Rcat(ctx, f, remotePartial, in0, src.ModTime(ctx), meta)
 						newDst = dst
 					} else {
 						in := tr.Account(ctx, in0).WithBuffer() // account and buffer the transfer
 						var wrappedSrc fs.ObjectInfo = src
 						// We try to pass the original object if possible
-						if src.Remote() != remote {
-							wrappedSrc = fs.NewOverrideRemote(src, remote)
+						if src.Remote() != remotePartial {
+							wrappedSrc = fs.NewOverrideRemote(src, remotePartial)
 						}
 						options := []fs.OpenOption{hashOption}
 						for _, option := range ci.UploadHeaders {
@@ -432,12 +479,15 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 						if ci.MetadataSet != nil {
 							options = append(options, fs.MetadataOption(ci.MetadataSet))
 						}
-						if doUpdate {
-							actionTaken = "Copied (replaced existing)"
+						if doUpdate && inplace {
 							err = dst.Update(ctx, in, wrappedSrc, options...)
 						} else {
-							actionTaken = "Copied (new)"
 							dst, err = f.Put(ctx, in, wrappedSrc, options...)
+						}
+						if doUpdate {
+							actionTaken = "Copied (replaced existing)"
+						} else {
+							actionTaken = "Copied (new)"
 						}
 						closeErr := in.Close()
 						if err == nil {
@@ -447,6 +497,10 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 					}
 				}
 			}
+			if !inplace {
+				atexit.Unregister(atexitRemovePartial)
+			}
+
 		}
 		tries++
 		if tries >= maxTries {
@@ -475,6 +529,9 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 	if err != nil {
 		err = fs.CountError(err)
 		fs.Errorf(src, "Failed to copy: %v", err)
+		if !inplace {
+			removeFailedPartialCopy(ctx, f, remotePartial)
+		}
 		return newDst, err
 	}
 
@@ -499,11 +556,25 @@ func Copy(ctx context.Context, f fs.Fs, dst fs.Object, remote string, src fs.Obj
 			return newDst, err
 		}
 	}
-	if newDst != nil && src.String() != newDst.String() {
-		fs.Infof(src, "%s to: %s", actionTaken, newDst.String())
-	} else {
-		fs.Infof(src, actionTaken)
+
+	// Move the copied file to its real destination.
+	if err == nil && !inplace && remotePartial != remote {
+		dst, err = f.Features().Move(ctx, newDst, remote)
+		if err == nil {
+			fs.Debugf(newDst, "renamed to: %s", remote)
+			newDst = dst
+		} else {
+			fs.Errorf(newDst, "partial file rename failed: %v", err)
+			err = fs.CountError(err)
+			removeFailedCopy(ctx, newDst)
+			return newDst, err
+		}
 	}
+
+	if newDst != nil && src.String() != newDst.String() {
+		actionTaken = fmt.Sprintf("%s to: %s", actionTaken, newDst.String())
+	}
+	fs.Infof(src, "%s%s", actionTaken, fs.LogValueHide("size", fs.SizeSuffix(src.Size())))
 	return newDst, err
 }
 
@@ -619,9 +690,24 @@ func SuffixName(ctx context.Context, remote string) string {
 		return remote
 	}
 	if ci.SuffixKeepExtension {
-		ext := path.Ext(remote)
-		base := remote[:len(remote)-len(ext)]
-		return base + ci.Suffix + ext
+		var (
+			base  = remote
+			exts  = ""
+			first = true
+			ext   = path.Ext(remote)
+		)
+		for ext != "" {
+			// Look second and subsequent extensions in mime types.
+			// If they aren't found then don't keep it as an extension.
+			if !first && mime.TypeByExtension(ext) == "" {
+				break
+			}
+			base = base[:len(base)-len(ext)]
+			exts = ext + exts
+			first = false
+			ext = path.Ext(base)
+		}
+		return base + ci.Suffix + exts
 	}
 	return remote + ci.Suffix
 }
@@ -837,8 +923,8 @@ func ListFn(ctx context.Context, f fs.Fs, fn func(fs.Object)) error {
 	})
 }
 
-// mutex for synchronized output
-var outMutex sync.Mutex
+// StdoutMutex mutex for synchronized output on stdout
+var StdoutMutex sync.Mutex
 
 // SyncPrintf is a global var holding the Printf function used in syncFprintf so that it can be overridden
 // Note, despite name, does not provide sync and should not be called directly
@@ -854,8 +940,8 @@ var SyncPrintf = func(format string, a ...interface{}) {
 // Updated to print to terminal if no writer is defined
 // This special behavior is used to allow easier replacement of the print to terminal code by progress
 func syncFprintf(w io.Writer, format string, a ...interface{}) {
-	outMutex.Lock()
-	defer outMutex.Unlock()
+	StdoutMutex.Lock()
+	defer StdoutMutex.Unlock()
 	if w == nil || w == os.Stdout {
 		SyncPrintf(format, a...)
 	} else {
@@ -969,7 +1055,7 @@ func hashSum(ctx context.Context, ht hash.Type, base64Encoded bool, downloadFlag
 		for _, option := range fs.GetConfig(ctx).DownloadHeaders {
 			options = append(options, option)
 		}
-		in, err := NewReOpen(ctx, o, fs.GetConfig(ctx).LowLevelRetries, options...)
+		in, err := Open(ctx, o, options...)
 		if err != nil {
 			return "ERROR", fmt.Errorf("failed to open file %v: %w", o, err)
 		}
@@ -1154,7 +1240,7 @@ func Purge(ctx context.Context, f fs.Fs, dir string) (err error) {
 			return nil
 		}
 		err = doPurge(ctx, dir)
-		if err == fs.ErrorCantPurge {
+		if errors.Is(err, fs.ErrorCantPurge) {
 			doFallbackPurge = true
 		}
 	}
@@ -1245,7 +1331,7 @@ type readCloser struct {
 //
 // if count < 0 then it will be ignored
 // if count >= 0 then only that many characters will be output
-func Cat(ctx context.Context, f fs.Fs, w io.Writer, offset, count int64) error {
+func Cat(ctx context.Context, f fs.Fs, w io.Writer, offset, count int64, sep []byte) error {
 	var mu sync.Mutex
 	ci := fs.GetConfig(ctx)
 	return ListFn(ctx, f, func(o fs.Object) {
@@ -1269,7 +1355,7 @@ func Cat(ctx context.Context, f fs.Fs, w io.Writer, offset, count int64) error {
 		for _, option := range ci.DownloadHeaders {
 			options = append(options, option)
 		}
-		in, err := o.Open(ctx, options...)
+		in, err := Open(ctx, o, options...)
 		if err != nil {
 			err = fs.CountError(err)
 			fs.Errorf(o, "Failed to open: %v", err)
@@ -1286,6 +1372,13 @@ func Cat(ctx context.Context, f fs.Fs, w io.Writer, offset, count int64) error {
 		if err != nil {
 			err = fs.CountError(err)
 			fs.Errorf(o, "Failed to send to output: %v", err)
+		}
+		if len(sep) >= 0 {
+			_, err = w.Write(sep)
+			if err != nil {
+				err = fs.CountError(err)
+				fs.Errorf(o, "Failed to send separator to output: %v", err)
+			}
 		}
 	})
 }
@@ -1858,7 +1951,7 @@ func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName str
 	var dstObj fs.Object
 	if !ci.NoCheckDest {
 		dstObj, err = fdst.NewObject(ctx, dstFileName)
-		if err == fs.ErrorObjectNotFound {
+		if errors.Is(err, fs.ErrorObjectNotFound) {
 			dstObj = nil
 		} else if err != nil {
 			return err
@@ -2283,7 +2376,7 @@ func GetFsInfo(f fs.Fs) *FsInfo {
 }
 
 var (
-	interactiveMu sync.Mutex
+	interactiveMu sync.Mutex // protects the following variables
 	skipped       = map[string]bool{}
 )
 
@@ -2291,14 +2384,22 @@ var (
 //
 // Call with interactiveMu held
 func skipDestructiveChoose(ctx context.Context, subject interface{}, action string) (skip bool) {
-	fmt.Printf("rclone: %s \"%v\"?\n", action, subject)
-	switch i := config.CommandDefault([]string{
+	// Lock the StdoutMutex - must not call fs.Log anything
+	// otherwise it will deadlock with --interactive --progress
+	StdoutMutex.Lock()
+
+	fmt.Printf("\nrclone: %s \"%v\"?\n", action, subject)
+	i := config.CommandDefault([]string{
 		"yYes, this is OK",
 		"nNo, skip this",
 		fmt.Sprintf("sSkip all %s operations with no more questions", action),
 		fmt.Sprintf("!Do all %s operations with no more questions", action),
 		"qExit rclone now.",
-	}, 0); i {
+	}, 0)
+
+	StdoutMutex.Unlock()
+
+	switch i {
 	case 'y':
 		skip = false
 	case 'n':

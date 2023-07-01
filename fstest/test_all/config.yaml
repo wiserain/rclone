@@ -129,6 +129,9 @@ backends:
  - backend:  "googlecloudstorage"
    remote:   "TestGoogleCloudStorage:"
    fastlist: true
+ - backend:  "googlecloudstorage"
+   remote:   "TestGoogleCloudStorage,directory_markers:"
+   fastlist: true
  - backend:  "googlephotos"
    remote:   "TestGooglePhotos:"
    tests:
@@ -166,6 +169,9 @@ backends:
  #   fastlist: false
  - backend:  "s3"
    remote:   "TestS3:"
+   fastlist: true
+ - backend:  "s3"
+   remote:   "TestS3,directory_markers:"
    fastlist: true
  - backend:  "s3"
    remote:   "TestS3Minio:"
@@ -299,21 +305,23 @@ backends:
  - backend:  "azureblob"
    remote:   "TestAzureBlob:"
    fastlist: true
+ - backend:  "azureblob"
+   remote:   "TestAzureBlob,directory_markers:"
+   fastlist: true
  - backend:  "pcloud"
    remote:   "TestPcloud:"
    fastlist: true
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false
-   oneonly:  true
    ignore:
     #  fs/operations
-    - TestCheckSum
-    - TestHashSums/Md5
+     - TestCheckSum
+     - TestHashSums/Md5
     #  fs/sync
-    - TestSyncWithTrackRenames
+     - TestSyncWithTrackRenames
     # integration
-    - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
+     - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:
@@ -325,10 +333,6 @@ backends:
    ignore:
      - TestIntegration/FsMkdir/FsEncoding/punctuation
      - TestIntegration/FsMkdir/FsEncoding/invalid_UTF-8
-     - TestIntegration/FsMkdir/FsPutFiles/FsCopy
-     - TestCopyFileCopyDest
-     - TestServerSideCopy
-     - TestSyncCopyDest
    fastlist: false
  - backend:  "webdav"
    remote:   "TestWebdavRclone:"

@@ -371,9 +371,14 @@ func TestSuffixName(t *testing.T) {
 		{"test.txt", "-suffix", false, "test.txt-suffix"},
 		{"test.txt", "-suffix", true, "test-suffix.txt"},
 		{"test.txt.csv", "-suffix", false, "test.txt.csv-suffix"},
-		{"test.txt.csv", "-suffix", true, "test.txt-suffix.csv"},
+		{"test.txt.csv", "-suffix", true, "test-suffix.txt.csv"},
 		{"test", "-suffix", false, "test-suffix"},
 		{"test", "-suffix", true, "test-suffix"},
+		{"test.html", "-suffix", true, "test-suffix.html"},
+		{"test.html.txt", "-suffix", true, "test-suffix.html.txt"},
+		{"test.csv.html.txt", "-suffix", true, "test-suffix.csv.html.txt"},
+		{"test.badext.csv.html.txt", "-suffix", true, "test.badext-suffix.csv.html.txt"},
+		{"test.badext", "-suffix", true, "test-suffix.badext"},
 	} {
 		ci.Suffix = test.suffix
 		ci.SuffixKeepExtension = test.keepExt
@@ -524,23 +529,25 @@ func TestCat(t *testing.T) {
 	r.CheckRemoteItems(t, file1, file2)
 
 	for _, test := range []struct {
-		offset int64
-		count  int64
-		a      string
-		b      string
+		offset    int64
+		count     int64
+		separator string
+		a         string
+		b         string
 	}{
-		{0, -1, "ABCDEFGHIJ", "012345678"},
-		{0, 5, "ABCDE", "01234"},
-		{-3, -1, "HIJ", "678"},
-		{1, 3, "BCD", "123"},
+		{0, -1, "", "ABCDEFGHIJ", "012345678"},
+		{0, 5, "", "ABCDE", "01234"},
+		{-3, -1, "", "HIJ", "678"},
+		{1, 3, "", "BCD", "123"},
+		{0, -1, "\n", "ABCDEFGHIJ", "012345678"},
 	} {
 		var buf bytes.Buffer
-		err := operations.Cat(ctx, r.Fremote, &buf, test.offset, test.count)
+		err := operations.Cat(ctx, r.Fremote, &buf, test.offset, test.count, []byte(test.separator))
 		require.NoError(t, err)
 		res := buf.String()
 
-		if res != test.a+test.b && res != test.b+test.a {
-			t.Errorf("Incorrect output from Cat(%d,%d): %q", test.offset, test.count, res)
+		if res != test.a+test.separator+test.b+test.separator && res != test.b+test.separator+test.a+test.separator {
+			t.Errorf("Incorrect output from Cat(%d,%d,%s): %q", test.offset, test.count, test.separator, res)
 		}
 	}
 }
@@ -789,7 +796,7 @@ func TestCopyURL(t *testing.T) {
 	headerFilename := "headerfilename.txt"
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 0 {
-			http.Error(w, "an error ocurred", status)
+			http.Error(w, "an error occurred", status)
 		}
 		if nameHeader {
 			w.Header().Set("Content-Disposition", `attachment; filename="folder\`+headerFilename+`"`)
@@ -863,7 +870,7 @@ func TestCopyURLToWriter(t *testing.T) {
 	status := 0
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 0 {
-			http.Error(w, "an error ocurred", status)
+			http.Error(w, "an error occurred", status)
 			return
 		}
 		_, err := w.Write([]byte(contents))
@@ -1219,6 +1226,72 @@ func TestCopyFileCopyDest(t *testing.T) {
 	file7dst.Path = "dst/three"
 
 	r.CheckRemoteItems(t, file2, file2dst, file3, file4, file4dst, file6, file7dst)
+}
+
+func TestCopyInplace(t *testing.T) {
+	ctx := context.Background()
+	ctx, ci := fs.AddConfig(ctx)
+	r := fstest.NewRun(t)
+
+	if !r.Fremote.Features().PartialUploads {
+		t.Skip("Partial uploads not supported")
+	}
+
+	ci.Inplace = true
+
+	file1 := r.WriteFile("file1", "file1 contents", t1)
+	r.CheckLocalItems(t, file1)
+
+	file2 := file1
+	file2.Path = "sub/file2"
+
+	err := operations.CopyFile(ctx, r.Fremote, r.Flocal, file2.Path, file1.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
+
+	err = operations.CopyFile(ctx, r.Fremote, r.Flocal, file2.Path, file1.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
+
+	err = operations.CopyFile(ctx, r.Fremote, r.Fremote, file2.Path, file2.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
+}
+
+func TestCopyLongFileName(t *testing.T) {
+	ctx := context.Background()
+	ctx, ci := fs.AddConfig(ctx)
+	r := fstest.NewRun(t)
+
+	if !r.Fremote.Features().PartialUploads {
+		t.Skip("Partial uploads not supported")
+	}
+
+	ci.Inplace = false // the default
+
+	file1 := r.WriteFile("file1", "file1 contents", t1)
+	r.CheckLocalItems(t, file1)
+
+	file2 := file1
+	file2.Path = "sub/" + strings.Repeat("file2", 30)
+
+	err := operations.CopyFile(ctx, r.Fremote, r.Flocal, file2.Path, file1.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
+
+	err = operations.CopyFile(ctx, r.Fremote, r.Flocal, file2.Path, file1.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
+
+	err = operations.CopyFile(ctx, r.Fremote, r.Fremote, file2.Path, file2.Path)
+	require.NoError(t, err)
+	r.CheckLocalItems(t, file1)
+	r.CheckRemoteItems(t, file2)
 }
 
 // testFsInfo is for unit testing fs.Info
@@ -1694,7 +1767,7 @@ func TestRcatMetadata(t *testing.T) {
 		gotMeta, err := fs.GetMetadata(ctx, o)
 		require.NoError(t, err)
 		// Check the specific user data we set is set
-		// Likey there will be other values
+		// Likely there will be other values
 		assert.Equal(t, "value", gotMeta["key"])
 		assert.Equal(t, "potato", gotMeta["sausage"])
 
@@ -1781,7 +1854,7 @@ func TestRcatSizeMetadata(t *testing.T) {
 		gotMeta, err := fs.GetMetadata(ctx, o)
 		require.NoError(t, err)
 		// Check the specific user data we set is set
-		// Likey there will be other values
+		// Likely there will be other values
 		assert.Equal(t, "value", gotMeta["key"])
 		assert.Equal(t, "potato", gotMeta["sausage"])
 	}

@@ -1,6 +1,6 @@
 ---
 title: "rclone listremotes"
-description: "List all the remotes in the config file."
+description: "List all the remotes in the config file and defined in environment variables."
 slug: rclone_listremotes
 url: /commands/rclone_listremotes/
 versionIntroduced: v1.34
@@ -8,7 +8,7 @@ versionIntroduced: v1.34
 ---
 # rclone listremotes
 
-List all the remotes in the config file.
+List all the remotes in the config file and defined in environment variables.
 
 ## Synopsis
 

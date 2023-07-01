@@ -60,6 +60,8 @@ type ChunkedUploadConfig struct {
 	CeilChunkSize func(fs.SizeSuffix) fs.SizeSuffix
 	// More than one chunk is required on upload
 	NeedMultipleChunks bool
+	// Skip this particular remote
+	Skip bool
 }
 
 // SetUploadChunkSizer is a test only interface to change the upload chunk size at runtime
@@ -458,7 +460,7 @@ func Run(t *testing.T, opt *Opt) {
 			t.Skip("Skipping FsCheckWrap on this Fs")
 		}
 		ft := new(fs.Features).Fill(ctx, f)
-		if ft.UnWrap == nil {
+		if ft.UnWrap == nil && !f.Features().Overlay {
 			t.Skip("Not a wrapping Fs")
 		}
 		v := reflect.ValueOf(ft).Elem()
@@ -524,23 +526,33 @@ func Run(t *testing.T, opt *Opt) {
 	t.Run("FsName", func(t *testing.T) {
 		skipIfNotOk(t)
 		got := removeConfigID(f.Name())
-		want := remoteName[:strings.LastIndex(remoteName, ":")+1]
+		var want string
 		if isLocalRemote {
-			want = "local:"
+			want = "local"
+		} else {
+			want = remoteName[:strings.LastIndex(remoteName, ":")]
+			comma := strings.IndexRune(remoteName, ',')
+			if comma >= 0 {
+				want = want[:comma]
+			}
 		}
-		require.Equal(t, want, got+":")
+		require.Equal(t, want, got)
 	})
 
 	// TestFsRoot tests the Root method
 	t.Run("FsRoot", func(t *testing.T) {
 		skipIfNotOk(t)
-		name := removeConfigID(f.Name()) + ":"
-		root := f.Root()
+		got := f.Root()
+		want := subRemoteName
+		colon := strings.LastIndex(want, ":")
+		if colon >= 0 {
+			want = want[colon+1:]
+		}
 		if isLocalRemote {
 			// only check last path element on local
-			require.Equal(t, filepath.Base(subRemoteName), filepath.Base(root))
+			require.Equal(t, filepath.Base(subRemoteName), filepath.Base(got))
 		} else {
-			require.Equal(t, subRemoteName, name+root)
+			require.Equal(t, want, got)
 		}
 	})
 
@@ -1504,16 +1516,21 @@ func Run(t *testing.T, opt *Opt) {
 			t.Run("ObjectUpdate", func(t *testing.T) {
 				skipIfNotOk(t)
 				contents := random.String(200)
-				buf := bytes.NewBufferString(contents)
-				hash := hash.NewMultiHasher()
-				in := io.TeeReader(buf, hash)
+				var h *hash.MultiHasher
 
-				file1.Size = int64(buf.Len())
+				file1.Size = int64(len(contents))
 				obj := findObject(ctx, t, f, file1.Path)
-				obji := object.NewStaticObjectInfo(file1.Path, file1.ModTime, int64(len(contents)), true, nil, obj.Fs())
-				err := obj.Update(ctx, in, obji)
-				require.NoError(t, err)
-				file1.Hashes = hash.Sums()
+				remoteBefore := obj.Remote()
+				obji := object.NewStaticObjectInfo(file1.Path+"-should-be-ignored.bin", file1.ModTime, int64(len(contents)), true, nil, obj.Fs())
+				retry(t, "Update object", func() error {
+					buf := bytes.NewBufferString(contents)
+					h = hash.NewMultiHasher()
+					in := io.TeeReader(buf, h)
+					return obj.Update(ctx, in, obji)
+				})
+				remoteAfter := obj.Remote()
+				assert.Equal(t, remoteBefore, remoteAfter, "Remote should not change")
+				file1.Hashes = h.Sums()
 
 				// check the object has been updated
 				file1.Check(t, obj, f.Precision())
@@ -1883,6 +1900,10 @@ func Run(t *testing.T, opt *Opt) {
 			skipIfNotOk(t)
 			if testing.Short() {
 				t.Skip("not running with -short")
+			}
+
+			if opt.ChunkedUpload.Skip {
+				t.Skip("skipping as ChunkedUpload.Skip is set")
 			}
 
 			setUploadChunkSizer, _ := f.(SetUploadChunkSizer)

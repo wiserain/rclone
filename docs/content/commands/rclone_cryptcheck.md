@@ -1,6 +1,6 @@
 ---
 title: "rclone cryptcheck"
-description: "Cryptcheck checks the integrity of a crypted remote."
+description: "Cryptcheck checks the integrity of an encrypted remote."
 slug: rclone_cryptcheck
 url: /commands/rclone_cryptcheck/
 versionIntroduced: v1.36
@@ -8,14 +8,14 @@ versionIntroduced: v1.36
 ---
 # rclone cryptcheck
 
-Cryptcheck checks the integrity of a crypted remote.
+Cryptcheck checks the integrity of an encrypted remote.
 
 ## Synopsis
 
 
 rclone cryptcheck checks a remote against a [crypted](/crypt/) remote.
 This is the equivalent of running rclone [check](/commands/rclone_check/),
-but able to check the checksums of the crypted remote.
+but able to check the checksums of the encrypted remote.
 
 For it to work the underlying remote of the cryptedremote must support
 some kind of checksum.
@@ -56,6 +56,9 @@ you what happened to it. These are reminiscent of diff files.
 - `+ path` means path was missing on the destination, so only in the source
 - `* path` means path was present in source and destination but different.
 - `! path` means there was an error reading or hashing the source or dest.
+
+The default number of parallel checks is 8. See the [--checkers=N](/docs/#checkers-n)
+option for more information.
 
 
 ```

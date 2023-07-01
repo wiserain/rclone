@@ -6,15 +6,19 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"path"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/fstest/fstests"
+	"github.com/rclone/rclone/lib/bucket"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/version"
 	"github.com/stretchr/testify/assert"
@@ -250,7 +254,8 @@ func (f *Fs) InternalTestVersions(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Create an object
-	const fileName = "test-versions.txt"
+	const dirName = "versions"
+	const fileName = dirName + "/" + "test-versions.txt"
 	contents := random.String(100)
 	item := fstest.NewItem(fileName, contents, fstest.Time("2001-05-06T04:05:06.499999999Z"))
 	obj := fstests.PutTestContents(ctx, t, f, &item, contents, true)
@@ -280,11 +285,12 @@ func (f *Fs) InternalTestVersions(t *testing.T) {
 		}()
 
 		// Read the contents
-		entries, err := f.List(ctx, "")
+		entries, err := f.List(ctx, dirName)
 		require.NoError(t, err)
 		tests := 0
 		var fileNameVersion string
 		for _, entry := range entries {
+			t.Log(entry)
 			remote := entry.Remote()
 			if remote == fileName {
 				t.Run("ReadCurrent", func(t *testing.T) {
@@ -308,6 +314,23 @@ func (f *Fs) InternalTestVersions(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, o)
 			assert.Equal(t, int64(100), o.Size(), o.Remote())
+		})
+
+		// Check we can make a NewFs from that object with a version suffix
+		t.Run("NewFs", func(t *testing.T) {
+			newPath := bucket.Join(fs.ConfigStringFull(f), fileNameVersion)
+			// Make sure --s3-versions is set in the config of the new remote
+			fs.Debugf(nil, "oldPath = %q", newPath)
+			lastColon := strings.LastIndex(newPath, ":")
+			require.True(t, lastColon >= 0)
+			newPath = newPath[:lastColon] + ",versions" + newPath[lastColon:]
+			fs.Debugf(nil, "newPath = %q", newPath)
+			fNew, err := cache.Get(ctx, newPath)
+			// This should return pointing to a file
+			require.Equal(t, fs.ErrorIsFile, err)
+			require.NotNil(t, fNew)
+			// With the directory the directory above
+			assert.Equal(t, dirName, path.Base(fs.ConfigStringFull(fNew)))
 		})
 	})
 

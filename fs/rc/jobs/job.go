@@ -12,9 +12,16 @@ import (
 
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/rc"
 )
+
+// Fill in these to avoid circular dependencies
+func init() {
+	cache.JobOnFinish = OnFinish
+	cache.JobGetJobID = GetJobID
+}
 
 // Job describes an asynchronous task started via the rc package
 type Job struct {
@@ -81,6 +88,17 @@ func (job *Job) removeListener(fn *func()) {
 			return
 		}
 	}
+}
+
+// OnFinish adds listener to job that will be triggered when job is finished.
+// It returns a function to cancel listening.
+func (job *Job) OnFinish(fn func()) func() {
+	if job.Finished {
+		fn()
+	} else {
+		job.addListener(&fn)
+	}
+	return func() { job.removeListener(&fn) }
 }
 
 // run the job until completion writing the return status
@@ -237,6 +255,11 @@ func getFilter(ctx context.Context, in rc.Params) (context.Context, error) {
 	return ctx, nil
 }
 
+type jobKeyType struct{}
+
+// Key for adding jobs to ctx
+var jobKey = jobKeyType{}
+
 // NewJob creates a Job and executes it, possibly in the background if _async is set
 func (jobs *Jobs) NewJob(ctx context.Context, fn rc.Func, in rc.Params) (job *Job, out rc.Params, err error) {
 	id := atomic.AddInt64(&jobID, 1)
@@ -274,9 +297,14 @@ func (jobs *Jobs) NewJob(ctx context.Context, fn rc.Func, in rc.Params) (job *Jo
 		StartTime: time.Now(),
 		Stop:      stop,
 	}
+
 	jobs.mu.Lock()
 	jobs.jobs[job.ID] = job
 	jobs.mu.Unlock()
+
+	// Add the job to the context
+	ctx = context.WithValue(ctx, jobKey, job)
+
 	if isAsync {
 		go job.run(ctx, fn, in)
 		out = make(rc.Params)
@@ -303,12 +331,22 @@ func OnFinish(jobID int64, fn func()) (func(), error) {
 	if job == nil {
 		return func() {}, errors.New("job not found")
 	}
-	if job.Finished {
-		fn()
-	} else {
-		job.addListener(&fn)
+	return job.OnFinish(fn), nil
+}
+
+// GetJob gets the Job from the context if possible
+func GetJob(ctx context.Context) (job *Job, ok bool) {
+	job, ok = ctx.Value(jobKey).(*Job)
+	return job, ok
+}
+
+// GetJobID gets the Job from the context if possible
+func GetJobID(ctx context.Context) (jobID int64, ok bool) {
+	job, ok := GetJob(ctx)
+	if !ok {
+		return -1, ok
 	}
-	return func() { job.removeListener(&fn) }, nil
+	return job.ID, true
 }
 
 func init() {

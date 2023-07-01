@@ -30,6 +30,9 @@ type Features struct {
 	WriteMetadata           bool // can write metadata to objects
 	UserMetadata            bool // can read/write general purpose metadata
 	FilterAware             bool // can make use of filters if provided for listing
+	PartialUploads          bool // uploaded file can appear incomplete on the fs while it's being uploaded
+	NoMultiThreading        bool // set if can't have multiplethreads on one download open
+	Overlay                 bool // this wraps one or more backends to add functionality
 
 	// Purge all files in the directory specified
 	//
@@ -172,6 +175,12 @@ type Features struct {
 // Disable nil's out the named feature.  If it isn't found then it
 // will log a message.
 func (ft *Features) Disable(name string) *Features {
+	// Prefix boolean values with ! to set the feature
+	invert := false
+	if strings.HasPrefix(name, "!") {
+		name = name[1:]
+		invert = true
+	}
 	v := reflect.ValueOf(ft).Elem()
 	vType := v.Type()
 	for i := 0; i < v.NumField(); i++ {
@@ -181,9 +190,18 @@ func (ft *Features) Disable(name string) *Features {
 			if !field.CanSet() {
 				Errorf(nil, "Can't set Feature %q", name)
 			} else {
-				zero := reflect.Zero(field.Type())
-				field.Set(zero)
-				Debugf(nil, "Reset feature %q", name)
+				if invert {
+					if field.Type().Kind() == reflect.Bool {
+						field.Set(reflect.ValueOf(true))
+						Debugf(nil, "Set feature %q", name)
+					} else {
+						Errorf(nil, "Can't set Feature %q to true", name)
+					}
+				} else {
+					zero := reflect.Zero(field.Type())
+					field.Set(zero)
+					Debugf(nil, "Reset feature %q", name)
+				}
 			}
 		}
 	}
@@ -254,6 +272,7 @@ func (ft *Features) Fill(ctx context.Context, f Fs) *Features {
 	if do, ok := f.(Wrapper); ok {
 		ft.WrapFs = do.WrapFs
 		ft.SetWrapper = do.SetWrapper
+		ft.Overlay = true // if implement UnWrap then must be an Overlay
 	}
 	if do, ok := f.(DirCacheFlusher); ok {
 		ft.DirCacheFlush = do.DirCacheFlush
@@ -322,6 +341,9 @@ func (ft *Features) Mask(ctx context.Context, f Fs) *Features {
 	ft.SlowModTime = ft.SlowModTime && mask.SlowModTime
 	ft.SlowHash = ft.SlowHash && mask.SlowHash
 	ft.FilterAware = ft.FilterAware && mask.FilterAware
+	ft.PartialUploads = ft.PartialUploads && mask.PartialUploads
+	ft.NoMultiThreading = ft.NoMultiThreading && mask.NoMultiThreading
+	// ft.Overlay = ft.Overlay && mask.Overlay don't propagate Overlay
 
 	if mask.Purge == nil {
 		ft.Purge = nil

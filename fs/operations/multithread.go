@@ -1,6 +1,7 @@
 package operations
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,10 +13,31 @@ import (
 )
 
 const (
-	multithreadChunkSize     = 64 << 10
-	multithreadChunkSizeMask = multithreadChunkSize - 1
-	multithreadBufferSize    = 32 * 1024
+	multithreadChunkSize      = 64 << 10
+	multithreadChunkSizeMask  = multithreadChunkSize - 1
+	multithreadReadBufferSize = 32 * 1024
 )
+
+// An offsetWriter maps writes at offset base to offset base+off in the underlying writer.
+//
+// Modified from the go source code. Can be replaced with
+// io.OffsetWriter when we no longer need to support go1.19
+type offsetWriter struct {
+	w   io.WriterAt
+	off int64 // the current offset
+}
+
+// newOffsetWriter returns an offsetWriter that writes to w
+// starting at offset off.
+func newOffsetWriter(w io.WriterAt, off int64) *offsetWriter {
+	return &offsetWriter{w, off}
+}
+
+func (o *offsetWriter) Write(p []byte) (n int, err error) {
+	n, err = o.w.WriteAt(p, o.off)
+	o.off += int64(n)
+	return
+}
 
 // Return a boolean as to whether we should use multi thread copy for
 // this transfer
@@ -28,11 +50,15 @@ func doMultiThreadCopy(ctx context.Context, f fs.Fs, src fs.Object) bool {
 	if ci.MultiThreadStreams <= 1 {
 		return false
 	}
+	// ...if the source doesn't support it
+	if src.Fs().Features().NoMultiThreading {
+		return false
+	}
 	// ...size of object is less than cutoff
 	if src.Size() < int64(ci.MultiThreadCutoff) {
 		return false
 	}
-	// ...source doesn't support it
+	// ...destination doesn't support it
 	dstFeatures := f.Features()
 	if dstFeatures.OpenWriterAt == nil {
 		return false
@@ -75,14 +101,19 @@ func (mc *multiThreadCopyState) copyStream(ctx context.Context, stream int) (err
 
 	fs.Debugf(mc.src, "multi-thread copy: stream %d/%d (%d-%d) size %v starting", stream+1, mc.streams, start, end, fs.SizeSuffix(end-start))
 
-	rc, err := NewReOpen(ctx, mc.src, ci.LowLevelRetries, &fs.RangeOption{Start: start, End: end - 1})
+	rc, err := Open(ctx, mc.src, &fs.RangeOption{Start: start, End: end - 1})
 	if err != nil {
 		return fmt.Errorf("multipart copy: failed to open source: %w", err)
 	}
 	defer fs.CheckClose(rc, &err)
 
+	var writer io.Writer = newOffsetWriter(mc.wc, start)
+	if ci.MultiThreadWriteBufferSize > 0 {
+		writer = bufio.NewWriterSize(writer, int(ci.MultiThreadWriteBufferSize))
+		fs.Debugf(mc.src, "multi-thread copy: write buffer set to %v", ci.MultiThreadWriteBufferSize)
+	}
 	// Copy the data
-	buf := make([]byte, multithreadBufferSize)
+	buf := make([]byte, multithreadReadBufferSize)
 	offset := start
 	for {
 		// Check if context cancelled and exit if so
@@ -95,7 +126,7 @@ func (mc *multiThreadCopyState) copyStream(ctx context.Context, stream int) (err
 			if err != nil {
 				return fmt.Errorf("multipart copy: accounting failed: %w", err)
 			}
-			nw, ew := mc.wc.WriteAt(buf[0:nr], offset)
+			nw, ew := writer.Write(buf[0:nr])
 			if nw > 0 {
 				offset += int64(nw)
 			}
@@ -110,6 +141,16 @@ func (mc *multiThreadCopyState) copyStream(ctx context.Context, stream int) (err
 			if er != io.EOF {
 				return fmt.Errorf("multipart copy: read failed: %w", er)
 			}
+
+			// if we were buffering, flush do disk
+			switch w := writer.(type) {
+			case *bufio.Writer:
+				er2 := w.Flush()
+				if er2 != nil {
+					return fmt.Errorf("multipart copy: flush failed: %w", er2)
+				}
+			}
+
 			break
 		}
 	}

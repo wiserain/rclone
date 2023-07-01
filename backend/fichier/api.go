@@ -118,6 +118,9 @@ func (f *Fs) getDownloadToken(ctx context.Context, url string) (*GetTokenRespons
 		Single: 1,
 		Pass:   f.opt.FilePassword,
 	}
+	if f.opt.CDN {
+		request.CDN = 1
+	}
 	opts := rest.Opts{
 		Method: "POST",
 		Path:   "/download/get_token.cgi",
@@ -473,7 +476,7 @@ func (f *Fs) getUploadNode(ctx context.Context) (response *GetUploadNodeResponse
 		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("didnt got an upload node: %w", err)
+		return nil, fmt.Errorf("didn't get an upload node: %w", err)
 	}
 
 	// fs.Debugf(f, "Got Upload node")

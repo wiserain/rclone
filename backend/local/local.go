@@ -266,7 +266,10 @@ type Object struct {
 
 // ------------------------------------------------------------
 
-var errLinksAndCopyLinks = errors.New("can't use -l/--links with -L/--copy-links")
+var (
+	errLinksAndCopyLinks = errors.New("can't use -l/--links with -L/--copy-links")
+	errLinksNeedsSuffix  = errors.New("need \"" + linkSuffix + "\" suffix to refer to symlink when using -l/--links")
+)
 
 // NewFs constructs an Fs from the path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
@@ -300,6 +303,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		WriteMetadata:           true,
 		UserMetadata:            xattrSupported, // can only R/W general purpose metadata if xattrs are supported
 		FilterAware:             true,
+		PartialUploads:          true,
 	}).Fill(ctx, f)
 	if opt.FollowSymlinks {
 		f.lstat = os.Stat
@@ -310,7 +314,16 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	if err == nil {
 		f.dev = readDevice(fi, f.opt.OneFileSystem)
 	}
+	// Check to see if this is a .rclonelink if not found
+	hasLinkSuffix := strings.HasSuffix(f.root, linkSuffix)
+	if hasLinkSuffix && opt.TranslateSymlinks && os.IsNotExist(err) {
+		fi, err = f.lstat(strings.TrimSuffix(f.root, linkSuffix))
+	}
 	if err == nil && f.isRegular(fi.Mode()) {
+		// Handle the odd case, that a symlink was specified by name without the link suffix
+		if !hasLinkSuffix && opt.TranslateSymlinks && fi.Mode()&os.ModeSymlink != 0 {
+			return nil, errLinksNeedsSuffix
+		}
 		// It is a file, so use the parent as the root
 		f.root = filepath.Dir(f.root)
 		// return an error with an fs which points to the parent
@@ -540,11 +553,6 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 				}
 				mode = fi.Mode()
 			}
-			// Don't include non directory if not included
-			// we leave directory filtering to the layer above
-			if useFilter && !fi.IsDir() && !filter.IncludeRemote(newRemote) {
-				continue
-			}
 			if fi.IsDir() {
 				// Ignore directories which are symlinks.  These are junction points under windows which
 				// are kind of a souped up symlink. Unix doesn't have directories which are symlinks.
@@ -556,6 +564,11 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 				// Check whether this link should be translated
 				if f.opt.TranslateSymlinks && fi.Mode()&os.ModeSymlink != 0 {
 					newRemote += linkSuffix
+				}
+				// Don't include non directory if not included
+				// we leave directory filtering to the layer above
+				if useFilter && !filter.IncludeRemote(newRemote) {
+					continue
 				}
 				fso, err := f.newObjectWithInfo(newRemote, fi)
 				if err != nil {

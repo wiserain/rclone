@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/async"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/fserrors"
@@ -140,55 +139,12 @@ func (b *batcher) finishBatch(ctx context.Context, items []*files.UploadSessionF
 	return complete, nil
 }
 
-// finishBatchJobStatus waits for the batch to complete returning completed entries
-func (b *batcher) finishBatchJobStatus(ctx context.Context, launchBatchStatus *files.UploadSessionFinishBatchLaunch) (complete *files.UploadSessionFinishBatchResult, err error) {
-	if launchBatchStatus.AsyncJobId == "" {
-		return nil, errors.New("wait for batch completion: empty job ID")
-	}
-	var batchStatus *files.UploadSessionFinishBatchJobStatus
-	sleepTime := 100 * time.Millisecond
-	const maxSleepTime = 1 * time.Second
-	startTime := time.Now()
-	try := 1
-	for {
-		remaining := time.Duration(b.f.opt.BatchCommitTimeout) - time.Since(startTime)
-		if remaining < 0 {
-			break
-		}
-		err = b.f.pacer.Call(func() (bool, error) {
-			batchStatus, err = b.f.srv.UploadSessionFinishBatchCheck(&async.PollArg{
-				AsyncJobId: launchBatchStatus.AsyncJobId,
-			})
-			return shouldRetry(ctx, err)
-		})
-		if err != nil {
-			fs.Debugf(b.f, "Wait for batch: sleeping for %v after error: %v: try %d remaining %v", sleepTime, err, try, remaining)
-		} else {
-			if batchStatus.Tag == "complete" {
-				fs.Debugf(b.f, "Upload batch completed in %v", time.Since(startTime))
-				return batchStatus.Complete, nil
-			}
-			fs.Debugf(b.f, "Wait for batch: sleeping for %v after status: %q: try %d remaining %v", sleepTime, batchStatus.Tag, try, remaining)
-		}
-		time.Sleep(sleepTime)
-		sleepTime *= 2
-		if sleepTime > maxSleepTime {
-			sleepTime = maxSleepTime
-		}
-		try++
-	}
-	if err == nil {
-		err = errors.New("batch didn't complete")
-	}
-	return nil, fmt.Errorf("wait for batch failed after %d tries in %v: %w", try, time.Since(startTime), err)
-}
-
 // commit a batch
 func (b *batcher) commitBatch(ctx context.Context, items []*files.UploadSessionFinishArg, results []chan<- batcherResponse) (err error) {
 	// If commit fails then signal clients if sync
 	var signalled = b.async
 	defer func() {
-		if err != nil && signalled {
+		if err != nil && !signalled {
 			// Signal to clients that there was an error
 			for _, result := range results {
 				result <- batcherResponse{err: err}

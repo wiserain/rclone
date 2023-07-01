@@ -32,7 +32,7 @@ for GET requests on the URL passed in.  It will also open the URL in
 the browser when rclone is run.
 
 See the [rc documentation](/rc/) for more info on the rc flags.
-` + libhttp.Help + libhttp.TemplateHelp + libhttp.AuthHelp,
+` + libhttp.Help(rcflags.FlagPrefix) + libhttp.TemplateHelp(rcflags.FlagPrefix) + libhttp.AuthHelp(rcflags.FlagPrefix),
 	Annotations: map[string]string{
 		"versionIntroduced": "v1.45",
 	},

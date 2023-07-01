@@ -261,6 +261,17 @@ Mounting on macOS can be done either via [macFUSE](https://osxfuse.github.io/)
 FUSE driver utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE system
 which "mounts" via an NFSv4 local server.
 
+#### macFUSE Notes
+
+If installing macFUSE using [dmg packages](https://github.com/osxfuse/osxfuse/releases) from
+the website, rclone will locate the macFUSE libraries without any further intervention.
+If however, macFUSE is installed using the [macports](https://www.macports.org/) package manager,
+the following addition steps are required.
+
+    sudo mkdir /usr/local/lib
+    cd /usr/local/lib
+    sudo ln -s /opt/local/lib/libfuse.2.dylib
+
 #### FUSE-T Limitations, Caveats, and Notes
 
 There are some limitations, caveats, and notes about how it works. These are current as 
@@ -397,20 +408,19 @@ or create systemd mount units:
 |||
 # /etc/systemd/system/mnt-data.mount
 [Unit]
-After=network-online.target
+Description=Mount for /mnt/data
 [Mount]
 Type=rclone
 What=sftp1:subdir
 Where=/mnt/data
-Options=rw,allow_other,args2env,vfs-cache-mode=writes,config=/etc/rclone.conf,cache-dir=/var/rclone
+Options=rw,_netdev,allow_other,args2env,vfs-cache-mode=writes,config=/etc/rclone.conf,cache-dir=/var/rclone
 |||
 
 optionally accompanied by systemd automount unit
 |||
 # /etc/systemd/system/mnt-data.automount
 [Unit]
-After=network-online.target
-Before=remote-fs.target
+Description=AutoMount for /mnt/data
 [Automount]
 Where=/mnt/data
 TimeoutIdleSec=600

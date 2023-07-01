@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// FlagPrefix is the prefix used to uniquely identify command line flags.
+const FlagPrefix = "rc-"
+
 // Options set by command line flags
 var (
 	Opt = rc.DefaultOpt
@@ -28,7 +31,7 @@ func AddFlags(flagSet *pflag.FlagSet) {
 	flags.BoolVarP(flagSet, &Opt.EnableMetrics, "rc-enable-metrics", "", false, "Enable prometheus metrics on /metrics")
 	flags.DurationVarP(flagSet, &Opt.JobExpireDuration, "rc-job-expire-duration", "", Opt.JobExpireDuration, "Expire finished async jobs older than this value")
 	flags.DurationVarP(flagSet, &Opt.JobExpireInterval, "rc-job-expire-interval", "", Opt.JobExpireInterval, "Interval to check for expired async jobs")
-	Opt.HTTP.AddFlagsPrefix(flagSet, "rc-")
-	Opt.Auth.AddFlagsPrefix(flagSet, "rc-")
-	Opt.Template.AddFlagsPrefix(flagSet, "rc-")
+	Opt.HTTP.AddFlagsPrefix(flagSet, FlagPrefix)
+	Opt.Auth.AddFlagsPrefix(flagSet, FlagPrefix)
+	Opt.Template.AddFlagsPrefix(flagSet, FlagPrefix)
 }

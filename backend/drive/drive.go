@@ -206,7 +206,7 @@ func init() {
 					m.Set("root_folder_id", "appDataFolder")
 				}
 
-				if opt.ServiceAccountFile == "" && opt.ServiceAccountCredentials == "" {
+				if opt.ServiceAccountFile == "" && opt.ServiceAccountCredentials == "" && !opt.EnvAuth {
 					return oauthutil.ConfigOut("teamdrive", &oauthutil.Options{
 						OAuth2Config: driveConfig,
 					})
@@ -549,7 +549,9 @@ need to use --ignore size also.`,
 		}, {
 			Name:    "server_side_across_configs",
 			Default: false,
-			Help: `Allow server-side operations (e.g. copy) to work across different drive configs.
+			Help: `Deprecated: use --server-side-across-configs instead.
+
+Allow server-side operations (e.g. copy) to work across different drive configs.
 
 This can be useful if you wish to do a server-side copy between two
 different Google drives.  Note that this isn't enabled by default
@@ -648,6 +650,18 @@ resource key is no needed.
 			// Encode invalid UTF-8 bytes as json doesn't handle them properly.
 			// Don't encode / as it's a valid name character in drive.
 			Default: encoder.EncodeInvalidUtf8,
+		}, {
+			Name:     "env_auth",
+			Help:     "Get IAM credentials from runtime (environment variables or instance meta data if no env vars).\n\nOnly applies if service_account_file and service_account_credentials is blank.",
+			Default:  false,
+			Advanced: true,
+			Examples: []fs.OptionExample{{
+				Value: "false",
+				Help:  "Enter credentials in the next step.",
+			}, {
+				Value: "true",
+				Help:  "Get GCP IAM credentials from the environment (env vars or IAM).",
+			}},
 		}}...),
 	})
 
@@ -713,6 +727,7 @@ type Options struct {
 	SkipDanglingShortcuts     bool                 `config:"skip_dangling_shortcuts"`
 	ResourceKey               string               `config:"resource_key"`
 	Enc                       encoder.MultiEncoder `config:"encoding"`
+	EnvAuth                   bool                 `config:"env_auth"`
 }
 
 // Fs represents a remote drive server
@@ -1193,6 +1208,12 @@ func createOAuthClient(ctx context.Context, opt *Options, name string, m configm
 		if err != nil {
 			return nil, fmt.Errorf("failed to create oauth client from service account: %w", err)
 		}
+	} else if opt.EnvAuth {
+		scopes := driveScopes(opt.Scope)
+		oAuthClient, err = google.DefaultClient(ctx, scopes...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create client from environment: %w", err)
+		}
 	} else {
 		oAuthClient, _, err = oauthutil.NewClientWithBaseClient(ctx, name, m, driveConfig, getClient(ctx, opt))
 		if err != nil {
@@ -1666,6 +1687,9 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 		return *f.fileObj, nil
 	}
 
+	if strings.HasSuffix(remote, "/") {
+		return nil, fs.ErrorIsDir
+	}
 	info, extension, exportName, exportMimeType, isDocument, err := f.getRemoteInfoWithExport(ctx, remote)
 	if err != nil {
 		return nil, err
@@ -3057,6 +3081,7 @@ func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.
 			if f.rootFolderID == "appDataFolder" {
 				changesCall.Spaces("appDataFolder")
 			}
+			changesCall.RestrictToMyDrive(!f.opt.SharedWithMe)
 			changeList, err = changesCall.Context(ctx).Do()
 			return f.shouldRetry(ctx, err)
 		})
@@ -4125,7 +4150,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if err != nil {
 		return err
 	}
-	newO, err := o.fs.newObjectWithInfo(ctx, src.Remote(), info)
+	newO, err := o.fs.newObjectWithInfo(ctx, o.remote, info)
 	if err != nil {
 		return err
 	}

@@ -331,15 +331,6 @@ func parsePath(path string) (root string) {
 	return
 }
 
-func (f *Fs) splitPath(remote string) (directory, leaf string) {
-	directory, leaf = dircache.SplitPath(remote)
-	if f.root != "" {
-		// Adds the root folder to the path to get a full path
-		directory = path.Join(f.root, directory)
-	}
-	return
-}
-
 // readMetaDataForPath reads the metadata from the path
 func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Item, err error) {
 	// defer fs.Trace(f, "path=%q", path)("info=%+v, err=%v", &info, &err)
@@ -1215,7 +1206,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if err != nil {
 		return nil, err
 	}
-	if partialContent && resp.StatusCode == 200 {
+	if partialContent && resp.StatusCode == 200 && resp.Header.Get("Content-Range") == "" {
 		if start > 0 {
 			// We need to read and discard the beginning of the data...
 			_, err = io.CopyN(io.Discard, resp.Body, start)

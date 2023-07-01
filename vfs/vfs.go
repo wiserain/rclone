@@ -13,7 +13,7 @@
 // # It also includes directory caching
 //
 // The vfs package returns Error values to signal precisely which
-// error conditions have ocurred.  It may also return general errors
+// error conditions have occurred.  It may also return general errors
 // it receives.  It tries to use os Error values (e.g. os.ErrExist)
 // where possible.
 //
@@ -227,12 +227,13 @@ func New(f fs.Fs, opt *vfscommon.Options) *VFS {
 		fs.Logf(f, "--vfs-cache-mode writes or full is recommended for this remote as it can't stream")
 	}
 
-	vfs.SetCacheMode(vfs.Opt.CacheMode)
-
 	// Pin the Fs into the cache so that when we use cache.NewFs
 	// with the same remote string we get this one. The Pin is
 	// removed when the vfs is finalized
 	cache.PinUntilFinalized(f, vfs)
+
+	// This can take some time so do it after the Pin
+	vfs.SetCacheMode(vfs.Opt.CacheMode)
 
 	return vfs
 }
@@ -654,18 +655,54 @@ func (vfs *VFS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	return nil
 }
 
+// mkdir creates a new directory with the specified name and permission bits
+// (before umask) returning the new directory node.
+func (vfs *VFS) mkdir(name string, perm os.FileMode) (*Dir, error) {
+	dir, leaf, err := vfs.StatParent(name)
+	if err != nil {
+		return nil, err
+	}
+	return dir.Mkdir(leaf)
+}
+
 // Mkdir creates a new directory with the specified name and permission bits
 // (before umask).
 func (vfs *VFS) Mkdir(name string, perm os.FileMode) error {
-	dir, leaf, err := vfs.StatParent(name)
-	if err != nil {
-		return err
+	_, err := vfs.mkdir(name, perm)
+	return err
+}
+
+// mkdirAll creates a new directory with the specified name and
+// permission bits (before umask) and all of its parent directories up
+// to the root.
+func (vfs *VFS) mkdirAll(name string, perm os.FileMode) (dir *Dir, err error) {
+	name = strings.Trim(name, "/")
+	// the root directory node already exists even if the directory isn't created yet
+	if name == "" {
+		return vfs.root, nil
 	}
-	_, err = dir.Mkdir(leaf)
-	if err != nil {
-		return err
+	var parent, leaf string
+	dir, leaf, err = vfs.StatParent(name)
+	if err == ENOENT {
+		parent, leaf = path.Split(name)
+		dir, err = vfs.mkdirAll(parent, perm)
 	}
-	return nil
+	if err != nil {
+		return nil, err
+	}
+	dir, err = dir.Mkdir(leaf)
+	if err != nil {
+		return nil, err
+	}
+	return dir, nil
+}
+
+// MkdirAll creates a new directory with the specified name and
+// permission bits (before umask) and all of its parent directories up
+// to the root.
+func (vfs *VFS) MkdirAll(name string, perm os.FileMode) error {
+	_, err := vfs.mkdirAll(name, perm)
+	return err
 }
 
 // ReadDir reads the directory named by dirname and returns
@@ -701,8 +738,17 @@ func (vfs *VFS) ReadFile(filename string) (b []byte, err error) {
 }
 
 // AddVirtual adds the object (file or dir) to the directory cache
-func (vfs *VFS) AddVirtual(remote string, size int64, isDir bool) error {
-	dir, leaf, err := vfs.StatParent(remote)
+func (vfs *VFS) AddVirtual(remote string, size int64, isDir bool) (err error) {
+	remote = strings.TrimRight(remote, "/")
+	var dir *Dir
+	var parent, leaf string
+	if vfs.f.Features().CanHaveEmptyDirectories {
+		dir, leaf, err = vfs.StatParent(remote)
+	} else {
+		// Create parent of virtual directory since backend can't have empty directories
+		parent, leaf = path.Split(remote)
+		dir, err = vfs.mkdirAll(parent, vfs.Opt.DirPerms)
+	}
 	if err != nil {
 		return err
 	}
