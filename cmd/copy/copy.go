@@ -88,7 +88,7 @@ recently very efficiently like this:
 		cmd.CheckArgs(2, 2, command, args)
 		fsrc, srcFileName, fdst := cmd.NewFsSrcFileDst(args)
 		// mod
-		if len(fsrc.Root()) > 7 && "isFile:" == fsrc.Root()[0:7] {
+		if len(fsrc.Root()) > 7 && fsrc.Root()[0:7] == "isFile:" {
 			srcFileName = fsrc.Root()[7:]
 		}
 		cmd.Run(true, true, command, func() error {
