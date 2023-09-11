@@ -58,7 +58,6 @@ import (
 const (
 	rcloneClientID              = "202264815644.apps.googleusercontent.com"
 	rcloneEncryptedClientSecret = "eX8GpZTVx3vxMWVkuuBdDWmAUE6rGhTwVrvG9GhllYccSdj2-mvHVg"
-	gdsEncryptedEndpoint        = "S02NBrLggd4DwLGR1SNhhfDXW6ZRBPP3I1oR6E0l4vGwkkAS2HX9IRPv9ch3dPXrPg" // mod
 	driveFolderType             = "application/vnd.google-apps.folder"
 	shortcutMimeType            = "application/vnd.google-apps.shortcut"
 	shortcutMimeTypeDangling    = "application/vnd.google-apps.shortcut.dangling" // synthetic mime type for internal use
@@ -469,7 +468,7 @@ date is used.`,
 			Sensitive: true,
 		}, { // mod
 			Name:      "gds_endpoint",
-			Default:   obscure.MustReveal(gdsEncryptedEndpoint),
+			Default:   "",
 			Help:      `api endpoint for custom google drive authentication server.`,
 			Advanced:  true,
 			Sensitive: true,
