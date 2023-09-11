@@ -24,6 +24,7 @@ import (
 
 	"storj.io/uplink"
 	"storj.io/uplink/edge"
+	"storj.io/uplink/private/testuplink"
 )
 
 const (
@@ -98,9 +99,10 @@ func init() {
 				},
 				}},
 			{
-				Name:     "access_grant",
-				Help:     "Access grant.",
-				Provider: "existing",
+				Name:      "access_grant",
+				Help:      "Access grant.",
+				Provider:  "existing",
+				Sensitive: true,
 			},
 			{
 				Name:     "satellite_address",
@@ -120,14 +122,16 @@ func init() {
 				},
 			},
 			{
-				Name:     "api_key",
-				Help:     "API key.",
-				Provider: newProvider,
+				Name:      "api_key",
+				Help:      "API key.",
+				Provider:  newProvider,
+				Sensitive: true,
 			},
 			{
-				Name:     "passphrase",
-				Help:     "Encryption passphrase.\n\nTo access existing objects enter passphrase used for uploading.",
-				Provider: newProvider,
+				Name:      "passphrase",
+				Help:      "Encryption passphrase.\n\nTo access existing objects enter passphrase used for uploading.",
+				Provider:  newProvider,
+				Sensitive: true,
 			},
 		},
 	})
@@ -272,6 +276,8 @@ func (f *Fs) connect(ctx context.Context) (project *uplink.Project, err error) {
 	cfg := uplink.Config{
 		UserAgent: "rclone",
 	}
+
+	ctx = testuplink.WithConcurrentSegmentUploadsDefaultConfig(ctx)
 
 	project, err = cfg.OpenProject(ctx, f.access)
 	if err != nil {
