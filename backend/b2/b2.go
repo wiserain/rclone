@@ -158,7 +158,7 @@ concurrently.
 Note that chunks are stored in memory and there may be up to
 "--transfers" * "--b2-upload-concurrency" chunks stored at once
 in memory.`,
-			Default:  16,
+			Default:  4,
 			Advanced: true,
 		}, {
 			Name: "disable_checksum",
@@ -1297,7 +1297,11 @@ func (f *Fs) copy(ctx context.Context, dstObj *Object, srcObj *Object, newInfo *
 		if err != nil {
 			return err
 		}
-		return up.Copy(ctx)
+		err = up.Copy(ctx)
+		if err != nil {
+			return err
+		}
+		return dstObj.decodeMetaDataFileInfo(up.info)
 	}
 
 	dstBucket, dstPath := dstObj.split()
@@ -1884,7 +1888,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 				return err
 			}
 			// NB Stream returns the buffer and token
-			return up.Stream(ctx, rw)
+			err = up.Stream(ctx, rw)
+			if err != nil {
+				return err
+			}
+			return o.decodeMetaDataFileInfo(up.info)
 		} else if err == io.EOF {
 			fs.Debugf(o, "File has %d bytes, which makes only one chunk. Using direct upload.", n)
 			defer o.fs.putRW(rw)
@@ -1895,11 +1903,15 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 			return err
 		}
 	} else if size > int64(o.fs.opt.UploadCutoff) {
-		_, err := multipart.UploadMultipart(ctx, src, in, multipart.UploadMultipartOptions{
+		chunkWriter, err := multipart.UploadMultipart(ctx, src, in, multipart.UploadMultipartOptions{
 			Open:        o.fs,
 			OpenOptions: options,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		up := chunkWriter.(*largeUpload)
+		return o.decodeMetaDataFileInfo(up.info)
 	}
 
 	modTime := src.ModTime(ctx)

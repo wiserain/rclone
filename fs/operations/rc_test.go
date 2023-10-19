@@ -318,7 +318,7 @@ func TestRcSetTier(t *testing.T) {
 	r.CheckRemoteItems(t, file1)
 
 	// Because we don't know what the current tier options here are, let's
-	// just get the current tier, and re-use that
+	// just get the current tier, and reuse that
 	o, err := r.Fremote.NewObject(ctx, file1.Path)
 	require.NoError(t, err)
 	trr, ok := o.(fs.GetTierer)
@@ -345,7 +345,7 @@ func TestRcSetTierFile(t *testing.T) {
 	r.CheckRemoteItems(t, file1)
 
 	// Because we don't know what the current tier options here are, let's
-	// just get the current tier, and re-use that
+	// just get the current tier, and reuse that
 	o, err := r.Fremote.NewObject(ctx, file1.Path)
 	require.NoError(t, err)
 	trr, ok := o.(fs.GetTierer)
@@ -544,7 +544,7 @@ func TestUploadFile(t *testing.T) {
 	r, call := rcNewRun(t, "operations/uploadfile")
 	ctx := context.Background()
 
-	testFileName := "test.txt"
+	testFileName := "uploadfile-test.txt"
 	testFileContent := "Hello World"
 	r.WriteFile(testFileName, testFileContent, t1)
 	testItem1 := fstest.NewItem(testFileName, testFileContent, t1)
@@ -552,6 +552,10 @@ func TestUploadFile(t *testing.T) {
 
 	currentFile, err := os.Open(path.Join(r.LocalName, testFileName))
 	require.NoError(t, err)
+
+	defer func() {
+		assert.NoError(t, currentFile.Close())
+	}()
 
 	formReader, contentType, _, err := rest.MultipartUpload(ctx, currentFile, url.Values{}, "file", testFileName)
 	require.NoError(t, err)
@@ -572,10 +576,14 @@ func TestUploadFile(t *testing.T) {
 
 	assert.NoError(t, r.Fremote.Mkdir(context.Background(), "subdir"))
 
-	currentFile, err = os.Open(path.Join(r.LocalName, testFileName))
+	currentFile2, err := os.Open(path.Join(r.LocalName, testFileName))
 	require.NoError(t, err)
 
-	formReader, contentType, _, err = rest.MultipartUpload(ctx, currentFile, url.Values{}, "file", testFileName)
+	defer func() {
+		assert.NoError(t, currentFile2.Close())
+	}()
+
+	formReader, contentType, _, err = rest.MultipartUpload(ctx, currentFile2, url.Values{}, "file", testFileName)
 	require.NoError(t, err)
 
 	httpReq = httptest.NewRequest("POST", "/", formReader)

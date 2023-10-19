@@ -85,6 +85,7 @@ type largeUpload struct {
 	uploads   []*api.GetUploadPartURLResponse // result of get upload URL calls
 	chunkSize int64                           // chunk size to use
 	src       *Object                         // if copying, object we are reading from
+	info      *api.FileInfo                   // final response with info about the object
 }
 
 // newLargeUpload starts an upload of object o from in with metadata in src
@@ -168,24 +169,26 @@ func (f *Fs) newLargeUpload(ctx context.Context, o *Object, in io.Reader, src fs
 // This should be returned with returnUploadURL when finished
 func (up *largeUpload) getUploadURL(ctx context.Context) (upload *api.GetUploadPartURLResponse, err error) {
 	up.uploadMu.Lock()
-	defer up.uploadMu.Unlock()
-	if len(up.uploads) == 0 {
-		opts := rest.Opts{
-			Method: "POST",
-			Path:   "/b2_get_upload_part_url",
-		}
-		var request = api.GetUploadPartURLRequest{
-			ID: up.id,
-		}
-		err := up.f.pacer.Call(func() (bool, error) {
-			resp, err := up.f.srv.CallJSON(ctx, &opts, &request, &upload)
-			return up.f.shouldRetry(ctx, resp, err)
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get upload URL: %w", err)
-		}
-	} else {
+	if len(up.uploads) > 0 {
 		upload, up.uploads = up.uploads[0], up.uploads[1:]
+		up.uploadMu.Unlock()
+		return upload, nil
+	}
+	up.uploadMu.Unlock()
+
+	opts := rest.Opts{
+		Method: "POST",
+		Path:   "/b2_get_upload_part_url",
+	}
+	var request = api.GetUploadPartURLRequest{
+		ID: up.id,
+	}
+	err = up.f.pacer.Call(func() (bool, error) {
+		resp, err := up.f.srv.CallJSON(ctx, &opts, &request, &upload)
+		return up.f.shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get upload URL: %w", err)
 	}
 	return upload, nil
 }
@@ -352,7 +355,8 @@ func (up *largeUpload) Close(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return up.o.decodeMetaDataFileInfo(&response)
+	up.info = &response
+	return nil
 }
 
 // Abort aborts the large upload
@@ -389,10 +393,11 @@ func (up *largeUpload) Stream(ctx context.Context, initialUploadBlock *pool.RW) 
 		hasMoreParts = true
 	)
 	up.size = initialUploadBlock.Size()
+	up.parts = 0
 	for part := 0; hasMoreParts; part++ {
 		// Get a block of memory from the pool and token which limits concurrency.
 		var rw *pool.RW
-		if part == 1 {
+		if part == 0 {
 			rw = initialUploadBlock
 		} else {
 			rw = up.f.getRW(false)
@@ -407,7 +412,7 @@ func (up *largeUpload) Stream(ctx context.Context, initialUploadBlock *pool.RW) 
 
 		// Read the chunk
 		var n int64
-		if part == 1 {
+		if part == 0 {
 			n = rw.Size()
 		} else {
 			n, err = io.CopyN(rw, up.in, up.chunkSize)
@@ -422,7 +427,7 @@ func (up *largeUpload) Stream(ctx context.Context, initialUploadBlock *pool.RW) 
 		}
 
 		// Keep stats up to date
-		up.parts = part
+		up.parts += 1
 		up.size += n
 		if part > maxParts {
 			up.f.putRW(rw)
@@ -452,7 +457,7 @@ func (up *largeUpload) Copy(ctx context.Context) (err error) {
 		remaining = up.size
 	)
 	g.SetLimit(up.f.opt.UploadConcurrency)
-	for part := 0; part <= up.parts; part++ {
+	for part := 0; part < up.parts; part++ {
 		// Fail fast, in case an errgroup managed function returns an error
 		// gCtx is cancelled. There is no point in copying all the other parts.
 		if gCtx.Err() != nil {

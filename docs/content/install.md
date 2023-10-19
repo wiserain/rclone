@@ -80,6 +80,19 @@ developers so it may be out of date. Its current version is as below.
 
 [![Homebrew package](https://repology.org/badge/version-for-repo/homebrew/rclone.svg)](https://repology.org/project/rclone/versions)
 
+### Installation with MacPorts (#macos-macports)
+
+On macOS, rclone can also be installed via [MacPorts](https://www.macports.org):
+
+    sudo port install rclone
+
+Note that this is a third party installer not controlled by the rclone
+developers so it may be out of date. Its current version is as below.
+
+[![MacPorts port](https://repology.org/badge/version-for-repo/macports/rclone.svg)](https://repology.org/project/rclone/versions)
+
+More information [here](https://ports.macports.org/port/rclone/).
+
 ### Precompiled binary, using curl {#macos-precompiled}
 
 To avoid problems with macOS gatekeeper enforcing the binary to be signed and
@@ -302,7 +315,7 @@ Make sure you have [Snapd installed](https://snapcraft.io/docs/installing-snapd)
 ```bash
 $ sudo snap install rclone
 ```
-Due to the strict confinement of Snap, rclone snap cannot acess real /home/$USER/.config/rclone directory, default config path is as below.
+Due to the strict confinement of Snap, rclone snap cannot access real /home/$USER/.config/rclone directory, default config path is as below.
 
 - Default config directory:
     - /home/$USER/snap/rclone/current/.config/rclone
@@ -572,7 +585,7 @@ It requires .NET Framework, but it is preinstalled on newer versions of Windows,
 also provides alternative standalone distributions which includes necessary runtime (.NET 5).
 WinSW is a command-line only utility, where you have to manually create an XML file with
 service configuration. This may be a drawback for some, but it can also be an advantage
-as it is easy to back up and re-use the configuration
+as it is easy to back up and reuse the configuration
 settings, without having go through manual steps in a GUI. One thing to note is that
 by default it does not restart the service on error, one have to explicit enable this
 in the configuration file (via the "onfailure" parameter).
