@@ -10,6 +10,8 @@ tests:
  - path: vfs
  - path: cmd/serve/restic
    localonly: true
+ - path: cmd/serve/docker
+   localonly: true
  - path: cmd/selfupdate
    localonly: true
 backends:
@@ -146,6 +148,9 @@ backends:
  - backend: "hidrive"
    remote:   "TestHiDrive:"
    fastlist: false
+ - backend:  "imagekit"
+   remote:   "TestImageKit:"
+   fastlist: false
  - backend:  "internetarchive"
    remote:   "TestIA:rclone-integration-test"
    fastlist: true
@@ -179,6 +184,9 @@ backends:
    fastlist: true
  - backend:  "s3"
    remote:   "TestS3,directory_markers:"
+   fastlist: true
+ - backend:  "s3"
+   remote:   "TestS3Rclone:"
    fastlist: true
  - backend:  "s3"
    remote:   "TestS3Minio:"
@@ -318,6 +326,8 @@ backends:
  - backend:  "azureblob"
    remote:   "TestAzureBlob,directory_markers:"
    fastlist: true
+ - backend:  "azurefiles"
+   remote:   "TestAzureFiles:"
  - backend:  "pcloud"
    remote:   "TestPcloud:"
    fastlist: true
@@ -370,6 +380,13 @@ backends:
  # - backend:  "koofr"
  #   remote:   "TestDigiStorage:"
  #   fastlist: false
+ - backend: "linkbox"
+   remote: "TestLinkbox:"
+   fastlist: false
+   ignore:
+     - TestIntegration/FsMkdir/FsEncoding/invalid_UTF-8
+     - TestRWFileHandleWriteNoWrite
+     - TestCaseInsensitiveMoveFile
  - backend:  "premiumizeme"
    remote:   "TestPremiumizeMe:"
    fastlist: false
@@ -415,16 +432,18 @@ backends:
  - backend:  "zoho"
    remote:   "TestZoho:"
    fastlist: false
+   tests:
+     - backend
  - backend: "hdfs"
    remote: "TestHdfs:"
    fastlist: false
    ignore:
      - TestSyncUTFNorm
- - backend: "uptobox"
-   remote: "TestUptobox:"
-   fastlist: false
-   ignore:
-     - TestRWFileHandleWriteNoWrite
+ # - backend: "uptobox"
+ #   remote: "TestUptobox:"
+ #   fastlist: false
+ #   ignore:
+ #     - TestRWFileHandleWriteNoWrite
  - backend: "oracleobjectstorage"
    remote: "TestOracleObjectStorage:"
    fastlist: true

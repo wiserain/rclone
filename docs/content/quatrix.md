@@ -121,7 +121,7 @@ d) Delete this remote
 y/e/d> y
 ```
 
-### Modified time and hashes
+### Modification times and hashes
 
 Quatrix allows modification times to be set on objects accurate to 1 microsecond.
 These will be used to detect whether objects need syncing or not.
@@ -189,7 +189,7 @@ Properties:
 
 - Config:      encoding
 - Env Var:     RCLONE_QUATRIX_ENCODING
-- Type:        MultiEncoder
+- Type:        Encoding
 - Default:     Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot
 
 #### --quatrix-effective-upload-time

@@ -22,6 +22,7 @@ package vfs
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-git/go-billy/v5"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/log"
@@ -40,6 +42,11 @@ import (
 	"github.com/rclone/rclone/vfs/vfscache"
 	"github.com/rclone/rclone/vfs/vfscommon"
 )
+
+// Help for the VFS.
+//
+//go:embed vfs.md
+var Help string
 
 // Node represents either a directory (*Dir) or a file (*File)
 type Node interface {
@@ -119,6 +126,8 @@ type Handle interface {
 	Release() error
 	Node() Node
 	//	Size() int64
+	Lock() error
+	Unlock() error
 }
 
 // baseHandle implements all the missing methods
@@ -144,16 +153,19 @@ func (h baseHandle) WriteString(s string) (n int, err error)              { retu
 func (h baseHandle) Flush() (err error)                                   { return ENOSYS }
 func (h baseHandle) Release() (err error)                                 { return ENOSYS }
 func (h baseHandle) Node() Node                                           { return nil }
+func (h baseHandle) Unlock() error                                        { return os.ErrInvalid }
+func (h baseHandle) Lock() error                                          { return os.ErrInvalid }
 
 //func (h baseHandle) Size() int64                                          { return 0 }
 
 // Check interfaces
 var (
-	_ OsFiler = (*os.File)(nil)
-	_ Handle  = (*baseHandle)(nil)
-	_ Handle  = (*ReadFileHandle)(nil)
-	_ Handle  = (*WriteFileHandle)(nil)
-	_ Handle  = (*DirHandle)(nil)
+	_ OsFiler    = (*os.File)(nil)
+	_ Handle     = (*baseHandle)(nil)
+	_ Handle     = (*ReadFileHandle)(nil)
+	_ Handle     = (*WriteFileHandle)(nil)
+	_ Handle     = (*DirHandle)(nil)
+	_ billy.File = (Handle)(nil)
 )
 
 // VFS represents the top level filing system
@@ -232,10 +244,24 @@ func New(f fs.Fs, opt *vfscommon.Options) *VFS {
 	// removed when the vfs is finalized
 	cache.PinUntilFinalized(f, vfs)
 
+	// Refresh the dircache if required
+	if vfs.Opt.Refresh {
+		go vfs.refresh()
+	}
+
 	// This can take some time so do it after the Pin
 	vfs.SetCacheMode(vfs.Opt.CacheMode)
 
 	return vfs
+}
+
+// refresh the directory cache for all directories
+func (vfs *VFS) refresh() {
+	fs.Debugf(vfs.f, "Refreshing VFS directory cache")
+	err := vfs.root.readDirTree()
+	if err != nil {
+		fs.Errorf(vfs.f, "Error refreshing VFS directory cache: %v", err)
+	}
 }
 
 // Stats returns info about the VFS

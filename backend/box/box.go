@@ -380,7 +380,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 
 // readMetaDataForPath reads the metadata from the path
 func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Item, err error) {
-	// defer fs.Trace(f, "path=%q", path)("info=%+v, err=%v", &info, &err)
+	// defer log.Trace(f, "path=%q", path)("info=%+v, err=%v", &info, &err)
 	leaf, directoryID, err := f.dirCache.FindPath(ctx, path, false)
 	if err != nil {
 		if err == fs.ErrorDirNotFound {
@@ -389,20 +389,30 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.It
 		return nil, err
 	}
 
-	found, err := f.listAll(ctx, directoryID, false, true, true, func(item *api.Item) bool {
-		if strings.EqualFold(item.Name, leaf) {
-			info = item
-			return true
-		}
-		return false
+	// Use preupload to find the ID
+	itemMini, err := f.preUploadCheck(ctx, leaf, directoryID, -1)
+	if err != nil {
+		return nil, err
+	}
+	if itemMini == nil {
+		return nil, fs.ErrorObjectNotFound
+	}
+
+	// Now we have the ID we can look up the object proper
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/files/" + itemMini.ID,
+		Parameters: fieldsValue(),
+	}
+	var item api.Item
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err := f.srv.CallJSON(ctx, &opts, nil, &item)
+		return shouldRetry(ctx, resp, err)
 	})
 	if err != nil {
 		return nil, err
 	}
-	if !found {
-		return nil, fs.ErrorObjectNotFound
-	}
-	return info, nil
+	return &item, nil
 }
 
 // errorHandler parses a non 2xx error response into an error
@@ -762,7 +772,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 //
 // It returns "", nil if the file is good to go
 // It returns "ID", nil if the file must be updated
-func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string, size int64) (ID string, err error) {
+func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string, size int64) (item *api.ItemMini, err error) {
 	check := api.PreUploadCheck{
 		Name: f.opt.Enc.FromStandardName(leaf),
 		Parent: api.Parent{
@@ -787,16 +797,16 @@ func (f *Fs) preUploadCheck(ctx context.Context, leaf, directoryID string, size 
 			var conflict api.PreUploadCheckConflict
 			err = json.Unmarshal(apiErr.ContextInfo, &conflict)
 			if err != nil {
-				return "", fmt.Errorf("pre-upload check: JSON decode failed: %w", err)
+				return nil, fmt.Errorf("pre-upload check: JSON decode failed: %w", err)
 			}
 			if conflict.Conflicts.Type != api.ItemTypeFile {
-				return "", fmt.Errorf("pre-upload check: can't overwrite non file with file: %w", err)
+				return nil, fs.ErrorIsDir
 			}
-			return conflict.Conflicts.ID, nil
+			return &conflict.Conflicts, nil
 		}
-		return "", fmt.Errorf("pre-upload check: %w", err)
+		return nil, fmt.Errorf("pre-upload check: %w", err)
 	}
-	return "", nil
+	return nil, nil
 }
 
 // Put the object
@@ -817,11 +827,11 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 
 	// Preflight check the upload, which returns the ID if the
 	// object already exists
-	ID, err := f.preUploadCheck(ctx, leaf, directoryID, src.Size())
+	item, err := f.preUploadCheck(ctx, leaf, directoryID, src.Size())
 	if err != nil {
 		return nil, err
 	}
-	if ID == "" {
+	if item == nil {
 		return f.PutUnchecked(ctx, in, src, options...)
 	}
 
@@ -829,7 +839,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	o := &Object{
 		fs:     f,
 		remote: remote,
-		id:     ID,
+		id:     item.ID,
 	}
 	return o, o.Update(ctx, in, src, options...)
 }
@@ -1211,6 +1221,10 @@ func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryT
 			fs.Infof(f, "Failed to get StreamPosition: %s", err)
 		}
 
+		// box can send duplicate Event IDs. Use this map to track and filter
+		// the ones we've already processed.
+		processedEventIDs := make(map[string]time.Time)
+
 		var ticker *time.Ticker
 		var tickerC <-chan time.Time
 		for {
@@ -1238,7 +1252,15 @@ func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryT
 						continue
 					}
 				}
-				streamPosition, err = f.changeNotifyRunner(ctx, notifyFunc, streamPosition)
+
+				// Garbage collect EventIDs older than 1 minute
+				for eventID, timestamp := range processedEventIDs {
+					if time.Since(timestamp) > time.Minute {
+						delete(processedEventIDs, eventID)
+					}
+				}
+
+				streamPosition, err = f.changeNotifyRunner(ctx, notifyFunc, streamPosition, processedEventIDs)
 				if err != nil {
 					fs.Infof(f, "Change notify listener failure: %s", err)
 				}
@@ -1291,11 +1313,8 @@ func (f *Fs) getFullPath(parentID string, childName string) (fullPath string) {
 	return fullPath
 }
 
-func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.EntryType), streamPosition string) (nextStreamPosition string, err error) {
+func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.EntryType), streamPosition string, processedEventIDs map[string]time.Time) (nextStreamPosition string, err error) {
 	nextStreamPosition = streamPosition
-
-	// box can send duplicate Event IDs; filter any in a single notify run
-	processedEventIDs := make(map[string]bool)
 
 	for {
 		limit := f.opt.ListChunk
@@ -1341,21 +1360,32 @@ func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.
 		var pathsToClear []pathToClear
 		newEventIDs := 0
 		for _, entry := range result.Entries {
-			if entry.EventID == "" || processedEventIDs[entry.EventID] { // missing Event ID, or already saw this one
+			eventDetails := fmt.Sprintf("[%q(%d)|%s|%s|%s|%s]", entry.Source.Name, entry.Source.SequenceID,
+				entry.Source.Type, entry.EventType, entry.Source.ID, entry.EventID)
+
+			if entry.EventID == "" {
+				fs.Debugf(f, "%s ignored due to missing EventID", eventDetails)
 				continue
 			}
-			processedEventIDs[entry.EventID] = true
+			if _, ok := processedEventIDs[entry.EventID]; ok {
+				fs.Debugf(f, "%s ignored due to duplicate EventID", eventDetails)
+				continue
+			}
+			processedEventIDs[entry.EventID] = time.Now()
 			newEventIDs++
 
 			if entry.Source.ID == "" { // missing File or Folder ID
+				fs.Debugf(f, "%s ignored due to missing SourceID", eventDetails)
 				continue
 			}
 			if entry.Source.Type != api.ItemTypeFile && entry.Source.Type != api.ItemTypeFolder { // event is not for a file or folder
+				fs.Debugf(f, "%s ignored due to unsupported SourceType", eventDetails)
 				continue
 			}
 
 			// Only interested in event types that result in a file tree change
 			if _, found := api.FileTreeChangeEventTypes[entry.EventType]; !found {
+				fs.Debugf(f, "%s ignored due to unsupported EventType", eventDetails)
 				continue
 			}
 
@@ -1366,6 +1396,7 @@ func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.
 					// Item in the cache has the same or newer SequenceID than
 					// this event. Ignore this event, it must be old.
 					f.itemMetaCacheMu.Unlock()
+					fs.Debugf(f, "%s ignored due to old SequenceID (%q)", eventDetails, itemMeta.SequenceID)
 					continue
 				}
 
@@ -1387,7 +1418,10 @@ func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.
 			if cachedItemMetaFound {
 				path := f.getFullPath(itemMeta.ParentID, itemMeta.Name)
 				if path != "" {
+					fs.Debugf(f, "%s added old path (%q) for notify", eventDetails, path)
 					pathsToClear = append(pathsToClear, pathToClear{path: path, entryType: entryType})
+				} else {
+					fs.Debugf(f, "%s old parent not cached", eventDetails)
 				}
 
 				// If this is a directory, also delete it from the dir cache.
@@ -1411,7 +1445,10 @@ func (f *Fs) changeNotifyRunner(ctx context.Context, notifyFunc func(string, fs.
 			if entry.Source.ItemStatus == api.ItemStatusActive {
 				path := f.getFullPath(entry.Source.Parent.ID, entry.Source.Name)
 				if path != "" {
+					fs.Debugf(f, "%s added new path (%q) for notify", eventDetails, path)
 					pathsToClear = append(pathsToClear, pathToClear{path: path, entryType: entryType})
+				} else {
+					fs.Debugf(f, "%s new parent not found", eventDetails)
 				}
 			}
 		}

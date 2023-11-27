@@ -292,7 +292,7 @@ func (gds *GdsClient) getGdsRemote(ctx context.Context) (remote *GdsRemote, err 
 // get an id of file or directory
 func (f *Fs) getID(ctx context.Context, path string, real bool) (id string, err error) {
 	if id, _ := parseRootID(path); len(id) > 6 {
-		info, err := f.getFile(ctx, id, f.fileFields)
+		info, err := f.getFile(ctx, id, f.getFileFields(ctx))
 		if err != nil {
 			return "", fmt.Errorf("no such object with id %q: %w", id, err)
 		}

@@ -526,7 +526,7 @@ put them back in again.` >}}
   * HNGamingUK <connor@earnshawhome.co.uk>
   * Jonta <359397+Jonta@users.noreply.github.com>
   * YenForYang <YenForYang@users.noreply.github.com>
-  * Joda Stößer <stoesser@yay-digital.de> <services+github@simjo.st>
+  * SimJoSt / Joda Stößer <git@simjo.st>
   * Logeshwaran <waranlogesh@gmail.com>
   * Rajat Goel <rajat@dropbox.com>
   * r0kk3rz <r0kk3rz@gmail.com>
@@ -773,3 +773,35 @@ put them back in again.` >}}
   * Volodymyr Kit <v.kit@maytech.net>
   * David Pedersen <limero@me.com>
   * Drew Stinnett <drew@drewlink.com>
+  * Pat Patterson <pat@backblaze.com>
+  * Herby Gillot <herby.gillot@gmail.com>
+  * Nikita Shoshin <shoshin_nikita@fastmail.com>
+  * rinsuki <428rinsuki+git@gmail.com>
+  * Beyond Meat <51850644+beyondmeat@users.noreply.github.com>
+  * Saleh Dindar <salh@fb.com>
+  * Volodymyr <142890760+vkit-maytech@users.noreply.github.com>
+  * Gabriel Espinoza <31670639+gspinoza@users.noreply.github.com>
+  * Keigo Imai <keigo.imai@gmail.com>
+  * Ivan Yanitra <iyanitra@tesla-consulting.com>
+  * alfish2000 <alfish2000@gmail.com>
+  * wuxingzhong <qq330332812@gmail.com>
+  * Adithya Kumar <akumar42@protonmail.com>
+  * Tayo-pasedaRJ <138471223+Tayo-pasedaRJ@users.noreply.github.com>
+  * Peter Kreuser <logo@kreuser.name>
+  * Piyush <piyushgarg80>
+  * fotile96 <fotile96@users.noreply.github.com>
+  * Luc Ritchie <luc.ritchie@gmail.com>
+  * cynful <cynful@users.noreply.github.com>
+  * wjielai <wjielai@tencent.com>
+  * Jack Deng <jackdeng@gmail.com>
+  * Mikubill <31246794+Mikubill@users.noreply.github.com>
+  * Artur Neumann <artur@jankaritech.com>
+  * Saw-jan <saw.jan.grg3e@gmail.com>
+  * Oksana Zhykina <o.zhykina@maytech.net>
+  * karan <karan.gupta92@gmail.com>
+  * viktor <viktor@yakovchuk.net>
+  * moongdal <moongdal@tutanota.com>
+  * Mina Galić <freebsd@igalic.co>
+  * Alen Šiljak <dev@alensiljak.eu.org>
+  * 你知道未来吗 <rkonfj@gmail.com>
+  * Abhinav Dhiman <8640877+ahnv@users.noreply.github.com>
