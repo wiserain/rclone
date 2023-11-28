@@ -28,7 +28,7 @@ for tool in "${unzip_tools_list[@]}"; do
     unzip_tool="$tool"
     break
   fi
-done  
+done
 set -e
 
 # exit if no unzip tools available
@@ -72,7 +72,7 @@ case $OS in
     ;;
   OpenBSD)
     OS='openbsd'
-    ;;  
+    ;;
   Darwin)
     OS='osx'
     binTgtDir=/usr/local/bin
@@ -139,7 +139,7 @@ case "$unzip_tool" in
     mkdir -p "$unzip_dir/empty"
     ;;
 esac
-    
+
 cd $unzip_dir/*
 
 
@@ -155,7 +155,7 @@ case "$OS" in
     #manual
     if ! [ -x "$(command -v mandb)" ]; then
         echo 'mandb not found. The rclone man docs will not be installed.'
-    else 
+    else
         mkdir -p /usr/local/share/man/man1
         cp rclone.1 /usr/local/share/man/man1/
         mandb
@@ -179,8 +179,8 @@ case "$OS" in
     chmod a=x ${binTgtDir}/rclone
     #manual
     mkdir -p ${man1TgtDir} && chmod -m 0555 ${man1TgtDir}
-    cp rclone.1 ${man1TgtDir}    
-    chmod a=r ${man1TgtDir}/rclone.1    
+    cp rclone.1 ${man1TgtDir}
+    chmod a=r ${man1TgtDir}/rclone.1
     ;;
   'termux')
     cd ../..
@@ -192,7 +192,7 @@ case "$OS" in
 esac
 
 # checking binary available
-command -v rclone >/dev/null 2>&1 || 
+command -v rclone >/dev/null 2>&1 || \
   { printf "\nERROR: rclone seems not installed.\n\n"; exit 1; }
 
 printf "\n%s has successfully installed." "$(rclone --version | head -n1)"
