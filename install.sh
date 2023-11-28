@@ -48,7 +48,7 @@ fi
 export XDG_CONFIG_HOME=config
 
 #check installed version of rclone to determine if update is necessary
-version=$(rclone --version >/dev/null 2>&1 | head -n1 | cut -d ' ' -f2)
+version=$(rclone --version 2>/dev/null | head -n1 | cut -d' ' -f2)
 if [ "$version" = "$tag_name" ]; then
     printf "\nThe latest version of rclone mod %s is already installed.\n\n" "${version}"
     exit 3
