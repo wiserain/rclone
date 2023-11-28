@@ -30,8 +30,7 @@ cd "$tmp_dir"
 #make sure unzip tool is available and choose one to work with
 set +e
 for tool in "${unzip_tools_list[@]}"; do
-    trash=$(hash "$tool" 2>>errors)
-    if [ "$?" -eq 0 ]; then
+    if command -v "$tool" >/dev/null 2>&1; then
         unzip_tool="$tool"
         break
     fi
@@ -49,7 +48,7 @@ fi
 export XDG_CONFIG_HOME=config
 
 #check installed version of rclone to determine if update is necessary
-version=$(rclone --version 2>>errors | head -n 1 | cut -d ' ' -f 2)
+version=$(rclone --version >/dev/null 2>&1 | head -n1 | cut -d ' ' -f2)
 if [ "$version" = "$tag_name" ]; then
     printf "\nThe latest version of rclone mod %s is already installed.\n\n" "${version}"
     exit 3
@@ -193,7 +192,7 @@ case "$OS" in
 esac
 
 #update version variable post install
-version=$(rclone --version 2>>errors | head -n 1)
+version=$(rclone --version >/dev/null 2>&1 | head -n1)
 
 printf "\n%s has successfully installed." "${version}"
 printf '\nNow run "rclone config" for setup. Check https://rclone.org/docs/ for more details.\n\n'
