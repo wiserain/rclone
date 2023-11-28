@@ -15,9 +15,9 @@ unzip_tools_list=('unzip' '7z' 'busybox')
 usage() { echo "Usage: sudo -v ; curl https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash" 1>&2; exit 1; }
 
 if [ -n "$1" ]; then
-    tag_name="$1"
+  tag_name="$1"
 else
-    tag_name=$(curl -fsS https://api.github.com/repos/wiserain/rclone/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  tag_name=$(curl -fsS https://api.github.com/repos/wiserain/rclone/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 fi
 
 
@@ -30,18 +30,18 @@ cd "$tmp_dir"
 #make sure unzip tool is available and choose one to work with
 set +e
 for tool in "${unzip_tools_list[@]}"; do
-    if command -v "$tool" >/dev/null 2>&1; then
-        unzip_tool="$tool"
-        break
-    fi
+  if command -v "$tool" >/dev/null 2>&1; then
+    unzip_tool="$tool"
+    break
+  fi
 done  
 set -e
 
 # exit if no unzip tools available
 if [ -z "$unzip_tool" ]; then
-    printf "\nNone of the supported tools for extracting zip archives (%s) were found." "${unzip_tools_list[*]}"
-    printf "Please install one of them and try again.\n\n"
-    exit 4
+  printf "\nNone of the supported tools for extracting zip archives (%s) were found." "${unzip_tools_list[*]}"
+  printf "Please install one of them and try again.\n\n"
+  exit 4
 fi
 
 # Make sure we don't create a root owned .config/rclone directory #2127
@@ -50,8 +50,8 @@ export XDG_CONFIG_HOME=config
 #check installed version of rclone to determine if update is necessary
 version=$(rclone --version 2>/dev/null | head -n1 | cut -d' ' -f2)
 if [ "$version" = "$tag_name" ]; then
-    printf "\nThe latest version of rclone mod %s is already installed.\n\n" "${version}"
-    exit 3
+  printf "\nThe latest version of rclone mod %s is already installed.\n\n" "${version}"
+  exit 3
 fi
 
 
