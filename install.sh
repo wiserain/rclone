@@ -191,9 +191,10 @@ case "$OS" in
     exit 2
 esac
 
-#update version variable post install
-version=$(rclone --version >/dev/null 2>&1 | head -n1)
+# checking binary available
+command -v rclone >/dev/null 2>&1 || 
+  { printf "\nERROR: rclone seems not installed.\n\n"; exit 1; }
 
-printf "\n%s has successfully installed." "${version}"
+printf "\n%s has successfully installed." "$(rclone --version | head -n1)"
 printf '\nNow run "rclone config" for setup. Check https://rclone.org/docs/ for more details.\n\n'
 exit 0
