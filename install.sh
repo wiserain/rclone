@@ -23,6 +23,7 @@ fi
 
 #create tmp directory and move to it with macOS compatibility fallback
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'rclone-install.XXXXXXXXXX')
+trap 'rm -rf "$tmp_dir"' EXIT
 cd "$tmp_dir"
 
 
@@ -190,9 +191,6 @@ case "$OS" in
     echo 'OS not supported'
     exit 2
 esac
-
-#cleanup
-rm -rf "$tmp_dir"
 
 #update version variable post install
 version=$(rclone --version 2>>errors | head -n 1)
