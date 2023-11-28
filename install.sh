@@ -29,7 +29,7 @@ cd "$tmp_dir"
 
 #make sure unzip tool is available and choose one to work with
 set +e
-for tool in ${unzip_tools_list[*]}; do
+for tool in "${unzip_tools_list[@]}"; do
     trash=$(hash "$tool" 2>>errors)
     if [ "$?" -eq 0 ]; then
         unzip_tool="$tool"
@@ -40,7 +40,7 @@ set -e
 
 # exit if no unzip tools available
 if [ -z "$unzip_tool" ]; then
-    printf "\nNone of the supported tools for extracting zip archives (${unzip_tools_list[*]}) were found. "
+    printf "\nNone of the supported tools for extracting zip archives (%s) were found." "${unzip_tools_list[*]}"
     printf "Please install one of them and try again.\n\n"
     exit 4
 fi
@@ -51,7 +51,7 @@ export XDG_CONFIG_HOME=config
 #check installed version of rclone to determine if update is necessary
 version=$(rclone --version 2>>errors | head -n 1 | cut -d ' ' -f 2)
 if [ "$version" = "$tag_name" ]; then
-    printf "\nThe latest version of rclone mod ${version} is already installed.\n\n"
+    printf "\nThe latest version of rclone mod %s is already installed.\n\n" "${version}"
     exit 3
 fi
 
@@ -62,7 +62,7 @@ OS="$(uname)"
 case $OS in
   Linux)
     OS='linux'
-    echo $PREFIX | grep -qo "com.termux" && \
+    echo "$PREFIX" | grep -qo "com.termux" && \
       { OS="termux"; unzip_tool="deb"; }
     ;;
   FreeBSD)
@@ -174,18 +174,18 @@ case "$OS" in
     ;;
   'osx')
     #binary
-    mkdir -m 0555 -p ${binTgtDir}
+    mkdir -p ${binTgtDir} && chmod -m 0555 ${binTgtDir}
     cp rclone ${binTgtDir}/rclone.new
     mv ${binTgtDir}/rclone.new ${binTgtDir}/rclone
     chmod a=x ${binTgtDir}/rclone
     #manual
-    mkdir -m 0555 -p ${man1TgtDir}
+    mkdir -p ${man1TgtDir} && chmod -m 0555 ${man1TgtDir}
     cp rclone.1 ${man1TgtDir}    
     chmod a=r ${man1TgtDir}/rclone.1    
     ;;
   'termux')
     cd ../..
-    dpkg -i $rclone_zip
+    dpkg -i "$rclone_zip"
     ;;
   *)
     echo 'OS not supported'
@@ -195,6 +195,6 @@ esac
 #update version variable post install
 version=$(rclone --version 2>>errors | head -n 1)
 
-printf "\n${version} has successfully installed."
+printf "\n%s has successfully installed." "${version}"
 printf '\nNow run "rclone config" for setup. Check https://rclone.org/docs/ for more details.\n\n'
 exit 0
