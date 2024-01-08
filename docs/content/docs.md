@@ -1614,7 +1614,7 @@ json.dump(o, sys.stdout, indent="\t")
 ```
 
 You can find this example (slightly expanded) in the rclone source code at
-[bin/test_metadata_mapper.py](https://github.com/rclone/rclone/blob/master/test_metadata_mapper.py).
+[bin/test_metadata_mapper.py](https://github.com/rclone/rclone/blob/master/bin/test_metadata_mapper.py).
 
 If you want to see the input to the metadata mapper and the output
 returned from it in the log you can use `-vv --dump mapper`.
@@ -1674,7 +1674,7 @@ use multiple threads to transfer the file (default 256M).
 
 Capable backends are marked in the
 [overview](/overview/#optional-features) as `MultithreadUpload`. (They
-need to implement either the `OpenWriterAt` or `OpenChunkedWriter`
+need to implement either the `OpenWriterAt` or `OpenChunkWriter`
 internal interfaces). These include include, `local`, `s3`,
 `azureblob`, `b2`, `oracleobjectstorage` and `smb` at the time of
 writing.
