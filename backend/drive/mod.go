@@ -139,7 +139,6 @@ func (p *ServiceAccountPool) LoadSA() error {
 		}
 	}
 	// make shuffled
-	rand.Seed(time.Now().UTC().UnixNano())
 	rand.Shuffle(len(saList), func(i, j int) {
 		saList[i], saList[j] = saList[j], saList[i]
 	})
