@@ -61,6 +61,7 @@ import (
 	"github.com/rclone/rclone/lib/rest"
 	"github.com/rclone/rclone/lib/version"
 	"golang.org/x/net/http/httpguts"
+	"golang.org/x/sync/errgroup"
 )
 
 // The S3 providers
@@ -2185,10 +2186,10 @@ If empty it will default to the environment variable "AWS_PROFILE" or
 			Sensitive: true,
 		}, {
 			Name: "upload_concurrency",
-			Help: `Concurrency for multipart uploads.
+			Help: `Concurrency for multipart uploads and copies.
 
 This is the number of chunks of the same file that are uploaded
-concurrently.
+concurrently for multipart uploads and copies.
 
 If you are uploading small numbers of large files over high-speed links
 and these uploads do not fully utilize your bandwidth, then increasing
@@ -2217,6 +2218,13 @@ If this is false (the default) then rclone will use v4 authentication.
 If it is set then rclone will use v2 authentication.
 
 Use this only if v4 signatures don't work, e.g. pre Jewel/v10 CEPH.`,
+			Default:  false,
+			Advanced: true,
+		}, {
+			Name: "use_dual_stack",
+			Help: `If true use AWS S3 dual-stack endpoint (IPv6 support).
+
+See [AWS Docs on Dualstack Endpoints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/dual-stack-endpoints.html)`,
 			Default:  false,
 			Advanced: true,
 		}, {
@@ -2427,6 +2435,19 @@ See [the time option docs](/docs/#time-option) for valid formats.
 			Default:  fs.Time{},
 			Advanced: true,
 		}, {
+			Name: "version_deleted",
+			Help: `Show deleted file markers when using versions.
+
+This shows deleted file markers in the listing when using versions. These will appear
+as 0 size files. The only operation which can be performed on them is deletion.
+
+Deleting a delete marker will reveal the previous version.
+
+Deleted files will always show with a timestamp.
+`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name: "decompress",
 			Help: `If set this will decompress gzip encoded objects.
 
@@ -2615,6 +2636,7 @@ type Options struct {
 	Region                string               `config:"region"`
 	Endpoint              string               `config:"endpoint"`
 	STSEndpoint           string               `config:"sts_endpoint"`
+	UseDualStack          bool                 `config:"use_dual_stack"`
 	LocationConstraint    string               `config:"location_constraint"`
 	ACL                   string               `config:"acl"`
 	BucketACL             string               `config:"bucket_acl"`
@@ -2653,6 +2675,7 @@ type Options struct {
 	UsePresignedRequest   bool                 `config:"use_presigned_request"`
 	Versions              bool                 `config:"versions"`
 	VersionAt             fs.Time              `config:"version_at"`
+	VersionDeleted        bool                 `config:"version_deleted"`
 	Decompress            bool                 `config:"decompress"`
 	MightGzip             fs.Tristate          `config:"might_gzip"`
 	UseAcceptEncodingGzip fs.Tristate          `config:"use_accept_encoding_gzip"`
@@ -2942,6 +2965,9 @@ func s3Connection(ctx context.Context, opt *Options, client *http.Client) (*s3.S
 		r.addService("sts", opt.STSEndpoint)
 		awsConfig.WithEndpointResolver(r)
 	}
+	if opt.UseDualStack {
+		awsConfig.UseDualStackEndpoint = endpoints.DualStackEndpointStateEnabled
+	}
 
 	// awsConfig.WithLogLevel(aws.LogDebugWithSigning)
 	awsSessionOpts := session.Options{
@@ -3196,6 +3222,10 @@ func setQuirks(opt *Options) {
 		// https://github.com/rclone/rclone/issues/6670
 		useAcceptEncodingGzip = false
 		useAlreadyExists = true // returns BucketNameUnavailable instead of BucketAlreadyExists but good enough!
+		// GCS S3 doesn't support multi-part server side copy:
+		// See: https://issuetracker.google.com/issues/323465186
+		// So make cutoff very large which it does seem to support
+		opt.CopyCutoff = math.MaxInt64
 	default:
 		fs.Logf("s3", "s3 provider %q not known - please set correctly", opt.Provider)
 		fallthrough
@@ -3420,6 +3450,7 @@ func (f *Fs) getMetaDataListing(ctx context.Context, wantRemote string) (info *s
 		withVersions: f.opt.Versions,
 		findFile:     true,
 		versionAt:    f.opt.VersionAt,
+		hidden:       f.opt.VersionDeleted,
 	}, func(gotRemote string, object *s3.Object, objectVersionID *string, isDirectory bool) error {
 		if isDirectory {
 			return nil
@@ -3481,6 +3512,10 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *s3.Obje
 		o.bytes = aws.Int64Value(info.Size)
 		o.storageClass = stringClonePointer(info.StorageClass)
 		o.versionID = stringClonePointer(versionID)
+		// If is delete marker, show that metadata has been read as there is none to read
+		if info.Size == isDeleteMarker {
+			o.meta = map[string]string{}
+		}
 	} else if !o.fs.opt.NoHeadObject {
 		err := o.readMetaData(ctx) // reads info and meta, returning an error
 		if err != nil {
@@ -3778,7 +3813,7 @@ func (ls *versionsList) List(ctx context.Context) (resp *s3.ListObjectsV2Output,
 		//structs.SetFrom(obj, objVersion)
 		setFrom_s3Object_s3ObjectVersion(obj, objVersion)
 		// Adjust the file names
-		if !ls.usingVersionAt && !aws.BoolValue(objVersion.IsLatest) {
+		if !ls.usingVersionAt && (!aws.BoolValue(objVersion.IsLatest) || objVersion.Size == isDeleteMarker) {
 			if obj.Key != nil && objVersion.LastModified != nil {
 				*obj.Key = version.Add(*obj.Key, *objVersion.LastModified)
 			}
@@ -4046,6 +4081,7 @@ func (f *Fs) listDir(ctx context.Context, bucket, directory, prefix string, addB
 		addBucket:    addBucket,
 		withVersions: f.opt.Versions,
 		versionAt:    f.opt.VersionAt,
+		hidden:       f.opt.VersionDeleted,
 	}, func(remote string, object *s3.Object, versionID *string, isDirectory bool) error {
 		entry, err := f.itemToDirEntry(ctx, remote, object, versionID, isDirectory)
 		if err != nil {
@@ -4132,6 +4168,7 @@ func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) (
 			recurse:      true,
 			withVersions: f.opt.Versions,
 			versionAt:    f.opt.VersionAt,
+			hidden:       f.opt.VersionDeleted,
 		}, func(remote string, object *s3.Object, versionID *string, isDirectory bool) error {
 			entry, err := f.itemToDirEntry(ctx, remote, object, versionID, isDirectory)
 			if err != nil {
@@ -4475,10 +4512,20 @@ func (f *Fs) copyMultipart(ctx context.Context, copyReq *s3.CopyObjectInput, dst
 
 	fs.Debugf(src, "Starting  multipart copy with %d parts", numParts)
 
-	var parts []*s3.CompletedPart
+	var (
+		parts   = make([]*s3.CompletedPart, numParts)
+		g, gCtx = errgroup.WithContext(ctx)
+	)
+	g.SetLimit(f.opt.UploadConcurrency)
 	for partNum := int64(1); partNum <= numParts; partNum++ {
-		if err := f.pacer.Call(func() (bool, error) {
-			partNum := partNum
+		// Fail fast, in case an errgroup managed function returns an error
+		// gCtx is cancelled. There is no point in uploading all the other parts.
+		if gCtx.Err() != nil {
+			break
+		}
+		partNum := partNum // for closure
+		g.Go(func() error {
+			var uout *s3.UploadPartCopyOutput
 			uploadPartReq := &s3.UploadPartCopyInput{}
 			//structs.SetFrom(uploadPartReq, copyReq)
 			setFrom_s3UploadPartCopyInput_s3CopyObjectInput(uploadPartReq, copyReq)
@@ -4487,18 +4534,24 @@ func (f *Fs) copyMultipart(ctx context.Context, copyReq *s3.CopyObjectInput, dst
 			uploadPartReq.PartNumber = &partNum
 			uploadPartReq.UploadId = uid
 			uploadPartReq.CopySourceRange = aws.String(calculateRange(partSize, partNum-1, numParts, srcSize))
-			uout, err := f.c.UploadPartCopyWithContext(ctx, uploadPartReq)
+			err := f.pacer.Call(func() (bool, error) {
+				uout, err = f.c.UploadPartCopyWithContext(gCtx, uploadPartReq)
+				return f.shouldRetry(gCtx, err)
+			})
 			if err != nil {
-				return f.shouldRetry(ctx, err)
+				return err
 			}
-			parts = append(parts, &s3.CompletedPart{
+			parts[partNum-1] = &s3.CompletedPart{
 				PartNumber: &partNum,
 				ETag:       uout.CopyPartResult.ETag,
-			})
-			return false, nil
-		}); err != nil {
-			return err
-		}
+			}
+			return nil
+		})
+	}
+
+	err = g.Wait()
+	if err != nil {
+		return err
 	}
 
 	return f.pacer.Call(func() (bool, error) {
@@ -4538,10 +4591,22 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		fs.Debugf(src, "Can't copy - not same remote type")
 		return nil, fs.ErrorCantCopy
 	}
+
 	srcBucket, srcPath := srcObj.split()
 	req := s3.CopyObjectInput{
 		MetadataDirective: aws.String(s3.MetadataDirectiveCopy),
 	}
+
+	// Update the metadata if it is in use
+	if ci := fs.GetConfig(ctx); ci.Metadata {
+		ui, err := srcObj.prepareUpload(ctx, src, fs.MetadataAsOpenOptions(ctx), true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare upload: %w", err)
+		}
+		setFrom_s3CopyObjectInput_s3PutObjectInput(&req, ui.req)
+		req.MetadataDirective = aws.String(s3.MetadataDirectiveReplace)
+	}
+
 	err = f.copy(ctx, &req, dstBucket, dstPath, srcBucket, srcPath, srcObj)
 	if err != nil {
 		return nil, err
@@ -4898,6 +4963,7 @@ func (f *Fs) restoreStatus(ctx context.Context, all bool) (out []restoreStatusOu
 		recurse:       true,
 		withVersions:  f.opt.Versions,
 		versionAt:     f.opt.VersionAt,
+		hidden:        f.opt.VersionDeleted,
 		restoreStatus: true,
 	}, func(remote string, object *s3.Object, versionID *string, isDirectory bool) error {
 		entry, err := f.itemToDirEntry(ctx, remote, object, versionID, isDirectory)
@@ -5643,7 +5709,7 @@ func (f *Fs) OpenChunkWriter(ctx context.Context, remote string, src fs.ObjectIn
 		fs:     f,
 		remote: remote,
 	}
-	ui, err := o.prepareUpload(ctx, src, options)
+	ui, err := o.prepareUpload(ctx, src, options, false)
 	if err != nil {
 		return info, nil, fmt.Errorf("failed to prepare upload: %w", err)
 	}
@@ -6010,7 +6076,9 @@ type uploadInfo struct {
 }
 
 // Prepare object for being uploaded
-func (o *Object) prepareUpload(ctx context.Context, src fs.ObjectInfo, options []fs.OpenOption) (ui uploadInfo, err error) {
+//
+// If noHash is true the md5sum will not be calculated
+func (o *Object) prepareUpload(ctx context.Context, src fs.ObjectInfo, options []fs.OpenOption, noHash bool) (ui uploadInfo, err error) {
 	bucket, bucketPath := o.split()
 	// Create parent dir/bucket if not saving directory marker
 	if !strings.HasSuffix(o.remote, "/") {
@@ -6084,7 +6152,7 @@ func (o *Object) prepareUpload(ctx context.Context, src fs.ObjectInfo, options [
 	var md5sumBase64 string
 	size := src.Size()
 	multipart := size < 0 || size >= int64(o.fs.opt.UploadCutoff)
-	if !multipart || !o.fs.opt.DisableChecksum {
+	if !noHash && (!multipart || !o.fs.opt.DisableChecksum) {
 		ui.md5sumHex, err = src.Hash(ctx, hash.MD5)
 		if err == nil && matchMd5.MatchString(ui.md5sumHex) {
 			hashBytes, err := hex.DecodeString(ui.md5sumHex)
@@ -6196,7 +6264,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	if multipart {
 		wantETag, gotETag, versionID, ui, err = o.uploadMultipart(ctx, src, in, options...)
 	} else {
-		ui, err = o.prepareUpload(ctx, src, options)
+		ui, err = o.prepareUpload(ctx, src, options, false)
 		if err != nil {
 			return fmt.Errorf("failed to prepare upload: %w", err)
 		}

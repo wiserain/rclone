@@ -1,6 +1,6 @@
 % rclone(1) User Manual
 % Nick Craig-Wood
-% Jan 24, 2024
+% Mar 10, 2024
 
 # Rclone syncs your files to cloud storage
 
@@ -105,7 +105,6 @@ WebDAV or S3, that work out of the box.)
 - 1Fichier
 - Akamai Netstorage
 - Alibaba Cloud (Aliyun) Object Storage System (OSS)
-- Amazon Drive
 - Amazon S3
 - Backblaze B2
 - Box
@@ -858,7 +857,6 @@ See the following for detailed instructions for
   * [1Fichier](https://rclone.org/fichier/)
   * [Akamai Netstorage](https://rclone.org/netstorage/)
   * [Alias](https://rclone.org/alias/)
-  * [Amazon Drive](https://rclone.org/amazonclouddrive/)
   * [Amazon S3](https://rclone.org/s3/)
   * [Backblaze B2](https://rclone.org/b2/)
   * [Box](https://rclone.org/box/)
@@ -1041,6 +1039,15 @@ recently very efficiently like this:
 
     rclone copy --max-age 24h --no-traverse /path/to/src remote:
 
+
+Rclone will sync the modification times of files and directories if
+the backend supports it. If metadata syncing is required then use the
+`--metadata` flag.
+
+Note that the modification time and metadata for the root directory
+will **not** be synced. See https://github.com/rclone/rclone/issues/7652
+for more info.
+
 **Note**: Use the `-P`/`--progress` flag to view real-time transfer statistics.
 
 **Note**: Use the `--dry-run` or the `--interactive`/`-i` flag to test without copying anything.
@@ -1072,7 +1079,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -1086,6 +1093,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -1187,10 +1195,55 @@ the destination from the sync with a filter rule or by putting an
 exclude-if-present file inside the destination directory and sync to a
 destination that is inside the source directory.
 
+Rclone will sync the modification times of files and directories if
+the backend supports it. If metadata syncing is required then use the
+`--metadata` flag.
+
+Note that the modification time and metadata for the root directory
+will **not** be synced. See https://github.com/rclone/rclone/issues/7652
+for more info.
+
 **Note**: Use the `-P`/`--progress` flag to view real-time transfer statistics
 
 **Note**: Use the `rclone dedupe` command to deal with "Duplicate object/directory found in source/destination - ignoring" errors.
 See [this forum post](https://forum.rclone.org/t/sync-not-clearing-duplicates/14372) for more info.
+
+# Logger Flags
+
+The `--differ`, `--missing-on-dst`, `--missing-on-src`, `--match` and `--error` flags write paths, one per line, to the file name (or
+stdout if it is `-`) supplied. What they write is described in the
+help below. For example `--differ` will write all paths which are
+present on both the source and destination but different.
+
+The `--combined` flag will write a file (or stdout) which contains all
+file paths with a symbol and then a space and then the path to tell
+you what happened to it. These are reminiscent of diff files.
+
+- `= path` means path was found in source and destination and was identical
+- `- path` means path was missing on the source, so only in the destination
+- `+ path` means path was missing on the destination, so only in the source
+- `* path` means path was present in source and destination but different.
+- `! path` means there was an error reading or hashing the source or dest.
+
+The `--dest-after` flag writes a list file using the same format flags
+as [`lsf`](https://rclone.org/commands/rclone_lsf/#synopsis) (including [customizable options
+for hash, modtime, etc.](https://rclone.org/commands/rclone_lsf/#synopsis))
+Conceptually it is similar to rsync's `--itemize-changes`, but not identical
+-- it should output an accurate list of what will be on the destination
+after the sync.
+
+Note that these logger flags have a few limitations, and certain scenarios
+are not currently supported:
+
+- `--max-duration` / `CutoffModeHard`
+- `--compare-dest` / `--copy-dest`
+- server-side moves of an entire dir at once
+- High-level retries, because there would be duplicates (use `--retries 1` to disable)
+- Possibly some unusual error scenarios
+
+Note also that each file is logged during the sync, as opposed to after, so it
+is most useful as a predictor of what SHOULD happen to each file
+(which may or may not match what actually DID.)
 
 
 ```
@@ -1200,8 +1253,24 @@ rclone sync source:path dest:path [flags]
 ## Options
 
 ```
+      --absolute                Put a leading / in front of path names
+      --combined string         Make a combined report of changes to this file
       --create-empty-src-dirs   Create empty source dirs on destination after sync
+      --csv                     Output in CSV format
+      --dest-after string       Report all files that exist on the dest post-sync
+      --differ string           Report all non-matching files to this file
+  -d, --dir-slash               Append a slash to directory names (default true)
+      --dirs-only               Only list directories
+      --error string            Report all files with errors (hashing or reading) to this file
+      --files-only              Only list files (default true)
+  -F, --format string           Output format - see lsf help for details (default "p")
+      --hash h                  Use this hash when h is used in the format MD5|SHA-1|DropboxHash (default "md5")
   -h, --help                    help for sync
+      --match string            Report all matching files to this file
+      --missing-on-dst string   Report all files missing from the destination to this file
+      --missing-on-src string   Report all files missing from the source to this file
+  -s, --separator string        Separator for the items in the format (default ";")
+  -t, --timeformat string       Specify a custom time format, or 'max' for max precision supported by remote (default: 2006-01-02 15:04:05)
 ```
 
 
@@ -1219,7 +1288,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -1233,6 +1302,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -1252,6 +1322,7 @@ Flags just used for `rclone sync`.
       --delete-after                    When synchronizing, delete files on destination after transferring (default)
       --delete-before                   When synchronizing, delete files on destination before transferring
       --delete-during                   When synchronizing, delete files during transfer
+      --fix-case                        Force rename of case insensitive dest to match source
       --ignore-errors                   Delete even if there are I/O errors
       --max-delete int                  When synchronizing, limit the number of deletes (default -1)
       --max-delete-size SizeSuffix      When synchronizing, limit the total size of deletes (default off)
@@ -1347,6 +1418,14 @@ whether rclone lists the destination directory or not.  Supplying this
 option when moving a small number of files into a large destination
 can speed transfers up greatly.
 
+Rclone will sync the modification times of files and directories if
+the backend supports it. If metadata syncing is required then use the
+`--metadata` flag.
+
+Note that the modification time and metadata for the root directory
+will **not** be synced. See https://github.com/rclone/rclone/issues/7652
+for more info.
+
 **Important**: Since this can cause data loss, test first with the
 `--dry-run` or the `--interactive`/`-i` flag.
 
@@ -1380,7 +1459,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -1394,6 +1473,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -2785,6 +2865,11 @@ On each successive run it will:
   Changes include `New`, `Newer`, `Older`, and `Deleted` files.
 - Propagate changes on Path1 to Path2, and vice-versa.
 
+Bisync is **in beta** and is considered an **advanced command**, so use with care.
+Make sure you have read and understood the entire [manual](https://rclone.org/bisync)
+(especially the [Limitations](https://rclone.org/bisync/#limitations) section) before using,
+or data loss can result. Questions can be asked in the [Rclone Forum](https://forum.rclone.org/).
+
 See [full bisync description](https://rclone.org/bisync/) for details.
 
 
@@ -2795,20 +2880,31 @@ rclone bisync remote1:path1 remote2:path2 [flags]
 ## Options
 
 ```
-      --check-access              Ensure expected RCLONE_TEST files are found on both Path1 and Path2 filesystems, else abort.
-      --check-filename string     Filename for --check-access (default: RCLONE_TEST)
-      --check-sync string         Controls comparison of final listings: true|false|only (default: true) (default "true")
-      --create-empty-src-dirs     Sync creation and deletion of empty directories. (Not compatible with --remove-empty-dirs)
-      --filters-file string       Read filtering patterns from a file
-      --force                     Bypass --max-delete safety check and run the sync. Consider using with --verbose
-  -h, --help                      help for bisync
-      --ignore-listing-checksum   Do not use checksums for listings (add --ignore-checksum to additionally skip post-copy checksum checks)
-      --localtime                 Use local time in listings (default: UTC)
-      --no-cleanup                Retain working files (useful for troubleshooting and testing).
-      --remove-empty-dirs         Remove ALL empty directories at the final cleanup step.
-      --resilient                 Allow future runs to retry after certain less-serious errors, instead of requiring --resync. Use at your own risk!
-  -1, --resync                    Performs the resync run. Path1 files may overwrite Path2 versions. Consider using --verbose or --dry-run first.
-      --workdir string            Use custom working dir - useful for testing. (default: $HOME/.cache/rclone/bisync)
+      --backup-dir1 string                   --backup-dir for Path1. Must be a non-overlapping path on the same remote.
+      --backup-dir2 string                   --backup-dir for Path2. Must be a non-overlapping path on the same remote.
+      --check-access                         Ensure expected RCLONE_TEST files are found on both Path1 and Path2 filesystems, else abort.
+      --check-filename string                Filename for --check-access (default: RCLONE_TEST)
+      --check-sync string                    Controls comparison of final listings: true|false|only (default: true) (default "true")
+      --compare string                       Comma-separated list of bisync-specific compare options ex. 'size,modtime,checksum' (default: 'size,modtime')
+      --conflict-loser ConflictLoserAction   Action to take on the loser of a sync conflict (when there is a winner) or on both files (when there is no winner): , num, pathname, delete (default: num)
+      --conflict-resolve string              Automatically resolve conflicts by preferring the version that is: none, path1, path2, newer, older, larger, smaller (default: none) (default "none")
+      --conflict-suffix string               Suffix to use when renaming a --conflict-loser. Can be either one string or two comma-separated strings to assign different suffixes to Path1/Path2. (default: 'conflict')
+      --create-empty-src-dirs                Sync creation and deletion of empty directories. (Not compatible with --remove-empty-dirs)
+      --download-hash                        Compute hash by downloading when otherwise unavailable. (warning: may be slow and use lots of data!)
+      --filters-file string                  Read filtering patterns from a file
+      --force                                Bypass --max-delete safety check and run the sync. Consider using with --verbose
+  -h, --help                                 help for bisync
+      --ignore-listing-checksum              Do not use checksums for listings (add --ignore-checksum to additionally skip post-copy checksum checks)
+      --max-lock Duration                    Consider lock files older than this to be expired (default: 0 (never expire)) (minimum: 2m) (default 0s)
+      --no-cleanup                           Retain working files (useful for troubleshooting and testing).
+      --no-slow-hash                         Ignore listing checksums only on backends where they are slow
+      --recover                              Automatically recover from interruptions without requiring --resync.
+      --remove-empty-dirs                    Remove ALL empty directories at the final cleanup step.
+      --resilient                            Allow future runs to retry after certain less-serious errors, instead of requiring --resync. Use at your own risk!
+  -1, --resync                               Performs the resync run. Equivalent to --resync-mode path1. Consider using --verbose or --dry-run first.
+      --resync-mode string                   During resync, prefer the version that is: path1, path2, newer, older, larger, smaller (default: path1 if --resync, otherwise none for no resync.) (default "none")
+      --slow-hash-sync-only                  Ignore slow checksums for listings and deltas, but still consider them during sync calls.
+      --workdir string                       Use custom working dir - useful for testing. (default: {WORKDIR})
 ```
 
 
@@ -2826,7 +2922,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -2840,6 +2936,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -3992,7 +4089,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -4006,6 +4103,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -4072,7 +4170,7 @@ See the [global flags page](https://rclone.org/flags/) for global options not li
 
 # rclone copyurl
 
-Copy url content to dest.
+Copy the contents of the URL supplied content to dest:path.
 
 ## Synopsis
 
@@ -4080,17 +4178,31 @@ Copy url content to dest.
 Download a URL's content and copy it to the destination without saving
 it in temporary storage.
 
-Setting `--auto-filename` will attempt to automatically determine the filename from the URL
-(after any redirections) and used in the destination path. 
-With `--auto-filename-header` in 
-addition, if a specific filename is set in HTTP headers, it will be used instead of the name from the URL.
-With `--print-filename` in addition, the resulting file name will be printed.
+Setting `--auto-filename` will attempt to automatically determine the
+filename from the URL (after any redirections) and used in the
+destination path.
+
+With `--auto-filename-header` in addition, if a specific filename is
+set in HTTP headers, it will be used instead of the name from the URL.
+With `--print-filename` in addition, the resulting file name will be
+printed.
 
 Setting `--no-clobber` will prevent overwriting file on the 
 destination if there is one with the same name.
 
 Setting `--stdout` or making the output file name `-`
 will cause the output to be written to standard output.
+
+## Troublshooting
+
+If you can't get `rclone copyurl` to work then here are some things you can try:
+
+- `--disable-http2` rclone will use HTTP2 if available - try disabling it
+- `--bind 0.0.0.0` rclone will use IPv6 if available - try disabling it
+- `--bind ::0` to disable IPv4
+- `--user agent curl` - some sites have whitelists for curl's user-agent - try that
+- Make sure the site works with `curl` directly
+
 
 
 ```
@@ -4667,7 +4779,7 @@ List all the remotes in the config file and defined in environment variables.
 
 rclone listremotes lists all the available remotes from the config file.
 
-When used with the `--long` flag it lists the types too.
+When used with the `--long` flag it lists the types and the descriptions too.
 
 
 ```
@@ -4678,7 +4790,7 @@ rclone listremotes [flags]
 
 ```
   -h, --help   help for listremotes
-      --long   Show the type as well as names
+      --long   Show the type and the description as well as names
 ```
 
 
@@ -4790,6 +4902,19 @@ those only (without traversing the whole directory structure):
     rclone lsf --absolute --files-only --max-age 1d /path/to/local > new_files
     rclone copy --files-from-raw new_files /path/to/local remote:path
 
+The default time format is `'2006-01-02 15:04:05'`.
+[Other formats](https://pkg.go.dev/time#pkg-constants) can be specified with the `--time-format` flag.
+Examples:
+
+	rclone lsf remote:path --format pt --time-format 'Jan 2, 2006 at 3:04pm (MST)'
+	rclone lsf remote:path --format pt --time-format '2006-01-02 15:04:05.000000000'
+	rclone lsf remote:path --format pt --time-format '2006-01-02T15:04:05.999999999Z07:00'
+	rclone lsf remote:path --format pt --time-format RFC3339
+	rclone lsf remote:path --format pt --time-format DateOnly
+	rclone lsf remote:path --format pt --time-format max
+`--time-format max` will automatically truncate '`2006-01-02 15:04:05.000000000`'
+to the maximum precision supported by the remote.
+
 
 Any of the filtering options can be applied to this command.
 
@@ -4821,16 +4946,17 @@ rclone lsf remote:path [flags]
 ## Options
 
 ```
-      --absolute           Put a leading / in front of path names
-      --csv                Output in CSV format
-  -d, --dir-slash          Append a slash to directory names (default true)
-      --dirs-only          Only list directories
-      --files-only         Only list files
-  -F, --format string      Output format - see  help for details (default "p")
-      --hash h             Use this hash when h is used in the format MD5|SHA-1|DropboxHash (default "md5")
-  -h, --help               help for lsf
-  -R, --recursive          Recurse into the listing
-  -s, --separator string   Separator for the items in the format (default ";")
+      --absolute             Put a leading / in front of path names
+      --csv                  Output in CSV format
+  -d, --dir-slash            Append a slash to directory names (default true)
+      --dirs-only            Only list directories
+      --files-only           Only list files
+  -F, --format string        Output format - see  help for details (default "p")
+      --hash h               Use this hash when h is used in the format MD5|SHA-1|DropboxHash (default "md5")
+  -h, --help                 help for lsf
+  -R, --recursive            Recurse into the listing
+  -s, --separator string     Separator for the items in the format (default ";")
+  -t, --time-format string   Specify a custom time format, or 'max' for max precision supported by remote (default: 2006-01-02 15:04:05)
 ```
 
 
@@ -5311,11 +5437,20 @@ Mounting on macOS can be done either via [built-in NFS server](https://rclone.or
 FUSE driver utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE system
 which "mounts" via an NFSv4 local server.
 
-# NFS mount
+#### Unicode Normalization
+
+It is highly recommended to keep the default of `--no-unicode-normalization=false`
+for all `mount` and `serve` commands on macOS. For details, see [vfs-case-sensitivity](https://rclone.org/commands/rclone_mount/#vfs-case-sensitivity).
+
+### NFS mount
 
 This method spins up an NFS server using [serve nfs](https://rclone.org/commands/rclone_serve_nfs/) command and mounts
 it to the specified mountpoint. If you run this in background mode using |--daemon|, you will need to
 send SIGTERM signal to the rclone process using |kill| command to stop the mount.
+
+Note that `--nfs-cache-handle-limit` controls the maximum number of cached file handles stored by the `nfsmount` caching handler.
+This should not be set too low or you may experience errors when trying to access files. The default is 1000000,
+but consider lowering this limit if the server's system resource usage causes problems.
 
 ### macFUSE Notes
 
@@ -5344,15 +5479,6 @@ As per the [FUSE-T wiki](https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 This means that viewing files with various tools, notably macOS Finder, will cause rlcone
 to update the modification time of the file. This may make rclone upload a full new copy
 of the file.
-
-#### Unicode Normalization
-
-Rclone includes flags for unicode normalization with macFUSE that should be updated
-for FUSE-T. See [this forum post](https://forum.rclone.org/t/some-unicode-forms-break-mount-on-macos-with-fuse-t/36403)
-and [FUSE-T issue #16](https://github.com/macos-fuse-t/fuse-t/issues/16). The following
-flag should be added to the `rclone mount` command.
-
-    -o modules=iconv,from_code=UTF-8,to_code=UTF-8
     
 #### Read Only mounts
 
@@ -5825,6 +5951,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -5883,6 +6031,7 @@ rclone mount remote:path /path/to/mountpoint [flags]
       --read-only                              Only allow read-only access
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -6003,7 +6152,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -6017,6 +6166,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -6469,11 +6619,20 @@ Mounting on macOS can be done either via [built-in NFS server](https://rclone.or
 FUSE driver utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE system
 which "mounts" via an NFSv4 local server.
 
-# NFS mount
+#### Unicode Normalization
+
+It is highly recommended to keep the default of `--no-unicode-normalization=false`
+for all `mount` and `serve` commands on macOS. For details, see [vfs-case-sensitivity](https://rclone.org/commands/rclone_mount/#vfs-case-sensitivity).
+
+### NFS mount
 
 This method spins up an NFS server using [serve nfs](https://rclone.org/commands/rclone_serve_nfs/) command and mounts
 it to the specified mountpoint. If you run this in background mode using |--daemon|, you will need to
 send SIGTERM signal to the rclone process using |kill| command to stop the mount.
+
+Note that `--nfs-cache-handle-limit` controls the maximum number of cached file handles stored by the `nfsmount` caching handler.
+This should not be set too low or you may experience errors when trying to access files. The default is 1000000,
+but consider lowering this limit if the server's system resource usage causes problems.
 
 ### macFUSE Notes
 
@@ -6502,15 +6661,6 @@ As per the [FUSE-T wiki](https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 This means that viewing files with various tools, notably macOS Finder, will cause rlcone
 to update the modification time of the file. This may make rclone upload a full new copy
 of the file.
-
-#### Unicode Normalization
-
-Rclone includes flags for unicode normalization with macFUSE that should be updated
-for FUSE-T. See [this forum post](https://forum.rclone.org/t/some-unicode-forms-break-mount-on-macos-with-fuse-t/36403)
-and [FUSE-T issue #16](https://github.com/macos-fuse-t/fuse-t/issues/16). The following
-flag should be added to the `rclone mount` command.
-
-    -o modules=iconv,from_code=UTF-8,to_code=UTF-8
     
 #### Read Only mounts
 
@@ -6983,6 +7133,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -7011,6 +7183,7 @@ rclone nfsmount remote:path /path/to/mountpoint [flags]
 ## Options
 
 ```
+      --addr string                            IPaddress:Port or :Port to bind server to
       --allow-non-empty                        Allow mounting over a non-empty directory (not supported on Windows)
       --allow-other                            Allow access to other users (not supported on Windows)
       --allow-root                             Allow access to root user (not supported on Windows)
@@ -7031,6 +7204,7 @@ rclone nfsmount remote:path /path/to/mountpoint [flags]
       --max-read-ahead SizeSuffix              The number of bytes that can be prefetched for sequential reads (not supported on Windows) (default 128Ki)
       --mount-case-insensitive Tristate        Tell the OS the mount is case insensitive (true) or sensitive (false) regardless of the backend (auto) (default unset)
       --network-mode                           Mount as remote network drive, instead of fixed disk drive (supported on Windows only)
+      --nfs-cache-handle-limit int             max file handles cached simultaneously (min 5) (default 1000000)
       --no-checksum                            Don't compare checksums on up/download
       --no-modtime                             Don't read/write the modification time (can speed things up)
       --no-seek                                Don't allow seeking in files
@@ -7042,6 +7216,7 @@ rclone nfsmount remote:path /path/to/mountpoint [flags]
       --sudo                                   Use sudo to run the mount command as root.
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -7986,6 +8161,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -8031,6 +8228,7 @@ rclone serve dlna remote:path [flags]
       --read-only                              Only allow read-only access
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -8440,6 +8638,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -8503,6 +8723,7 @@ rclone serve docker [flags]
       --socket-gid int                         GID for unix socket (default: current process GID) (default 1000)
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -8896,6 +9117,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -9025,6 +9268,7 @@ rclone serve ftp remote:path [flags]
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
       --user string                            User name for authentication (default "anonymous")
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -9517,6 +9761,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -9655,6 +9921,7 @@ rclone serve http remote:path [flags]
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
       --user string                            User name for authentication
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -9728,7 +9995,9 @@ NFS mount over local network, you need to specify the listening address and port
 
 Modifying files through NFS protocol requires VFS caching. Usually you will need to specify `--vfs-cache-mode`
 in order to be able to write to the mountpoint (full is recommended). If you don't specify VFS cache mode,
-the mount will be read-only.
+the mount will be read-only. Note also that `--nfs-cache-handle-limit` controls the maximum number of cached file handles stored by the caching handler.
+This should not be set too low or you may experience errors when trying to access files. The default is `1000000`, but consider lowering this limit if
+the server's system resource usage causes problems.
 
 To serve NFS over the network use following command:
 
@@ -10055,6 +10324,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -10089,6 +10380,7 @@ rclone serve nfs remote:path [flags]
       --file-perms FileMode                    File permissions (default 0666)
       --gid uint32                             Override the gid field set by the filesystem (not supported on Windows) (default 1000)
   -h, --help                                   help for nfs
+      --nfs-cache-handle-limit int             max file handles cached simultaneously (min 5) (default 1000000)
       --no-checksum                            Don't compare checksums on up/download
       --no-modtime                             Don't read/write the modification time (can speed things up)
       --no-seek                                Don't allow seeking in files
@@ -10096,6 +10388,7 @@ rclone serve nfs remote:path [flags]
       --read-only                              Only allow read-only access
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -10828,6 +11121,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -10882,6 +11197,7 @@ rclone serve s3 remote:path [flags]
       --server-write-timeout Duration          Timeout for server writing data (default 1h0m0s)
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -11305,6 +11621,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -11434,6 +11772,7 @@ rclone serve sftp remote:path [flags]
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
       --user string                            User name for authentication
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -11955,6 +12294,28 @@ If the flag is not provided on the command line, then its default value depends
 on the operating system where rclone runs: "true" on Windows and macOS, "false"
 otherwise. If the flag is provided without a value, then it is "true".
 
+The `--no-unicode-normalization` flag controls whether a similar "fixup" is
+performed for filenames that differ but are [canonically
+equivalent](https://en.wikipedia.org/wiki/Unicode_equivalence) with respect to
+unicode. Unicode normalization can be particularly helpful for users of macOS,
+which prefers form NFD instead of the NFC used by most other platforms. It is
+therefore highly recommended to keep the default of `false` on macOS, to avoid
+encoding compatibility issues.
+
+In the (probably unlikely) event that a directory has multiple duplicate
+filenames after applying case and unicode normalization, the `--vfs-block-norm-dupes`
+flag allows hiding these duplicates. This comes with a performance tradeoff, as
+rclone will have to scan the entire directory for duplicates when listing a
+directory. For this reason, it is recommended to leave this disabled if not
+needed. However, macOS users may wish to consider using it, as otherwise, if a
+remote directory contains both NFC and NFD versions of the same filename, an odd
+situation will occur: both versions of the file will be visible in the mount,
+and both will appear to be editable, however, editing either version will
+actually result in only the NFD version getting edited under the hood. `--vfs-block-
+norm-dupes` prevents this confusion by detecting this scenario, hiding the
+duplicates, and logging an error, similar to how this is handled in `rclone
+sync`.
+
 ## VFS Disk Options
 
 This flag allows you to manually set the statistics about the filing system.
@@ -12095,6 +12456,7 @@ rclone serve webdav remote:path [flags]
       --uid uint32                             Override the uid field set by the filesystem (not supported on Windows) (default 1000)
       --umask int                              Override the permission bits set by the filesystem (not supported on Windows) (default 2)
       --user string                            User name for authentication
+      --vfs-block-norm-dupes                   If duplicate filenames exist in the same directory (after normalization), log an error and hide the duplicates (may have a performance cost)
       --vfs-cache-max-age Duration             Max time since last access of objects in the cache (default 1h0m0s)
       --vfs-cache-max-size SizeSuffix          Max total size of objects in the cache (default off)
       --vfs-cache-min-free-space SizeSuffix    Target minimum free space on the disk containing the cache (default off)
@@ -12912,17 +13274,20 @@ This can be used when scripting to make aged backups efficiently, e.g.
 
 ## Metadata support {#metadata}
 
-Metadata is data about a file which isn't the contents of the file.
-Normally rclone only preserves the modification time and the content
-(MIME) type where possible.
+Metadata is data about a file (or directory) which isn't the contents
+of the file (or directory). Normally rclone only preserves the
+modification time and the content (MIME) type where possible.
 
-Rclone supports preserving all the available metadata on files (not
-directories) when using the `--metadata` or `-M` flag.
+Rclone supports preserving all the available metadata on files and
+directories when using the `--metadata` or `-M` flag.
 
 Exactly what metadata is supported and what that support means depends
 on the backend. Backends that support metadata have a metadata section
 in their docs and are listed in the [features table](https://rclone.org/overview/#features)
 (Eg [local](https://rclone.org/local/#metadata), [s3](/s3/#metadata))
+
+Some backends don't support metadata, some only support metadata on
+files and some support metadata on both files and directories.
 
 Rclone only supports a one-time sync of metadata. This means that
 metadata will be synced from the source object to the destination
@@ -12943,6 +13308,14 @@ This flag can be repeated as many times as necessary.
 The [--metadata-mapper](#metadata-mapper) flag can be used to pass the
 name of a program in which can transform metadata when it is being
 copied from source to destination.
+
+Rclone supports `--metadata-set` and `--metadata-mapper` when doing
+sever side `Move` and server side `Copy`, but not when doing server
+side `DirMove` (renaming a directory) as this would involve recursing
+into the directory. Note that you can disable `DirMove` with
+`--disable DirMove` and rclone will revert back to using `Move` for
+each individual object where `--metadata-set` and `--metadata-mapper`
+are supported.
 
 ### Types of metadata
 
@@ -13573,6 +13946,26 @@ triggering follow-on actions if data was copied, or skipping if not.
 NB: Enabling this option turns a usually non-fatal error into a potentially
 fatal one - please check and adjust your scripts accordingly!
 
+### --fix-case ###
+
+Normally, a sync to a case insensitive dest (such as macOS / Windows) will
+not result in a matching filename if the source and dest filenames have
+casing differences but are otherwise identical. For example, syncing `hello.txt`
+to `HELLO.txt` will normally result in the dest filename remaining `HELLO.txt`.
+If `--fix-case` is set, then `HELLO.txt` will be renamed to `hello.txt`
+to match the source.
+
+NB:
+- directory names with incorrect casing will also be fixed
+- `--fix-case` will be ignored if `--immutable` is set
+- using `--local-case-sensitive` instead is not advisable;
+it will cause `HELLO.txt` to get deleted!
+- the old dest filename must not be excluded by filters.
+Be especially careful with [`--files-from`](https://rclone.org/filtering/#files-from-read-list-of-source-file-names),
+which does not respect [`--ignore-case`](https://rclone.org/filtering/#ignore-case-make-searches-case-insensitive)!
+- on remotes that do not support server-side move, `--fix-case` will require
+downloading the file and re-uploading it. To avoid this, do not use `--fix-case`.
+
 ### --fs-cache-expire-duration=TIME
 
 When using rclone via the API rclone caches created remotes for 5
@@ -14006,10 +14399,10 @@ some context for the `Metadata` which may be important.
 - `SrcFsType` is the name of the source backend.
 - `DstFs` is the config string for the remote that the object is being copied to
 - `DstFsType` is the name of the destination backend.
-- `Remote` is the path of the file relative to the root.
-- `Size`, `MimeType`, `ModTime` are attributes of the file.
+- `Remote` is the path of the object relative to the root.
+- `Size`, `MimeType`, `ModTime` are attributes of the object.
 - `IsDir` is `true` if this is a directory (not yet implemented).
-- `ID` is the source `ID` of the file if known.
+- `ID` is the source `ID` of the object if known.
 - `Metadata` is the backend specific metadata as described in the backend docs.
 
 ```json
@@ -14251,6 +14644,11 @@ files if they are incorrect as it would normally.
 
 This can be used if the remote is being synced with another tool also
 (e.g. the Google Drive client).
+
+### --no-update-dir-modtime ###
+
+When using this flag, rclone won't update modification times of remote
+directories if they are incorrect as it would normally.
 
 ### --order-by string ###
 
@@ -15349,7 +15747,7 @@ For more help and alternate methods see: https://rclone.org/remote_setup/
 Execute the following on the machine with the web browser (same rclone
 version recommended):
 
-	rclone authorize "amazon cloud drive"
+	rclone authorize "dropbox"
 
 Then paste the result below:
 result>
@@ -15358,7 +15756,7 @@ result>
 Then on your main desktop machine
 
 ```
-rclone authorize "amazon cloud drive"
+rclone authorize "dropbox"
 If your browser doesn't open automatically go to the following link: http://127.0.0.1:53682/auth
 Log in and authorize rclone for access
 Waiting for code...
@@ -16935,6 +17333,26 @@ See the [config password](https://rclone.org/commands/rclone_config_password/) c
 
 **Authentication is required for this call.**
 
+### config/paths: Reads the config file path and other important paths. {#config-paths}
+
+Returns a JSON object with the following keys:
+
+- config: path to config file
+- cache: path to root of cache directory
+- temp: path to root of temporary directory
+
+Eg
+
+    {
+        "cache": "/home/USER/.cache/rclone",
+        "config": "/home/USER/.rclone.conf",
+        "temp": "/tmp"
+    }
+
+See the [config paths](https://rclone.org/commands/rclone_config_paths/) command for more information on the above.
+
+**Authentication is required for this call.**
+
 ### config/providers: Shows how providers are configured in the config file. {#config-providers}
 
 Returns a JSON object:
@@ -17720,6 +18138,50 @@ This command does not have a command line equivalent so use this instead:
 
     rclone rc --loopback operations/fsinfo fs=remote:
 
+### operations/hashsum: Produces a hashsum file for all the objects in the path. {#operations-hashsum}
+
+Produces a hash file for all the objects in the path using the hash
+named.  The output is in the same format as the standard
+md5sum/sha1sum tool.
+
+This takes the following parameters:
+
+- fs - a remote name string e.g. "drive:" for the source, "/" for local filesystem
+    - this can point to a file and just that file will be returned in the listing.
+- hashType - type of hash to be used
+- download - check by downloading rather than with hash (boolean)
+- base64 - output the hashes in base64 rather than hex (boolean)
+
+If you supply the download flag, it will download the data from the
+remote and create the hash on the fly. This can be useful for remotes
+that don't support the given hash or if you really want to check all
+the data.
+
+Note that if you wish to supply a checkfile to check hashes against
+the current files then you should use operations/check instead of
+operations/hashsum.
+
+Returns:
+
+- hashsum - array of strings of the hashes
+- hashType - type of hash used
+
+Example:
+
+    $ rclone rc --loopback operations/hashsum fs=bin hashType=MD5 download=true base64=true
+    {
+        "hashType": "md5",
+        "hashsum": [
+            "WTSVLpuiXyJO_kGzJerRLg==  backend-versions.sh",
+            "v1b_OlWCJO9LtNq3EIKkNQ==  bisect-go-rclone.sh",
+            "VHbmHzHh4taXzgag8BAIKQ==  bisect-rclone.sh",
+        ]
+    }
+
+See the [hashsum](https://rclone.org/commands/rclone_hashsum/) command for more information on the above.
+
+**Authentication is required for this call.**
+
 ### operations/list: List the given remote and path in JSON format {#operations-list}
 
 This takes the following parameters:
@@ -18086,7 +18548,9 @@ This takes the following parameters
 - ignoreListingChecksum - Do not use checksums for listings
 - resilient - Allow future runs to retry after certain less-serious errors, instead of requiring resync. 
             Use at your own risk!
-- workdir - server directory for history files (default: /home/ncw/.cache/rclone/bisync)
+- workdir - server directory for history files (default: `~/.cache/rclone/bisync`)
+- backupdir1 - --backup-dir for Path1. Must be a non-overlapping path on the same remote.
+- backupdir2 - --backup-dir for Path2. Must be a non-overlapping path on the same remote.
 - noCleanup - retain working files
 
 See [bisync command help](https://rclone.org/commands/rclone_bisync/)
@@ -18486,7 +18950,6 @@ Here is an overview of the major features of each cloud storage system.
 | ---------------------------- |:-----------------:|:-------:|:----------------:|:---------------:|:---------:|:--------:|
 | 1Fichier                     | Whirlpool         | -       | No               | Yes             | R         | -        |
 | Akamai Netstorage            | MD5, SHA256       | R/W     | No               | No              | R         | -        |
-| Amazon Drive                 | MD5               | -       | Yes              | No              | R         | -        |
 | Amazon S3 (or S3 compatible) | MD5               | R/W     | No               | No              | R/W       | RWU      |
 | Backblaze B2                 | SHA1              | R/W     | No               | No              | R/W       | -        |
 | Box                          | SHA1              | R/W     | Yes              | No              | -         | -        |
@@ -18495,7 +18958,7 @@ Here is an overview of the major features of each cloud storage system.
 | Enterprise File Fabric       | -                 | R/W     | Yes              | No              | R/W       | -        |
 | FTP                          | -                 | R/W ¹⁰  | No               | No              | -         | -        |
 | Google Cloud Storage         | MD5               | R/W     | No               | No              | R/W       | -        |
-| Google Drive                 | MD5, SHA1, SHA256 | R/W     | No               | Yes             | R/W       | -        |
+| Google Drive                 | MD5, SHA1, SHA256 | DR/W    | No               | Yes             | R/W       | DRWU     |
 | Google Photos                | -                 | -       | No               | Yes             | R         | -        |
 | HDFS                         | -                 | R/W     | No               | No              | -         | -        |
 | HiDrive                      | HiDrive ¹²        | R/W     | No               | No              | -         | -        |
@@ -18509,7 +18972,7 @@ Here is an overview of the major features of each cloud storage system.
 | Memory                       | MD5               | R/W     | No               | No              | -         | -        |
 | Microsoft Azure Blob Storage | MD5               | R/W     | No               | No              | R/W       | -        |
 | Microsoft Azure Files Storage | MD5              | R/W     | Yes              | No              | R/W       | -        |
-| Microsoft OneDrive           | QuickXorHash ⁵    | R/W     | Yes              | No              | R         | -        |
+| Microsoft OneDrive           | QuickXorHash ⁵    | DR/W    | Yes              | No              | R         | DRW      |
 | OpenDrive                    | MD5               | R/W     | Yes              | Partial ⁸       | -         | -        |
 | OpenStack Swift              | MD5               | R/W     | No               | No              | R/W       | -        |
 | Oracle Object Storage        | MD5               | R/W     | No               | No              | R/W       | -        |
@@ -18521,7 +18984,7 @@ Here is an overview of the major features of each cloud storage system.
 | QingStor                     | MD5               | - ⁹     | No               | No              | R/W       | -        |
 | Quatrix by Maytech           | -                 | R/W     | No               | No              | -         | -        |
 | Seafile                      | -                 | -       | No               | No              | -         | -        |
-| SFTP                         | MD5, SHA1 ²       | R/W     | Depends          | No              | -         | -        |
+| SFTP                         | MD5, SHA1 ²       | DR/W    | Depends          | No              | -         | -        |
 | Sia                          | -                 | -       | No               | No              | -         | -        |
 | SMB                          | -                 | R/W     | Yes              | No              | -         | -        |
 | SugarSync                    | -                 | -       | No               | No              | -         | -        |
@@ -18530,7 +18993,7 @@ Here is an overview of the major features of each cloud storage system.
 | WebDAV                       | MD5, SHA1 ³       | R ⁴     | Depends          | No              | -         | -        |
 | Yandex Disk                  | MD5               | R/W     | No               | No              | R         | -        |
 | Zoho WorkDrive               | -                 | -       | No               | No              | -         | -        |
-| The local filesystem         | All               | R/W     | Depends          | No              | -         | RWU      |
+| The local filesystem         | All               | DR/W    | Depends          | No              | -         | DRWU     |
 
 ¹ Dropbox supports [its own custom
 hash](https://www.dropbox.com/developers/reference/content-hash).
@@ -18584,12 +19047,20 @@ systems they must support a common hash type.
 Almost all cloud storage systems store some sort of timestamp
 on objects, but several of them not something that is appropriate
 to use for syncing. E.g. some backends will only write a timestamp
-that represent the time of the upload. To be relevant for syncing
+that represents the time of the upload. To be relevant for syncing
 it should be able to store the modification time of the source
 object. If this is not the case, rclone will only check the file
 size by default, though can be configured to check the file hash
 (with the `--checksum` flag). Ideally it should also be possible to
 change the timestamp of an existing file without having to re-upload it.
+
+| Key | Explanation |
+|-----|-------------|
+| `-` | ModTimes not supported - times likely the upload time |
+| `R` | ModTimes supported on files but can't be changed without re-upload |
+| `R/W` | Read and Write ModTimes fully supported on files |
+| `DR` | ModTimes supported on files and directories but can't be changed without re-upload |
+| `DR/W` | Read and Write ModTimes fully supported on files and directories |
 
 Storage systems with a `-` in the ModTime column, means the
 modification read on objects is not the modification time of the
@@ -18611,6 +19082,9 @@ in a `mount` will be silently ignored.
 
 Storage systems with `R/W` (for read/write) in the ModTime column,
 means they do also support modtime-only operations.
+
+Storage systems with `D` in the ModTime column means that the
+following symbols apply to directories as well as files.
 
 ### Case Insensitive ###
 
@@ -18924,9 +19398,12 @@ The levels of metadata support are
 
 | Key | Explanation |
 |-----|-------------|
-| `R` | Read only System Metadata |
-| `RW` | Read and write System Metadata |
-| `RWU` | Read and write System Metadata and read and write User Metadata |
+| `R` | Read only System Metadata on files only|
+| `RW` | Read and write System Metadata on files only|
+| `RWU` | Read and write System Metadata and read and write User Metadata on files only|
+| `DR` | Read only System Metadata on files and directories |
+| `DRW` | Read and write System Metadata on files and directories|
+| `DRWU` | Read and write System Metadata and read and write User Metadata on files and directories |
 
 See [the metadata docs](https://rclone.org/docs/#metadata) for more info.
 
@@ -18939,7 +19416,6 @@ upon backend-specific capabilities.
 | ---------------------------- |:-----:|:----:|:----:|:-------:|:-------:|:-----:|:------------:|:------------------|:------------:|:-----:|:--------:|
 | 1Fichier                     | No    | Yes  | Yes  | No      | No      | No    | No           | No                | Yes          | No    | Yes      |
 | Akamai Netstorage            | Yes   | No   | No   | No      | No      | Yes   | Yes          | No                | No           | No    | Yes      |
-| Amazon Drive                 | Yes   | No   | Yes  | Yes     | No      | No    | No           | No                | No           | No    | Yes      |
 | Amazon S3 (or S3 compatible) | No    | Yes  | No   | No      | Yes     | Yes   | Yes          | Yes               | Yes          | No    | No       |
 | Backblaze B2                 | No    | Yes  | No   | No      | Yes     | Yes   | Yes          | Yes               | Yes          | No    | No       |
 | Box                          | Yes   | Yes  | Yes  | Yes     | Yes     | No    | Yes          | No                | Yes          | Yes   | Yes      |
@@ -18983,7 +19459,7 @@ upon backend-specific capabilities.
 | WebDAV                       | Yes   | Yes  | Yes  | Yes     | No      | No    | Yes ³        | No                | No           | Yes   | Yes      |
 | Yandex Disk                  | Yes   | Yes  | Yes  | Yes     | Yes     | No    | Yes          | No                | Yes          | Yes   | Yes      |
 | Zoho WorkDrive               | Yes   | Yes  | Yes  | Yes     | No      | No    | No           | No                | No           | Yes   | Yes      |
-| The local filesystem         | Yes   | No   | Yes  | Yes     | No      | No    | Yes          | Yes               | No           | Yes   | Yes      |
+| The local filesystem         | No    | No   | Yes  | Yes     | No      | No    | Yes          | Yes               | No           | Yes   | Yes      |
 
 ¹ Note Swift implements this in order to delete directory markers but
 it doesn't actually have a quicker way of deleting files other than
@@ -19102,7 +19578,7 @@ Flags for anything which can Copy a file.
       --ignore-checksum                             Skip post copy check of checksums
       --ignore-existing                             Skip all files that exist on destination
       --ignore-size                                 Ignore size when skipping use modtime or checksum
-  -I, --ignore-times                                Don't skip files that match size and time - transfer all files
+  -I, --ignore-times                                Don't skip items that match size and time - transfer all unconditionally
       --immutable                                   Do not modify files, fail if existing files have been modified
       --inplace                                     Download directly to destination file instead of atomic download to temp/rename
       --max-backlog int                             Maximum number of objects in sync or check backlog (default 10000)
@@ -19116,6 +19592,7 @@ Flags for anything which can Copy a file.
       --multi-thread-write-buffer-size SizeSuffix   In memory buffer size for writing when in multi-thread mode (default 128Ki)
       --no-check-dest                               Don't check the destination, copy regardless
       --no-traverse                                 Don't traverse destination file system on copy
+      --no-update-dir-modtime                       Don't update directory modification times
       --no-update-modtime                           Don't update destination modtime if files identical
       --order-by string                             Instructions on how to order the transfers, e.g. 'size,descending'
       --partial-suffix string                       Add partial-suffix to temporary file name when --inplace is not used (default ".partial")
@@ -19136,6 +19613,7 @@ Flags just used for `rclone sync`.
       --delete-after                    When synchronizing, delete files on destination after transferring (default)
       --delete-before                   When synchronizing, delete files on destination before transferring
       --delete-during                   When synchronizing, delete files during transfer
+      --fix-case                        Force rename of case insensitive dest to match source
       --ignore-errors                   Delete even if there are I/O errors
       --max-delete int                  When synchronizing, limit the number of deletes (default -1)
       --max-delete-size SizeSuffix      When synchronizing, limit the total size of deletes (default off)
@@ -19191,7 +19669,7 @@ General networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.65.2")
+      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.66.0")
 ```
 
 
@@ -19375,14 +19853,7 @@ Flags to control the Remote Control API.
 Backend only flags. These can be set in the config file also.
 
 ```
-      --acd-auth-url string                                 Auth server URL
-      --acd-client-id string                                OAuth Client Id
-      --acd-client-secret string                            OAuth Client Secret
-      --acd-encoding Encoding                               The encoding for the backend (default Slash,InvalidUtf8,Dot)
-      --acd-templink-threshold SizeSuffix                   Files >= this size will be downloaded via their tempLink (default 9Gi)
-      --acd-token string                                    OAuth Access Token as a JSON blob
-      --acd-token-url string                                Token server url
-      --acd-upload-wait-per-gb Duration                     Additional time per GiB to wait after a failed complete upload to see if it appears (default 3m0s)
+      --alias-description string                            Description of the remote
       --alias-remote string                                 Remote or path to alias
       --azureblob-access-tier string                        Access tier of blob: hot, cool, cold or archive
       --azureblob-account string                            Azure Storage Account Name
@@ -19393,6 +19864,8 @@ Backend only flags. These can be set in the config file also.
       --azureblob-client-id string                          The ID of the client in use
       --azureblob-client-secret string                      One of the service principal's client secrets
       --azureblob-client-send-certificate-chain             Send the certificate chain when using certificate auth
+      --azureblob-delete-snapshots string                   Set to specify how to deal with snapshots on blob deletion
+      --azureblob-description string                        Description of the remote
       --azureblob-directory-markers                         Upload an empty object with a trailing slash when a new directory is created
       --azureblob-disable-checksum                          Don't store MD5 checksum with object metadata
       --azureblob-encoding Encoding                         The encoding for the backend (default Slash,BackSlash,Del,Ctl,RightPeriod,InvalidUtf8)
@@ -19423,6 +19896,7 @@ Backend only flags. These can be set in the config file also.
       --azurefiles-client-secret string                     One of the service principal's client secrets
       --azurefiles-client-send-certificate-chain            Send the certificate chain when using certificate auth
       --azurefiles-connection-string string                 Azure Files Connection String
+      --azurefiles-description string                       Description of the remote
       --azurefiles-encoding Encoding                        The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,RightPeriod,InvalidUtf8,Dot)
       --azurefiles-endpoint string                          Endpoint for the service
       --azurefiles-env-auth                                 Read credentials from runtime (environment variables, CLI or MSI)
@@ -19442,8 +19916,9 @@ Backend only flags. These can be set in the config file also.
       --b2-account string                                   Account ID or Application Key ID
       --b2-chunk-size SizeSuffix                            Upload chunk size (default 96Mi)
       --b2-copy-cutoff SizeSuffix                           Cutoff for switching to multipart copy (default 4Gi)
+      --b2-description string                               Description of the remote
       --b2-disable-checksum                                 Disable checksums for large (> upload cutoff) files
-      --b2-download-auth-duration Duration                  Time before the authorization token will expire in s or suffix ms|s|m|h|d (default 1w)
+      --b2-download-auth-duration Duration                  Time before the public link authorization token will expire in s or suffix ms|s|m|h|d (default 1w)
       --b2-download-url string                              Custom endpoint for downloads
       --b2-encoding Encoding                                The encoding for the backend (default Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --b2-endpoint string                                  Endpoint for the service
@@ -19462,6 +19937,7 @@ Backend only flags. These can be set in the config file also.
       --box-client-id string                                OAuth Client Id
       --box-client-secret string                            OAuth Client Secret
       --box-commit-retries int                              Max number of times to try committing a multipart file (default 100)
+      --box-description string                              Description of the remote
       --box-encoding Encoding                               The encoding for the backend (default Slash,BackSlash,Del,Ctl,RightSpace,InvalidUtf8,Dot)
       --box-impersonate string                              Impersonate this user ID when using a service account
       --box-list-chunk int                                  Size of listing chunk 1-1000 (default 1000)
@@ -19478,6 +19954,7 @@ Backend only flags. These can be set in the config file also.
       --cache-db-path string                                Directory to store file structure metadata DB (default "$HOME/.cache/rclone/cache-backend")
       --cache-db-purge                                      Clear all the cached data for this remote on start
       --cache-db-wait-time Duration                         How long to wait for the DB to be available - 0 is unlimited (default 1s)
+      --cache-description string                            Description of the remote
       --cache-info-age Duration                             How long to cache file structure information (directory listings, file size, times, etc.) (default 6h0m0s)
       --cache-plex-insecure string                          Skip all certificate verification when connecting to the Plex server
       --cache-plex-password string                          The password of the Plex user (obscured)
@@ -19491,15 +19968,19 @@ Backend only flags. These can be set in the config file also.
       --cache-workers int                                   How many workers should run in parallel to download chunks (default 4)
       --cache-writes                                        Cache file data on writes through the FS
       --chunker-chunk-size SizeSuffix                       Files larger than chunk size will be split in chunks (default 2Gi)
+      --chunker-description string                          Description of the remote
       --chunker-fail-hard                                   Choose how chunker should handle files with missing or invalid chunks
       --chunker-hash-type string                            Choose how chunker handles hash sums (default "md5")
       --chunker-remote string                               Remote to chunk/unchunk
+      --combine-description string                          Description of the remote
       --combine-upstreams SpaceSepList                      Upstreams for combining
+      --compress-description string                         Description of the remote
       --compress-level int                                  GZIP compression level (-2 to 9) (default -1)
       --compress-mode string                                Compression mode (default "gzip")
       --compress-ram-cache-limit SizeSuffix                 Some remotes don't allow the upload of files with unknown size (default 20Mi)
       --compress-remote string                              Remote to compress
   -L, --copy-links                                          Follow symlinks and copy the pointed to item
+      --crypt-description string                            Description of the remote
       --crypt-directory-name-encryption                     Option to either encrypt directory names or leave them intact (default true)
       --crypt-filename-encoding string                      How to encode the encrypted filename to text string (default "base32")
       --crypt-filename-encryption string                    How to encrypt the filenames (default "standard")
@@ -19510,6 +19991,7 @@ Backend only flags. These can be set in the config file also.
       --crypt-remote string                                 Remote to encrypt/decrypt
       --crypt-server-side-across-configs                    Deprecated: use --server-side-across-configs instead
       --crypt-show-mapping                                  For all files listed show how the names encrypt
+      --crypt-strict-names                                  If set, this will raise an error when crypt comes across a filename that can't be decrypted
       --crypt-suffix string                                 If this is set it will override the default suffix of ".bin" (default ".bin")
       --drive-acknowledge-abuse                             Set to allow files which return cannotDownloadAbusiveFile to be downloaded
       --drive-allow-import-name-change                      Allow the filetype to change when uploading Google docs
@@ -19519,6 +20001,7 @@ Backend only flags. These can be set in the config file also.
       --drive-client-id string                              Google Application Client Id
       --drive-client-secret string                          OAuth Client Secret
       --drive-copy-shortcut-content                         Server side copy contents of shortcuts instead of the shortcut
+      --drive-description string                            Description of the remote
       --drive-disable-http2                                 Disable drive using http2 (default true)
       --drive-encoding Encoding                             The encoding for the backend (default InvalidUtf8)
       --drive-env-auth                                      Get IAM credentials from runtime (environment variables or instance meta data if no env vars)
@@ -19567,6 +20050,7 @@ Backend only flags. These can be set in the config file also.
       --dropbox-chunk-size SizeSuffix                       Upload chunk size (< 150Mi) (default 48Mi)
       --dropbox-client-id string                            OAuth Client Id
       --dropbox-client-secret string                        OAuth Client Secret
+      --dropbox-description string                          Description of the remote
       --dropbox-encoding Encoding                           The encoding for the backend (default Slash,BackSlash,Del,RightSpace,InvalidUtf8,Dot)
       --dropbox-impersonate string                          Impersonate this user when using a business account
       --dropbox-pacer-min-sleep Duration                    Minimum time to sleep between API calls (default 10ms)
@@ -19576,10 +20060,12 @@ Backend only flags. These can be set in the config file also.
       --dropbox-token-url string                            Token server url
       --fichier-api-key string                              Your API Key, get it from https://1fichier.com/console/params.pl
       --fichier-cdn                                         Set if you wish to use CDN download links
+      --fichier-description string                          Description of the remote
       --fichier-encoding Encoding                           The encoding for the backend (default Slash,LtGt,DoubleQuote,SingleQuote,BackQuote,Dollar,BackSlash,Del,Ctl,LeftSpace,RightSpace,InvalidUtf8,Dot)
       --fichier-file-password string                        If you want to download a shared file that is password protected, add this parameter (obscured)
       --fichier-folder-password string                      If you want to list the files in a shared folder that is password protected, add this parameter (obscured)
       --fichier-shared-folder string                        If you want to download a shared folder, add this parameter
+      --filefabric-description string                       Description of the remote
       --filefabric-encoding Encoding                        The encoding for the backend (default Slash,Del,Ctl,InvalidUtf8,Dot)
       --filefabric-permanent-token string                   Permanent Authentication Token
       --filefabric-root-folder-id string                    ID of the root folder
@@ -19590,6 +20076,7 @@ Backend only flags. These can be set in the config file also.
       --ftp-ask-password                                    Allow asking for FTP password when needed
       --ftp-close-timeout Duration                          Maximum time to wait for a response to close (default 1m0s)
       --ftp-concurrency int                                 Maximum number of FTP simultaneous connections, 0 for unlimited
+      --ftp-description string                              Description of the remote
       --ftp-disable-epsv                                    Disable using EPSV even if server advertises support
       --ftp-disable-mlsd                                    Disable using MLSD even if server advertises support
       --ftp-disable-tls13                                   Disable TLS 1.3 (workaround for FTP servers with buggy TLS)
@@ -19615,6 +20102,7 @@ Backend only flags. These can be set in the config file also.
       --gcs-client-id string                                OAuth Client Id
       --gcs-client-secret string                            OAuth Client Secret
       --gcs-decompress                                      If set this will decompress gzip encoded objects
+      --gcs-description string                              Description of the remote
       --gcs-directory-markers                               Upload an empty object with a trailing slash when a new directory is created
       --gcs-encoding Encoding                               The encoding for the backend (default Slash,CrLf,InvalidUtf8,Dot)
       --gcs-endpoint string                                 Endpoint for the service
@@ -19635,6 +20123,7 @@ Backend only flags. These can be set in the config file also.
       --gphotos-batch-timeout Duration                      Max time to allow an idle upload batch before uploading (default 0s)
       --gphotos-client-id string                            OAuth Client Id
       --gphotos-client-secret string                        OAuth Client Secret
+      --gphotos-description string                          Description of the remote
       --gphotos-encoding Encoding                           The encoding for the backend (default Slash,CrLf,InvalidUtf8,Dot)
       --gphotos-include-archived                            Also view and download archived media
       --gphotos-read-only                                   Set to make the Google Photos backend read only
@@ -19643,10 +20132,12 @@ Backend only flags. These can be set in the config file also.
       --gphotos-token string                                OAuth Access Token as a JSON blob
       --gphotos-token-url string                            Token server url
       --hasher-auto-size SizeSuffix                         Auto-update checksum for files smaller than this size (disabled by default)
+      --hasher-description string                           Description of the remote
       --hasher-hashes CommaSepList                          Comma separated list of supported checksum types (default md5,sha1)
       --hasher-max-age Duration                             Maximum time to keep checksums in cache (0 = no cache, off = cache forever) (default off)
       --hasher-remote string                                Remote to cache checksums for (e.g. myRemote:path)
       --hdfs-data-transfer-protection string                Kerberos data transfer protection: authentication|integrity|privacy
+      --hdfs-description string                             Description of the remote
       --hdfs-encoding Encoding                              The encoding for the backend (default Slash,Colon,Del,Ctl,InvalidUtf8,Dot)
       --hdfs-namenode CommaSepList                          Hadoop name nodes and ports
       --hdfs-service-principal-name string                  Kerberos service principal name for the namenode
@@ -19655,6 +20146,7 @@ Backend only flags. These can be set in the config file also.
       --hidrive-chunk-size SizeSuffix                       Chunksize for chunked uploads (default 48Mi)
       --hidrive-client-id string                            OAuth Client Id
       --hidrive-client-secret string                        OAuth Client Secret
+      --hidrive-description string                          Description of the remote
       --hidrive-disable-fetching-member-count               Do not fetch number of objects in directories unless it is absolutely necessary
       --hidrive-encoding Encoding                           The encoding for the backend (default Slash,Dot)
       --hidrive-endpoint string                             Endpoint for the service (default "https://api.hidrive.strato.com/2.1")
@@ -19665,10 +20157,12 @@ Backend only flags. These can be set in the config file also.
       --hidrive-token-url string                            Token server url
       --hidrive-upload-concurrency int                      Concurrency for chunked uploads (default 4)
       --hidrive-upload-cutoff SizeSuffix                    Cutoff/Threshold for chunked uploads (default 96Mi)
+      --http-description string                             Description of the remote
       --http-headers CommaSepList                           Set HTTP headers for all transactions
       --http-no-head                                        Don't use HEAD requests
       --http-no-slash                                       Set this if the site doesn't end directories with /
       --http-url string                                     URL of HTTP host to connect to
+      --imagekit-description string                         Description of the remote
       --imagekit-encoding Encoding                          The encoding for the backend (default Slash,LtGt,DoubleQuote,Dollar,Question,Hash,Percent,BackSlash,Del,Ctl,InvalidUtf8,Dot,SquareBracket)
       --imagekit-endpoint string                            You can find your ImageKit.io URL endpoint in your [dashboard](https://imagekit.io/dashboard/developer/api-keys)
       --imagekit-only-signed Restrict unsigned image URLs   If you have configured Restrict unsigned image URLs in your dashboard settings, set this to true
@@ -19677,6 +20171,7 @@ Backend only flags. These can be set in the config file also.
       --imagekit-upload-tags string                         Tags to add to the uploaded files, e.g. "tag1,tag2"
       --imagekit-versions                                   Include old versions in directory listings
       --internetarchive-access-key-id string                IAS3 Access Key
+      --internetarchive-description string                  Description of the remote
       --internetarchive-disable-checksum                    Don't ask the server to test against MD5 checksum calculated by rclone (default true)
       --internetarchive-encoding Encoding                   The encoding for the backend (default Slash,LtGt,CrLf,Del,Ctl,InvalidUtf8,Dot)
       --internetarchive-endpoint string                     IAS3 Endpoint (default "https://s3.us.archive.org")
@@ -19686,6 +20181,7 @@ Backend only flags. These can be set in the config file also.
       --jottacloud-auth-url string                          Auth server URL
       --jottacloud-client-id string                         OAuth Client Id
       --jottacloud-client-secret string                     OAuth Client Secret
+      --jottacloud-description string                       Description of the remote
       --jottacloud-encoding Encoding                        The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,Del,Ctl,InvalidUtf8,Dot)
       --jottacloud-hard-delete                              Delete files permanently rather than putting them into the trash
       --jottacloud-md5-memory-limit SizeSuffix              Files bigger than this will be cached on disk to calculate the MD5 if required (default 10Mi)
@@ -19694,6 +20190,7 @@ Backend only flags. These can be set in the config file also.
       --jottacloud-token-url string                         Token server url
       --jottacloud-trashed-only                             Only show files that are in the trash
       --jottacloud-upload-resume-limit SizeSuffix           Files bigger than this can be resumed if the upload fail's (default 10Mi)
+      --koofr-description string                            Description of the remote
       --koofr-encoding Encoding                             The encoding for the backend (default Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --koofr-endpoint string                               The Koofr API endpoint to use
       --koofr-mountid string                                Mount ID of the mount to use
@@ -19701,10 +20198,12 @@ Backend only flags. These can be set in the config file also.
       --koofr-provider string                               Choose your storage provider
       --koofr-setmtime                                      Does the backend support setting modification time (default true)
       --koofr-user string                                   Your user name
+      --linkbox-description string                          Description of the remote
       --linkbox-token string                                Token from https://www.linkbox.to/admin/account
   -l, --links                                               Translate symlinks to/from regular files with a '.rclonelink' extension
       --local-case-insensitive                              Force the filesystem to report itself as case insensitive
       --local-case-sensitive                                Force the filesystem to report itself as case sensitive
+      --local-description string                            Description of the remote
       --local-encoding Encoding                             The encoding for the backend (default Slash,Dot)
       --local-no-check-updated                              Don't check to see if the files change during upload
       --local-no-preallocate                                Disable preallocation of disk space for transferred files
@@ -19717,6 +20216,7 @@ Backend only flags. These can be set in the config file also.
       --mailru-check-hash                                   What should copy do if file checksum is mismatched or invalid (default true)
       --mailru-client-id string                             OAuth Client Id
       --mailru-client-secret string                         OAuth Client Secret
+      --mailru-description string                           Description of the remote
       --mailru-encoding Encoding                            The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --mailru-pass string                                  Password (obscured)
       --mailru-speedup-enable                               Skip full upload if there is another file with same data hash (default true)
@@ -19727,12 +20227,15 @@ Backend only flags. These can be set in the config file also.
       --mailru-token-url string                             Token server url
       --mailru-user string                                  User name (usually email)
       --mega-debug                                          Output more debug from Mega
+      --mega-description string                             Description of the remote
       --mega-encoding Encoding                              The encoding for the backend (default Slash,InvalidUtf8,Dot)
       --mega-hard-delete                                    Delete files permanently rather than putting them into the trash
       --mega-pass string                                    Password (obscured)
       --mega-use-https                                      Use HTTPS for transfers
       --mega-user string                                    User name
+      --memory-description string                           Description of the remote
       --netstorage-account string                           Set the NetStorage account name
+      --netstorage-description string                       Description of the remote
       --netstorage-host string                              Domain+path of NetStorage host to connect to
       --netstorage-protocol string                          Select between HTTP or HTTPS protocol (default "https")
       --netstorage-secret string                            Set the NetStorage account secret/G2O key for authentication (obscured)
@@ -19744,6 +20247,7 @@ Backend only flags. These can be set in the config file also.
       --onedrive-client-id string                           OAuth Client Id
       --onedrive-client-secret string                       OAuth Client Secret
       --onedrive-delta                                      If set rclone will use delta listing to implement recursive listings
+      --onedrive-description string                         Description of the remote
       --onedrive-drive-id string                            The ID of the drive to use
       --onedrive-drive-type string                          The type of the drive (personal | business | documentLibrary)
       --onedrive-encoding Encoding                          The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,LeftSpace,LeftTilde,RightSpace,RightPeriod,InvalidUtf8,Dot)
@@ -19753,6 +20257,7 @@ Backend only flags. These can be set in the config file also.
       --onedrive-link-scope string                          Set the scope of the links created by the link command (default "anonymous")
       --onedrive-link-type string                           Set the type of the links created by the link command (default "view")
       --onedrive-list-chunk int                             Size of listing chunk (default 1000)
+      --onedrive-metadata-permissions Bits                  Control whether permissions should be read or written in metadata (default off)
       --onedrive-no-versions                                Remove all versions on modifying operations
       --onedrive-region string                              Choose national cloud region for OneDrive (default "global")
       --onedrive-root-folder-id string                      ID of the root folder
@@ -19766,6 +20271,7 @@ Backend only flags. These can be set in the config file also.
       --oos-config-profile string                           Profile name inside the oci config file (default "Default")
       --oos-copy-cutoff SizeSuffix                          Cutoff for switching to multipart copy (default 4.656Gi)
       --oos-copy-timeout Duration                           Timeout for copy (default 1m0s)
+      --oos-description string                              Description of the remote
       --oos-disable-checksum                                Don't store MD5 checksum with object metadata
       --oos-encoding Encoding                               The encoding for the backend (default Slash,InvalidUtf8,Dot)
       --oos-endpoint string                                 Endpoint for Object storage API
@@ -19784,12 +20290,14 @@ Backend only flags. These can be set in the config file also.
       --oos-upload-concurrency int                          Concurrency for multipart uploads (default 10)
       --oos-upload-cutoff SizeSuffix                        Cutoff for switching to chunked upload (default 200Mi)
       --opendrive-chunk-size SizeSuffix                     Files will be uploaded in chunks this size (default 10Mi)
+      --opendrive-description string                        Description of the remote
       --opendrive-encoding Encoding                         The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,LeftSpace,LeftCrLfHtVt,RightSpace,RightCrLfHtVt,InvalidUtf8,Dot)
       --opendrive-password string                           Password (obscured)
       --opendrive-username string                           Username
       --pcloud-auth-url string                              Auth server URL
       --pcloud-client-id string                             OAuth Client Id
       --pcloud-client-secret string                         OAuth Client Secret
+      --pcloud-description string                           Description of the remote
       --pcloud-encoding Encoding                            The encoding for the backend (default Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --pcloud-hostname string                              Hostname to connect to (default "api.pcloud.com")
       --pcloud-password string                              Your pcloud password (obscured)
@@ -19800,6 +20308,7 @@ Backend only flags. These can be set in the config file also.
       --pikpak-auth-url string                              Auth server URL
       --pikpak-client-id string                             OAuth Client Id
       --pikpak-client-secret string                         OAuth Client Secret
+      --pikpak-description string                           Description of the remote
       --pikpak-encoding Encoding                            The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,LeftSpace,RightSpace,RightPeriod,InvalidUtf8,Dot)
       --pikpak-hash-memory-limit SizeSuffix                 Files bigger than this will be cached on disk to calculate hash if required (default 10Mi)
       --pikpak-pass string                                  Pikpak password (obscured)
@@ -19812,11 +20321,13 @@ Backend only flags. These can be set in the config file also.
       --premiumizeme-auth-url string                        Auth server URL
       --premiumizeme-client-id string                       OAuth Client Id
       --premiumizeme-client-secret string                   OAuth Client Secret
+      --premiumizeme-description string                     Description of the remote
       --premiumizeme-encoding Encoding                      The encoding for the backend (default Slash,DoubleQuote,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --premiumizeme-token string                           OAuth Access Token as a JSON blob
       --premiumizeme-token-url string                       Token server url
       --protondrive-2fa string                              The 2FA code
       --protondrive-app-version string                      The app version string (default "macos-drive@1.0.0-alpha.1+rclone")
+      --protondrive-description string                      Description of the remote
       --protondrive-enable-caching                          Caches the files and folders metadata to reduce API calls (default true)
       --protondrive-encoding Encoding                       The encoding for the backend (default Slash,LeftSpace,RightSpace,InvalidUtf8,Dot)
       --protondrive-mailbox-password string                 The mailbox password of your two-password proton account (obscured)
@@ -19827,12 +20338,14 @@ Backend only flags. These can be set in the config file also.
       --putio-auth-url string                               Auth server URL
       --putio-client-id string                              OAuth Client Id
       --putio-client-secret string                          OAuth Client Secret
+      --putio-description string                            Description of the remote
       --putio-encoding Encoding                             The encoding for the backend (default Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --putio-token string                                  OAuth Access Token as a JSON blob
       --putio-token-url string                              Token server url
       --qingstor-access-key-id string                       QingStor Access Key ID
       --qingstor-chunk-size SizeSuffix                      Chunk size to use for uploading (default 4Mi)
       --qingstor-connection-retries int                     Number of connection retries (default 3)
+      --qingstor-description string                         Description of the remote
       --qingstor-encoding Encoding                          The encoding for the backend (default Slash,Ctl,InvalidUtf8)
       --qingstor-endpoint string                            Enter an endpoint URL to connection QingStor API
       --qingstor-env-auth                                   Get QingStor credentials from runtime
@@ -19841,18 +20354,21 @@ Backend only flags. These can be set in the config file also.
       --qingstor-upload-cutoff SizeSuffix                   Cutoff for switching to chunked upload (default 200Mi)
       --qingstor-zone string                                Zone to connect to
       --quatrix-api-key string                              API key for accessing Quatrix account
+      --quatrix-description string                          Description of the remote
       --quatrix-effective-upload-time string                Wanted upload time for one chunk (default "4s")
       --quatrix-encoding Encoding                           The encoding for the backend (default Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot)
       --quatrix-hard-delete                                 Delete files permanently rather than putting them into the trash
       --quatrix-host string                                 Host name of Quatrix account
       --quatrix-maximal-summary-chunk-size SizeSuffix       The maximal summary for all chunks. It should not be less than 'transfers'*'minimal_chunk_size' (default 95.367Mi)
       --quatrix-minimal-chunk-size SizeSuffix               The minimal size for one chunk (default 9.537Mi)
+      --quatrix-skip-project-folders                        Skip project folders in operations
       --s3-access-key-id string                             AWS Access Key ID
       --s3-acl string                                       Canned ACL used when creating buckets and storing or copying objects
       --s3-bucket-acl string                                Canned ACL used when creating buckets
       --s3-chunk-size SizeSuffix                            Chunk size to use for uploading (default 5Mi)
       --s3-copy-cutoff SizeSuffix                           Cutoff for switching to multipart copy (default 4.656Gi)
       --s3-decompress                                       If set this will decompress gzip encoded objects
+      --s3-description string                               Description of the remote
       --s3-directory-markers                                Upload an empty object with a trailing slash when a new directory is created
       --s3-disable-checksum                                 Don't store MD5 checksum with object metadata
       --s3-disable-http2                                    Disable usage of http2 for S3 backends
@@ -19887,19 +20403,22 @@ Backend only flags. These can be set in the config file also.
       --s3-sse-kms-key-id string                            If using KMS ID you must provide the ARN of Key
       --s3-storage-class string                             The storage class to use when storing new objects in S3
       --s3-sts-endpoint string                              Endpoint for STS
-      --s3-upload-concurrency int                           Concurrency for multipart uploads (default 4)
+      --s3-upload-concurrency int                           Concurrency for multipart uploads and copies (default 4)
       --s3-upload-cutoff SizeSuffix                         Cutoff for switching to chunked upload (default 200Mi)
       --s3-use-accelerate-endpoint                          If true use the AWS S3 accelerated endpoint
       --s3-use-accept-encoding-gzip Accept-Encoding: gzip   Whether to send Accept-Encoding: gzip header (default unset)
       --s3-use-already-exists Tristate                      Set if rclone should report BucketAlreadyExists errors on bucket creation (default unset)
+      --s3-use-dual-stack                                   If true use AWS S3 dual-stack endpoint (IPv6 support)
       --s3-use-multipart-etag Tristate                      Whether to use ETag in multipart uploads for verification (default unset)
       --s3-use-multipart-uploads Tristate                   Set if rclone should use multipart uploads (default unset)
       --s3-use-presigned-request                            Whether to use a presigned request or PutObject for single part uploads
       --s3-v2-auth                                          If true use v2 authentication
       --s3-version-at Time                                  Show file versions as they were at the specified time (default off)
+      --s3-version-deleted                                  Show deleted file markers when using versions
       --s3-versions                                         Include old versions in directory listings
       --seafile-2fa                                         Two-factor authentication ('true' if the account has 2FA enabled)
       --seafile-create-library                              Should rclone create a library if it doesn't exist
+      --seafile-description string                          Description of the remote
       --seafile-encoding Encoding                           The encoding for the backend (default Slash,DoubleQuote,BackSlash,Ctl,InvalidUtf8)
       --seafile-library string                              Name of the library
       --seafile-library-key string                          Library password (for encrypted libraries only) (obscured)
@@ -19911,6 +20430,7 @@ Backend only flags. These can be set in the config file also.
       --sftp-ciphers SpaceSepList                           Space separated list of ciphers to be used for session encryption, ordered by preference
       --sftp-concurrency int                                The maximum number of outstanding requests for one file (default 64)
       --sftp-copy-is-hardlink                               Set to enable server side copies using hardlinks
+      --sftp-description string                             Description of the remote
       --sftp-disable-concurrent-reads                       If set don't use concurrent reads
       --sftp-disable-concurrent-writes                      If set don't use concurrent writes
       --sftp-disable-hashcheck                              Disable the execution of SSH commands to determine if remote file hashing is available
@@ -19945,6 +20465,7 @@ Backend only flags. These can be set in the config file also.
       --sharefile-chunk-size SizeSuffix                     Upload chunk size (default 64Mi)
       --sharefile-client-id string                          OAuth Client Id
       --sharefile-client-secret string                      OAuth Client Secret
+      --sharefile-description string                        Description of the remote
       --sharefile-encoding Encoding                         The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,LeftSpace,LeftPeriod,RightSpace,RightPeriod,InvalidUtf8,Dot)
       --sharefile-endpoint string                           Endpoint for API calls
       --sharefile-root-folder-id string                     ID of the root folder
@@ -19953,10 +20474,12 @@ Backend only flags. These can be set in the config file also.
       --sharefile-upload-cutoff SizeSuffix                  Cutoff for switching to multipart upload (default 128Mi)
       --sia-api-password string                             Sia Daemon API Password (obscured)
       --sia-api-url string                                  Sia daemon API URL, like http://sia.daemon.host:9980 (default "http://127.0.0.1:9980")
+      --sia-description string                              Description of the remote
       --sia-encoding Encoding                               The encoding for the backend (default Slash,Question,Hash,Percent,Del,Ctl,InvalidUtf8,Dot)
       --sia-user-agent string                               Siad User Agent (default "Sia-Agent")
       --skip-links                                          Don't warn about skipped symlinks
       --smb-case-insensitive                                Whether the server is configured to be case-insensitive (default true)
+      --smb-description string                              Description of the remote
       --smb-domain string                                   Domain name for NTLM authentication (default "WORKGROUP")
       --smb-encoding Encoding                               The encoding for the backend (default Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,RightSpace,RightPeriod,InvalidUtf8,Dot)
       --smb-hide-special-share                              Hide special shares (e.g. print$) which users aren't supposed to access (default true)
@@ -19968,6 +20491,7 @@ Backend only flags. These can be set in the config file also.
       --smb-user string                                     SMB username (default "$USER")
       --storj-access-grant string                           Access grant
       --storj-api-key string                                API key
+      --storj-description string                            Description of the remote
       --storj-passphrase string                             Encryption passphrase
       --storj-provider string                               Choose an authentication method (default "existing")
       --storj-satellite-address string                      Satellite address (default "us1.storj.io")
@@ -19976,6 +20500,7 @@ Backend only flags. These can be set in the config file also.
       --sugarsync-authorization string                      Sugarsync authorization
       --sugarsync-authorization-expiry string               Sugarsync authorization expiry
       --sugarsync-deleted-id string                         Sugarsync deleted folder id
+      --sugarsync-description string                        Description of the remote
       --sugarsync-encoding Encoding                         The encoding for the backend (default Slash,Ctl,InvalidUtf8,Dot)
       --sugarsync-hard-delete                               Permanently delete files if true
       --sugarsync-private-access-key string                 Sugarsync Private Access Key
@@ -19989,6 +20514,7 @@ Backend only flags. These can be set in the config file also.
       --swift-auth-token string                             Auth Token from alternate authentication - optional (OS_AUTH_TOKEN)
       --swift-auth-version int                              AuthVersion - optional - set to (1,2,3) if your auth URL has no version (ST_AUTH_VERSION)
       --swift-chunk-size SizeSuffix                         Above this size files will be chunked into a _segments container (default 5Gi)
+      --swift-description string                            Description of the remote
       --swift-domain string                                 User domain - optional (v3 auth) (OS_USER_DOMAIN_NAME)
       --swift-encoding Encoding                             The encoding for the backend (default Slash,InvalidUtf8)
       --swift-endpoint-type string                          Endpoint type to choose from the service catalogue (OS_ENDPOINT_TYPE) (default "public")
@@ -20008,17 +20534,21 @@ Backend only flags. These can be set in the config file also.
       --union-action-policy string                          Policy to choose upstream on ACTION category (default "epall")
       --union-cache-time int                                Cache time of usage and free space (in seconds) (default 120)
       --union-create-policy string                          Policy to choose upstream on CREATE category (default "epmfs")
+      --union-description string                            Description of the remote
       --union-min-free-space SizeSuffix                     Minimum viable free space for lfs/eplfs policies (default 1Gi)
       --union-search-policy string                          Policy to choose upstream on SEARCH category (default "ff")
       --union-upstreams string                              List of space separated upstreams
       --uptobox-access-token string                         Your access token
+      --uptobox-description string                          Description of the remote
       --uptobox-encoding Encoding                           The encoding for the backend (default Slash,LtGt,DoubleQuote,BackQuote,Del,Ctl,LeftSpace,InvalidUtf8,Dot)
       --uptobox-private                                     Set to make uploaded files private
       --webdav-bearer-token string                          Bearer token instead of user/pass (e.g. a Macaroon)
       --webdav-bearer-token-command string                  Command to run to get a bearer token
+      --webdav-description string                           Description of the remote
       --webdav-encoding string                              The encoding for the backend
       --webdav-headers CommaSepList                         Set HTTP headers for all transactions
       --webdav-nextcloud-chunk-size SizeSuffix              Nextcloud upload chunk size (default 10Mi)
+      --webdav-owncloud-exclude-shares                      Exclude ownCloud shares
       --webdav-pacer-min-sleep Duration                     Minimum time to sleep between API calls (default 10ms)
       --webdav-pass string                                  Password (obscured)
       --webdav-url string                                   URL of http host to connect to
@@ -20027,6 +20557,7 @@ Backend only flags. These can be set in the config file also.
       --yandex-auth-url string                              Auth server URL
       --yandex-client-id string                             OAuth Client Id
       --yandex-client-secret string                         OAuth Client Secret
+      --yandex-description string                           Description of the remote
       --yandex-encoding Encoding                            The encoding for the backend (default Slash,Del,Ctl,InvalidUtf8,Dot)
       --yandex-hard-delete                                  Delete files permanently rather than putting them into the trash
       --yandex-token string                                 OAuth Access Token as a JSON blob
@@ -20034,6 +20565,7 @@ Backend only flags. These can be set in the config file also.
       --zoho-auth-url string                                Auth server URL
       --zoho-client-id string                               OAuth Client Id
       --zoho-client-secret string                           OAuth Client Secret
+      --zoho-description string                             Description of the remote
       --zoho-encoding Encoding                              The encoding for the backend (default Del,Ctl,InvalidUtf8)
       --zoho-region string                                  Zoho region to connect to
       --zoho-token string                                   OAuth Access Token as a JSON blob
@@ -20596,22 +21128,33 @@ docker volume inspect my_vol
 If docker refuses to remove the volume, you should find containers
 or swarm services that use it and stop them first.
 
+## Bisync
+`bisync` is **in beta** and is considered an **advanced command**, so use with care.
+Make sure you have read and understood the entire [manual](https://rclone.org/bisync) (especially the [Limitations](#limitations) section) before using, or data loss can result. Questions can be asked in the [Rclone Forum](https://forum.rclone.org/).
+
 ## Getting started {#getting-started}
 
 - [Install rclone](https://rclone.org/install/) and setup your remotes.
 - Bisync will create its working directory
-  at `~/.cache/rclone/bisync` on Linux
+  at `~/.cache/rclone/bisync` on Linux, `/Users/yourusername/Library/Caches/rclone/bisync` on Mac,
   or `C:\Users\MyLogin\AppData\Local\rclone\bisync` on Windows.
   Make sure that this location is writable.
 - Run bisync with the `--resync` flag, specifying the paths
   to the local and remote sync directory roots.
-- For successive sync runs, leave off the `--resync` flag.
+- For successive sync runs, leave off the `--resync` flag. (**Important!**)
 - Consider using a [filters file](#filtering) for excluding
   unnecessary files and directories from the sync.
 - Consider setting up the [--check-access](#check-access) feature
   for safety.
-- On Linux, consider setting up a [crontab entry](#cron). bisync can
+- On Linux or Mac, consider setting up a [crontab entry](#cron). bisync can
   safely run in concurrent cron jobs thanks to lock files it maintains.
+
+For example, your first command might look like this:
+
+```
+rclone bisync remote1:path1 remote2:path2 --create-empty-src-dirs --compare size,modtime,checksum --slow-hash-sync-only --resilient -MvP --drive-skip-gdocs --fix-case --resync --dry-run
+```
+If all looks good, run it again without `--dry-run`. After that, remove `--resync` as well.
 
 Here is a typical run log (with timestamps removed for clarity):
 
@@ -20671,36 +21214,36 @@ Positional arguments:
                 Type 'rclone listremotes' for list of configured remotes.
 
 Optional Flags:
-      --check-access            Ensure expected `RCLONE_TEST` files are found on
-                                both Path1 and Path2 filesystems, else abort.
-      --check-filename FILENAME Filename for `--check-access` (default: `RCLONE_TEST`)
-      --check-sync CHOICE       Controls comparison of final listings:
-                                `true | false | only` (default: true)
-                                If set to `only`, bisync will only compare listings
-                                from the last run but skip actual sync.
-      --filters-file PATH       Read filtering patterns from a file
-      --max-delete PERCENT      Safety check on maximum percentage of deleted files allowed.
-                                If exceeded, the bisync run will abort. (default: 50%)
-      --force                   Bypass `--max-delete` safety check and run the sync.
-                                Consider using with `--verbose`
-      --create-empty-src-dirs   Sync creation and deletion of empty directories. 
-                                  (Not compatible with --remove-empty-dirs)
-      --remove-empty-dirs       Remove empty directories at the final cleanup step.
-  -1, --resync                  Performs the resync run.
-                                Warning: Path1 files may overwrite Path2 versions.
-                                Consider using `--verbose` or `--dry-run` first.
-      --ignore-listing-checksum Do not use checksums for listings 
-                                  (add --ignore-checksum to additionally skip post-copy checksum checks)
-      --resilient               Allow future runs to retry after certain less-serious errors, 
-                                  instead of requiring --resync. Use at your own risk!
-      --localtime               Use local time in listings (default: UTC)
-      --no-cleanup              Retain working files (useful for troubleshooting and testing).
-      --workdir PATH            Use custom working directory (useful for testing).
-                                (default: `~/.cache/rclone/bisync`)
-  -n, --dry-run                 Go through the motions - No files are copied/deleted.
-  -v, --verbose                 Increases logging verbosity.
-                                May be specified more than once for more details.
-  -h, --help                    help for bisync
+      --backup-dir1 string                   --backup-dir for Path1. Must be a non-overlapping path on the same remote.
+      --backup-dir2 string                   --backup-dir for Path2. Must be a non-overlapping path on the same remote.
+      --check-access                         Ensure expected RCLONE_TEST files are found on both Path1 and Path2 filesystems, else abort.
+      --check-filename string                Filename for --check-access (default: RCLONE_TEST)
+      --check-sync string                    Controls comparison of final listings: true|false|only (default: true) (default "true")
+      --compare string                       Comma-separated list of bisync-specific compare options ex. 'size,modtime,checksum' (default: 'size,modtime')
+      --conflict-loser ConflictLoserAction   Action to take on the loser of a sync conflict (when there is a winner) or on both files (when there is no winner): , num, pathname, delete (default: num)
+      --conflict-resolve string              Automatically resolve conflicts by preferring the version that is: none, path1, path2, newer, older, larger, smaller (default: none) (default "none")
+      --conflict-suffix string               Suffix to use when renaming a --conflict-loser. Can be either one string or two comma-separated strings to assign different suffixes to Path1/Path2. (default: 'conflict')
+      --create-empty-src-dirs                Sync creation and deletion of empty directories. (Not compatible with --remove-empty-dirs)
+      --download-hash                        Compute hash by downloading when otherwise unavailable. (warning: may be slow and use lots of data!)
+      --filters-file string                  Read filtering patterns from a file
+      --force                                Bypass --max-delete safety check and run the sync. Consider using with --verbose
+  -h, --help                                 help for bisync
+      --ignore-listing-checksum              Do not use checksums for listings (add --ignore-checksum to additionally skip post-copy checksum checks)
+      --max-lock Duration                    Consider lock files older than this to be expired (default: 0 (never expire)) (minimum: 2m) (default 0s)
+      --no-cleanup                           Retain working files (useful for troubleshooting and testing).
+      --no-slow-hash                         Ignore listing checksums only on backends where they are slow
+      --recover                              Automatically recover from interruptions without requiring --resync.
+      --remove-empty-dirs                    Remove ALL empty directories at the final cleanup step.
+      --resilient                            Allow future runs to retry after certain less-serious errors, instead of requiring --resync. Use at your own risk!
+  -1, --resync                               Performs the resync run. Equivalent to --resync-mode path1. Consider using --verbose or --dry-run first.
+      --resync-mode string                   During resync, prefer the version that is: path1, path2, newer, older, larger, smaller (default: path1 if --resync, otherwise none for no resync.) (default "none")
+      --retries int                          Retry operations this many times if they fail (requires --resilient). (default 3)
+      --retries-sleep Duration               Interval between retrying operations if they fail, e.g. 500ms, 60s, 5m (0 to disable) (default 0s)
+      --slow-hash-sync-only                  Ignore slow checksums for listings and deltas, but still consider them during sync calls.
+      --workdir string                       Use custom working dir - useful for testing. (default: {WORKDIR})
+      --max-delete PERCENT                   Safety check on maximum percentage of deleted files allowed. If exceeded, the bisync run will abort. (default: 50%)
+  -n, --dry-run                              Go through the motions - No files are copied/deleted.
+  -v, --verbose                              Increases logging verbosity. May be specified more than once for more details.
 ```
 
 Arbitrary rclone flags may be specified on the
@@ -20734,22 +21277,16 @@ as the last step in the process.
 
 ## Command-line flags
 
-#### --resync
+### --resync
 
 This will effectively make both Path1 and Path2 filesystems contain a
-matching superset of all files. Path2 files that do not exist in Path1 will
+matching superset of all files. By default, Path2 files that do not exist in Path1 will
 be copied to Path1, and the process will then copy the Path1 tree to Path2.
 
-The `--resync` sequence is roughly equivalent to:
+The `--resync` sequence is roughly equivalent to the following (but see [`--resync-mode`](#resync-mode) for other options):
 ```
-rclone copy Path2 Path1 --ignore-existing
-rclone copy Path1 Path2
-```
-Or, if using `--create-empty-src-dirs`:
-```
-rclone copy Path2 Path1 --ignore-existing
-rclone copy Path1 Path2 --create-empty-src-dirs
-rclone copy Path2 Path1 --create-empty-src-dirs
+rclone copy Path2 Path1 --ignore-existing [--create-empty-src-dirs]
+rclone copy Path1 Path2 [--create-empty-src-dirs]
 ```
 
 The base directories on both Path1 and Path2 filesystems must exist
@@ -20757,12 +21294,9 @@ or bisync will fail. This is required for safety - that bisync can verify
 that both paths are valid.
 
 When using `--resync`, a newer version of a file on the Path2 filesystem
-will be overwritten by the Path1 filesystem version. 
-(Note that this is [NOT entirely symmetrical](https://github.com/rclone/rclone/issues/5681#issuecomment-938761815).)
+will (by default) be overwritten by the Path1 filesystem version.
+(Note that this is [NOT entirely symmetrical](https://github.com/rclone/rclone/issues/5681#issuecomment-938761815), and more symmetrical options can be specified with the [`--resync-mode`](#resync-mode) flag.)
 Carefully evaluate deltas using [--dry-run](https://rclone.org/flags/#non-backend-flags).
-
-[//]: # (I reverted a recent change in the above paragraph, as it was incorrect.
-https://github.com/rclone/rclone/commit/dd72aff98a46c6e20848ac7ae5f7b19d45802493 )
 
 For a resync run, one of the paths may be empty (no files in the path tree).
 The resync run should result in files on both paths, else a normal non-resync
@@ -20773,7 +21307,100 @@ For a non-resync run, either path being empty (no files in the tree) fails with
 This is a safety check that an unexpected empty path does not result in
 deleting **everything** in the other path.
 
-#### --check-access
+Note that `--resync` implies `--resync-mode path1` unless a different
+[`--resync-mode`](#resync-mode)  is explicitly specified.
+It is not necessary to use both the `--resync` and `--resync-mode` flags --
+either one is sufficient without the other.
+
+**Note:** `--resync` (including `--resync-mode`) should only be used under three specific (rare) circumstances:
+1. It is your _first_ bisync run (between these two paths)
+2. You've just made changes to your bisync settings (such as editing the contents of your `--filters-file`)
+3. There was an error on the prior run, and as a result, bisync now requires `--resync` to recover
+
+The rest of the time, you should _omit_ `--resync`. The reason is because `--resync` will only _copy_ (not _sync_) each side to the other.
+Therefore, if you included `--resync` for every bisync run, it would never be possible to delete a file --
+the deleted file would always keep reappearing at the end of every run (because it's being copied from the other side where it still exists).
+Similarly, renaming a file would always result in a duplicate copy (both old and new name) on both sides.
+
+If you find that frequent interruptions from #3 are an issue, rather than
+automatically running `--resync`, the recommended alternative is to use the
+[`--resilient`](#resilient), [`--recover`](#recover), and
+[`--conflict-resolve`](#conflict-resolve) flags, (along with [Graceful
+Shutdown](#graceful-shutdown) mode, when needed) for a very robust
+"set-it-and-forget-it" bisync setup that can automatically bounce back from
+almost any interruption it might encounter. Consider adding something like the
+following:
+
+```
+--resilient --recover --max-lock 2m --conflict-resolve newer
+```
+
+### --resync-mode CHOICE {#resync-mode}
+
+In the event that a file differs on both sides during a `--resync`,
+`--resync-mode` controls which version will overwrite the other. The supported
+options are similar to [`--conflict-resolve`](#conflict-resolve). For all of
+the following options, the version that is kept is referred to as the "winner",
+and the version that is overwritten (deleted) is referred to as the "loser".
+The options are named after the "winner":
+
+- `path1` - (the default) - the version from Path1 is unconditionally
+considered the winner (regardless of `modtime` and `size`, if any). This can be
+useful if one side is more trusted or up-to-date than the other, at the time of
+the `--resync`.
+- `path2` - same as `path1`, except the path2 version is considered the winner.
+- `newer` - the newer file (by `modtime`) is considered the winner, regardless
+of which side it came from. This may result in having a mix of some winners
+from Path1, and some winners from Path2. (The implementation is analogous to
+running `rclone copy --update` in both directions.)
+- `older` - same as `newer`, except the older file is considered the winner,
+and the newer file is considered the loser.
+- `larger` - the larger file (by `size`) is considered the winner (regardless
+of `modtime`, if any). This can be a useful option for remotes without
+`modtime` support, or with the kinds of files (such as logs) that tend to grow
+but not shrink, over time.
+- `smaller` - the smaller file (by `size`) is considered the winner (regardless
+of `modtime`, if any).
+
+For all of the above options, note the following:
+- If either of the underlying remotes lacks support for the chosen method, it
+will be ignored and will fall back to the default of `path1`. (For example, if
+`--resync-mode newer` is set, but one of the paths uses a remote that doesn't
+support `modtime`.)
+- If a winner can't be determined because the chosen method's attribute is
+missing or equal, it will be ignored, and bisync will instead try to determine
+whether the files differ by looking at the other `--compare` methods in effect.
+(For example, if `--resync-mode newer` is set, but the Path1 and Path2 modtimes
+are identical, bisync will compare the sizes.) If bisync concludes that they
+differ, preference is given to whichever is the "source" at that moment. (In
+practice, this gives a slight advantage to Path2, as the 2to1 copy comes before
+the 1to2 copy.) If the files _do not_ differ, nothing is copied (as both sides
+are already correct).
+- These options apply only to files that exist on both sides (with the same
+name and relative path). Files that exist *only* on one side and not the other
+are *always* copied to the other, during `--resync` (this is one of the main
+differences between resync and non-resync runs.).
+- `--conflict-resolve`, `--conflict-loser`, and `--conflict-suffix` do not
+apply during `--resync`, and unlike these flags, nothing is renamed during
+`--resync`. When a file differs on both sides during `--resync`, one version
+always overwrites the other (much like in `rclone copy`.) (Consider using
+[`--backup-dir`](#backup-dir1-and-backup-dir2) to retain a backup of the losing
+version.)
+- Unlike for `--conflict-resolve`, `--resync-mode none` is not a valid option
+(or rather, it will be interpreted as "no resync", unless `--resync` has also
+been specified, in which case it will be ignored.)
+- Winners and losers are decided at the individual file-level only (there is
+not currently an option to pick an entire winning directory atomically,
+although the `path1` and `path2` options typically produce a similar result.)
+- To maintain backward-compatibility, the `--resync` flag implies
+`--resync-mode path1` unless a different `--resync-mode` is explicitly
+specified. Similarly, all `--resync-mode` options (except `none`) imply
+`--resync`, so it is not necessary to use both the `--resync` and
+`--resync-mode` flags simultaneously -- either one is sufficient without the
+other.
+
+
+### --check-access
 
 Access check files are an additional safety measure against data loss.
 bisync will ensure it can find matching `RCLONE_TEST` files in the same places
@@ -20802,7 +21429,7 @@ bisync assuming a bunch of deleted files if the linked-to tree should not be
 accessible.
 See also the [--check-filename](--check-filename) flag.
 
-#### --check-filename
+### --check-filename
 
 Name of the file(s) used in access health validation.
 The default `--check-filename` is `RCLONE_TEST`.
@@ -20810,7 +21437,154 @@ One or more files having this filename must exist, synchronized between your
 source and destination filesets, in order for `--check-access` to succeed.
 See [--check-access](#check-access) for additional details.
 
-#### --max-delete
+### --compare
+
+As of `v1.66`, bisync fully supports comparing based on any combination of
+size, modtime, and checksum (lifting the prior restriction on backends without
+modtime support.)
+
+By default (without the `--compare` flag), bisync inherits the same comparison
+options as `sync`
+(that is: `size` and `modtime` by default, unless modified with flags such as
+[`--checksum`](https://rclone.org/docs/#c-checksum) or [`--size-only`](/docs/#size-only).)
+
+If the `--compare` flag is set, it will override these defaults. This can be
+useful if you wish to compare based on combinations not currently supported in
+`sync`, such as comparing all three of `size` AND `modtime` AND `checksum`
+simultaneously (or just `modtime` AND `checksum`).
+
+`--compare` takes a comma-separated list, with the currently supported values
+being `size`, `modtime`, and `checksum`. For example, if you want to compare
+size and checksum, but not modtime, you would do:
+```
+--compare size,checksum
+```
+
+Or if you want to compare all three:
+```
+--compare size,modtime,checksum
+```
+
+`--compare` overrides any conflicting flags. For example, if you set the
+conflicting flags `--compare checksum --size-only`, `--size-only` will be
+ignored, and bisync will compare checksum and not size. To avoid confusion, it
+is recommended to use _either_ `--compare` or the normal `sync` flags, but not
+both.
+
+If `--compare` includes `checksum` and both remotes support checksums but have
+no hash types in common with each other, checksums will be considered _only_
+for comparisons within the same side (to determine what has changed since the
+prior sync), but not for comparisons against the opposite side. If one side
+supports checksums and the other does not, checksums will only be considered on
+the side that supports them.
+
+When comparing with `checksum` and/or `size` without `modtime`, bisync cannot
+determine whether a file is `newer` or `older` -- only whether it is `changed`
+or `unchanged`. (If it is `changed` on both sides, bisync still does the
+standard equality-check to avoid declaring a sync conflict unless it absolutely
+has to.)
+
+It is recommended to do a `--resync` when changing `--compare` settings, as
+otherwise your prior listing files may not contain the attributes you wish to
+compare (for example, they will not have stored checksums if you were not
+previously comparing checksums.)
+
+### --ignore-listing-checksum
+
+When `--checksum` or `--compare checksum` is set, bisync will retrieve (or
+generate) checksums (for backends that support them) when creating the listings
+for both paths, and store the checksums in the listing files.
+`--ignore-listing-checksum` will disable this behavior, which may speed things
+up considerably, especially on backends (such as [local](https://rclone.org/local/)) where hashes
+must be computed on the fly instead of retrieved. Please note the following:
+
+* As of `v1.66`, `--ignore-listing-checksum` is now automatically set when
+neither `--checksum` nor `--compare checksum` are in use (as the checksums
+would not be used for anything.)
+* `--ignore-listing-checksum` is NOT the same as
+[`--ignore-checksum`](https://rclone.org/docs/#ignore-checksum),
+and you may wish to use one or the other, or both. In a nutshell:
+`--ignore-listing-checksum` controls whether checksums are considered when
+scanning for diffs,
+while `--ignore-checksum` controls whether checksums are considered during the
+copy/sync operations that follow,
+if there ARE diffs.
+* Unless `--ignore-listing-checksum` is passed, bisync currently computes
+hashes for one path
+*even when there's no common hash with the other path*
+(for example, a [crypt](https://rclone.org/crypt/#modification-times-and-hashes) remote.)
+This can still be beneficial, as the hashes will still be used to detect
+changes within the same side
+(if `--checksum` or `--compare checksum` is set), even if they can't be used to
+compare against the opposite side.
+* If you wish to ignore listing checksums _only_ on remotes where they are slow
+to compute, consider using
+[`--no-slow-hash`](#no-slow-hash) (or
+[`--slow-hash-sync-only`](#slow-hash-sync-only)) instead of
+`--ignore-listing-checksum`.
+* If `--ignore-listing-checksum` is used simultaneously with `--compare
+checksum` (or `--checksum`), checksums will be ignored for bisync deltas,
+but still considered during the sync operations that follow (if deltas are
+detected based on modtime and/or size.)
+
+### --no-slow-hash
+
+On some remotes (notably `local`), checksums can dramatically slow down a
+bisync run, because hashes cannot be stored and need to be computed in
+real-time when they are requested. On other remotes (such as `drive`), they add
+practically no time at all. The `--no-slow-hash` flag will automatically skip
+checksums on remotes where they are slow, while still comparing them on others
+(assuming [`--compare`](#compare) includes `checksum`.) This can be useful when one of your
+bisync paths is slow but you still want to check checksums on the other, for a more
+robust sync.
+
+### --slow-hash-sync-only
+
+Same as [`--no-slow-hash`](#no-slow-hash), except slow hashes are still
+considered during sync calls. They are still NOT considered for determining
+deltas, nor or they included in listings. They are also skipped during
+`--resync`. The main use case for this flag is when you have a large number of
+files, but relatively few of them change from run to run -- so you don't want
+to check your entire tree every time (it would take too long), but you still
+want to consider checksums for the smaller group of files for which a `modtime`
+or `size` change was detected. Keep in mind that this speed savings comes with
+a safety trade-off: if a file's content were to change without a change to its
+`modtime` or `size`, bisync would not detect it, and it would not be synced.
+
+`--slow-hash-sync-only` is only useful if both remotes share a common hash
+type (if they don't, bisync will automatically fall back to `--no-slow-hash`.)
+Both `--no-slow-hash` and `--slow-hash-sync-only` have no effect without
+`--compare checksum` (or `--checksum`).
+
+### --download-hash
+
+If `--download-hash` is set, bisync will use best efforts to obtain an MD5
+checksum by downloading and computing on-the-fly, when checksums are not
+otherwise available (for example, a remote that doesn't support them.) Note
+that since rclone has to download the entire file, this may dramatically slow
+down your bisync runs, and is also likely to use a lot of data, so it is
+probably not practical for bisync paths with a large total file size. However,
+it can be a good option for syncing small-but-important files with maximum
+accuracy (for example, a source code repo on a `crypt` remote.) An additional
+advantage over methods like [`cryptcheck`](https://rclone.org/commands/rclone_cryptcheck/) is
+that the original file is not required for comparison (for example,
+`--download-hash` can be used to bisync two different crypt remotes with
+different passwords.)
+
+When `--download-hash` is set, bisync still looks for more efficient checksums
+first, and falls back to downloading only when none are found. It takes
+priority over conflicting flags such as `--no-slow-hash`. `--download-hash` is
+not suitable for [Google Docs](#gdocs) and other files of unknown size, as
+their checksums would change from run to run (due to small variances in the
+internals of the generated export file.) Therefore, bisync automatically skips
+`--download-hash` for files with a size less than 0.
+
+See also: [`Hasher`](https://rclone.org/hasher/) backend,
+[`cryptcheck`](https://rclone.org/commands/rclone_cryptcheck/) command, [`rclone check
+--download`](https://rclone.org/commands/rclone_check/) option,
+[`md5sum`](https://rclone.org/commands/rclone_md5sum/) command
+
+### --max-delete
 
 As a safety check, if greater than the `--max-delete` percent of files were
 deleted on either the Path1 or Path2 filesystem, then bisync will abort with
@@ -20828,7 +21602,7 @@ to bypass the check.
 
 Also see the [all files changed](#all-files-changed) check.
 
-#### --filters-file {#filters-file}
+### --filters-file {#filters-file}
 
 By using rclone filter features you can exclude file types or directory
 sub-trees from the sync.
@@ -20852,7 +21626,153 @@ of the current filters file and compares it to the hash stored in the `.md5` fil
 If they don't match, the run aborts with a critical error and thus forces you
 to do a `--resync`, likely avoiding a disaster.
 
-#### --check-sync
+### --conflict-resolve CHOICE {#conflict-resolve}
+
+In bisync, a "conflict" is a file that is *new* or *changed* on *both sides*
+(relative to the prior run) AND is *not currently identical* on both sides.
+`--conflict-resolve` controls how bisync handles such a scenario. The currently
+supported options are:
+
+- `none` - (the default) - do not attempt to pick a winner, keep and rename
+both files according to [`--conflict-loser`](#conflict-loser) and
+[`--conflict-suffix`](#conflict-suffix) settings. For example, with the default
+settings, `file.txt` on Path1 is renamed `file.txt.conflict1` and `file.txt` on
+Path2 is renamed `file.txt.conflict2`. Both are copied to the opposite path
+during the run, so both sides end up with a copy of both files. (As `none` is
+the default, it is not necessary to specify `--conflict-resolve none` -- you
+can just omit the flag.)
+- `newer` - the newer file (by `modtime`) is considered the winner and is
+copied without renaming. The older file (the "loser") is handled according to
+`--conflict-loser` and `--conflict-suffix` settings (either renamed or
+deleted.) For example, if `file.txt` on Path1 is newer than `file.txt` on
+Path2, the result on both sides (with other default settings) will be `file.txt`
+(winner from Path1) and `file.txt.conflict1` (loser from Path2).
+- `older` - same as `newer`, except the older file is considered the winner,
+and the newer file is considered the loser.
+- `larger` - the larger file (by `size`) is considered the winner (regardless
+of `modtime`, if any).
+- `smaller` - the smaller file (by `size`) is considered the winner (regardless
+of `modtime`, if any).
+- `path1` - the version from Path1 is unconditionally considered the winner
+(regardless of `modtime` and `size`, if any). This can be useful if one side is
+usually more trusted or up-to-date than the other.
+- `path2` - same as `path1`, except the path2 version is considered the
+winner.
+
+For all of the above options, note the following:
+- If either of the underlying remotes lacks support for the chosen method, it
+will be ignored and fall back to `none`. (For example, if `--conflict-resolve
+newer` is set, but one of the paths uses a remote that doesn't support
+`modtime`.)
+- If a winner can't be determined because the chosen method's attribute is
+missing or equal, it will be ignored and fall back to `none`. (For example, if
+`--conflict-resolve newer` is set, but the Path1 and Path2 modtimes are
+identical, even if the sizes may differ.)
+- If the file's content is currently identical on both sides, it is not
+considered a "conflict", even if new or changed on both sides since the prior
+sync. (For example, if you made a change on one side and then synced it to the
+other side by other means.) Therefore, none of the conflict resolution flags
+apply in this scenario.
+- The conflict resolution flags do not apply during a `--resync`, as there is
+no "prior run" to speak of (but see [`--resync-mode`](#resync-mode) for similar
+options.)
+
+### --conflict-loser CHOICE {#conflict-loser}
+
+`--conflict-loser` determines what happens to the "loser" of a sync conflict
+(when [`--conflict-resolve`](#conflict-resolve) determines a winner) or to both
+files (when there is no winner.) The currently supported options are:
+
+- `num` - (the default) - auto-number the conflicts by automatically appending
+the next available number to the `--conflict-suffix`, in chronological order.
+For example, with the default settings, the first conflict for `file.txt` will
+be renamed `file.txt.conflict1`. If `file.txt.conflict1` already exists,
+`file.txt.conflict2` will be used instead (etc., up to a maximum of
+9223372036854775807 conflicts.)
+- `pathname` - rename the conflicts according to which side they came from,
+which was the default behavior prior to `v1.66`. For example, with
+`--conflict-suffix path`, `file.txt` from Path1 will be renamed
+`file.txt.path1`, and `file.txt` from Path2 will be renamed `file.txt.path2`.
+If two non-identical suffixes are provided (ex. `--conflict-suffix
+cloud,local`), the trailing digit is omitted. Importantly, note that with
+`pathname`, there is no auto-numbering beyond `2`, so if `file.txt.path2`
+somehow already exists, it will be overwritten. Using a dynamic date variable
+in your `--conflict-suffix` (see below) is one possible way to avoid this. Note
+also that conflicts-of-conflicts are possible, if the original conflict is not
+manually resolved -- for example, if for some reason you edited
+`file.txt.path1` on both sides, and those edits were different, the result
+would be `file.txt.path1.path1` and `file.txt.path1.path2` (in addition to
+`file.txt.path2`.)
+- `delete` - keep the winner only and delete the loser, instead of renaming it.
+If a winner cannot be determined (see `--conflict-resolve` for details on how
+this could happen), `delete` is ignored and the default `num` is used instead
+(i.e. both versions are kept and renamed, and neither is deleted.) `delete` is
+inherently the most destructive option, so use it only with care.
+
+For all of the above options, note that if a winner cannot be determined (see
+`--conflict-resolve` for details on how this could happen), or if
+`--conflict-resolve` is not in use, *both* files will be renamed.
+
+### --conflict-suffix STRING[,STRING] {#conflict-suffix}
+
+`--conflict-suffix` controls the suffix that is appended when bisync renames a
+[`--conflict-loser`](#conflict-loser) (default: `conflict`).
+`--conflict-suffix` will accept either one string or two comma-separated
+strings to assign different suffixes to Path1 vs. Path2. This may be helpful
+later in identifying the source of the conflict. (For example,
+`--conflict-suffix dropboxconflict,laptopconflict`)
+
+With `--conflict-loser num`, a number is always appended to the suffix. With
+`--conflict-loser pathname`, a number is appended only when one suffix is
+specified (or when two identical suffixes are specified.) i.e. with
+`--conflict-loser pathname`, all of the following would produce exactly the
+same result:
+
+```
+--conflict-suffix path
+--conflict-suffix path,path
+--conflict-suffix path1,path2
+```
+
+Suffixes may be as short as 1 character. By default, the suffix is appended
+after any other extensions (ex. `file.jpg.conflict1`), however, this can be
+changed with the [`--suffix-keep-extension`](https://rclone.org/docs/#suffix-keep-extension) flag
+(i.e. to instead result in `file.conflict1.jpg`).
+
+`--conflict-suffix` supports several *dynamic date variables* when enclosed in
+curly braces as globs. This can be helpful to track the date and/or time that
+each conflict was handled by bisync. For example:
+
+```
+--conflict-suffix {DateOnly}-conflict
+// result: myfile.txt.2006-01-02-conflict1
+```
+
+All of the formats described [here](https://pkg.go.dev/time#pkg-constants) and
+[here](https://pkg.go.dev/time#example-Time.Format) are supported, but take
+care to ensure that your chosen format does not use any characters that are
+illegal on your remotes (for example, macOS does not allow colons in
+filenames, and slashes are also best avoided as they are often interpreted as
+directory separators.) To address this particular issue, an additional
+`{MacFriendlyTime}` (or just `{mac}`) option is supported, which results in
+`2006-01-02 0304PM`.
+
+Note that `--conflict-suffix` is entirely separate from rclone's main
+[`--sufix`](https://rclone.org/docs/#suffix-suffix) flag. This is intentional, as users may wish
+to use both flags simultaneously, if also using
+[`--backup-dir`](#backup-dir1-and-backup-dir2).
+
+Finally, note that the default in bisync prior to `v1.66` was to rename
+conflicts with `..path1` and `..path2` (with two periods, and `path` instead of
+`conflict`.) Bisync now defaults to a single dot instead of a double dot, but
+additional dots can be added by including them in the specified suffix string.
+For example, for behavior equivalent to the previous default, use:
+
+```
+[--conflict-resolve none] --conflict-loser pathname --conflict-suffix .path
+```
+
+### --check-sync
 
 Enabled by default, the check-sync function checks that all of the same
 files exist in both the Path1 and Path2 history listings. This _check-sync_
@@ -20869,59 +21789,183 @@ sync run times for very large numbers of files.
 The check may be run manually with `--check-sync=only`. It runs only the
 integrity check and terminates without actually synching.
 
-See also: [Concurrent modifications](#concurrent-modifications)
+Note that currently, `--check-sync` **only checks listing snapshots and NOT the
+actual files on the remotes.** Note also that the listing snapshots will not
+know about any changes that happened during or after the latest bisync run, as
+those will be discovered on the next run. Therefore, while listings should
+always match _each other_ at the end of a bisync run, it is _expected_ that
+they will not match the underlying remotes, nor will the remotes match each
+other, if there were changes during or after the run. This is normal, and any
+differences will be detected and synced on the next run.
 
+For a robust integrity check of the current state of the remotes (as opposed to just their listing snapshots), consider using [`check`](commands/rclone_check/)
+(or [`cryptcheck`](https://rclone.org/commands/rclone_cryptcheck/), if at least one path is a `crypt` remote) instead of `--check-sync`, 
+keeping in mind that differences are expected if files changed during or after your last bisync run.
 
-#### --ignore-listing-checksum
+For example, a possible sequence could look like this:
 
-By default, bisync will retrieve (or generate) checksums (for backends that support them) 
-when creating the listings for both paths, and store the checksums in the listing files. 
-`--ignore-listing-checksum` will disable this behavior, which may speed things up considerably, 
-especially on backends (such as [local](https://rclone.org/local/)) where hashes must be computed on the fly instead of retrieved. 
-Please note the following:
+1. Normally scheduled bisync run:
 
-* While checksums are (by default) generated and stored in the listing files, 
-they are NOT currently used for determining diffs (deltas). 
-It is anticipated that full checksum support will be added in a future version.
-* `--ignore-listing-checksum` is NOT the same as [`--ignore-checksum`](https://rclone.org/docs/#ignore-checksum), 
-and you may wish to use one or the other, or both. In a nutshell: 
-`--ignore-listing-checksum` controls whether checksums are considered when scanning for diffs, 
-while `--ignore-checksum` controls whether checksums are considered during the copy/sync operations that follow, 
-if there ARE diffs.
-* Unless `--ignore-listing-checksum` is passed, bisync currently computes hashes for one path 
-*even when there's no common hash with the other path* 
-(for example, a [crypt](https://rclone.org/crypt/#modification-times-and-hashes) remote.)
-* If both paths support checksums and have a common hash, 
-AND `--ignore-listing-checksum` was not specified when creating the listings, 
-`--check-sync=only` can be used to compare Path1 vs. Path2 checksums (as of the time the previous listings were created.) 
-However, `--check-sync=only` will NOT include checksums if the previous listings 
-were generated on a run using `--ignore-listing-checksum`. For a more robust integrity check of the current state, 
-consider using [`check`](commands/rclone_check/) 
-(or [`cryptcheck`](https://rclone.org/commands/rclone_cryptcheck/), if at least one path is a `crypt` remote.)
+```
+rclone bisync Path1 Path2 -MPc --check-access --max-delete 10 --filters-file /path/to/filters.txt -v --no-cleanup --ignore-listing-checksum --disable ListR --checkers=16 --drive-pacer-min-sleep=10ms --create-empty-src-dirs --resilient
+```
 
-#### --resilient
+2. Periodic independent integrity check (perhaps scheduled nightly or weekly):
+
+```
+rclone check -MvPc Path1 Path2 --filter-from /path/to/filters.txt
+```
+
+3. If diffs are found, you have some choices to correct them.
+If one side is more up-to-date and you want to make the other side match it, you could run:
+
+```
+rclone sync Path1 Path2 --filter-from /path/to/filters.txt --create-empty-src-dirs -MPc -v
+```
+(or switch Path1 and Path2 to make Path2 the source-of-truth)
+
+Or, if neither side is totally up-to-date, you could run a `--resync` to bring them back into agreement
+(but remember that this could cause deleted files to re-appear.)
+
+*Note also that `rclone check` does not currently include empty directories,
+so if you want to know if any empty directories are out of sync,
+consider alternatively running the above `rclone sync` command with `--dry-run` added.
+
+See also: [Concurrent modifications](#concurrent-modifications), [`--resilient`](#resilient)
+
+### --resilient
 
 ***Caution: this is an experimental feature. Use at your own risk!***
 
-By default, most errors or interruptions will cause bisync to abort and 
-require [`--resync`](#resync) to recover. This is a safety feature, 
-to prevent bisync from running again until a user checks things out. 
-However, in some cases, bisync can go too far and enforce a lockout when one isn't actually necessary, 
-like for certain less-serious errors that might resolve themselves on the next run. 
-When `--resilient` is specified, bisync tries its best to recover and self-correct, 
-and only requires `--resync` as a last resort when a human's involvement is absolutely necessary. 
-The intended use case is for running bisync as a background process (such as via scheduled [cron](#cron)).
+By default, most errors or interruptions will cause bisync to abort and
+require [`--resync`](#resync) to recover. This is a safety feature,  to prevent
+bisync from running again until a user checks things out.  However, in some
+cases, bisync can go too far and enforce a lockout when one isn't actually
+necessary,  like for certain less-serious errors that might resolve themselves
+on the next run.  When `--resilient` is specified, bisync tries its best to
+recover and self-correct,  and only requires `--resync` as a last resort when a
+human's involvement is absolutely necessary.  The intended use case is for
+running bisync as a background process (such as via scheduled [cron](#cron)).
 
-When using `--resilient` mode, bisync will still report the error and abort, 
-however it will not lock out future runs -- allowing the possibility of retrying at the next normally scheduled time, 
-without requiring a `--resync` first. Examples of such retryable errors include 
-access test failures, missing listing files, and filter change detections. 
-These safety features will still prevent the *current* run from proceeding -- 
-the difference is that if conditions have improved by the time of the *next* run, 
-that next run will be allowed to proceed. 
-Certain more serious errors will still enforce a `--resync` lockout, even in `--resilient` mode, to prevent data loss.
+When using `--resilient` mode, bisync will still report the error and abort,
+however it will not lock out future runs -- allowing the possibility of
+retrying at the next normally scheduled time,  without requiring a `--resync`
+first. Examples of such retryable errors include  access test failures, missing
+listing files, and filter change detections.  These safety features will still
+prevent the *current* run from proceeding --  the difference is that if
+conditions have improved by the time of the *next* run,  that next run will be
+allowed to proceed.  Certain more serious errors will still enforce a
+`--resync` lockout, even in `--resilient` mode, to prevent data loss.
 
-Behavior of `--resilient` may change in a future version.
+Behavior of `--resilient` may change in a future version. (See also:
+[`--recover`](#recover), [`--max-lock`](#max-lock), [Graceful
+Shutdown](#graceful-shutdown))
+
+### --recover
+
+If `--recover` is set, in the event of a sudden interruption or other
+un-graceful shutdown, bisync will attempt to automatically recover on the next
+run, instead of requiring `--resync`. Bisync is able to recover robustly by
+keeping one "backup" listing at all times, representing the state of both paths
+after the last known successful sync. Bisync can then compare the current state
+with this snapshot to determine which changes it needs to retry. Changes that
+were synced after this snapshot (during the run that was later interrupted)
+will appear to bisync as if they are "new or changed on both sides", but in
+most cases this is not a problem, as bisync will simply do its usual "equality
+check" and learn that no action needs to be taken on these files, since they
+are already identical on both sides.
+
+In the rare event that a file is synced successfully during a run that later
+aborts, and then that same file changes AGAIN before the next run, bisync will
+think it is a sync conflict, and handle it accordingly. (From bisync's
+perspective, the file has changed on both sides since the last trusted sync,
+and the files on either side are not currently identical.) Therefore,
+`--recover` carries with it a slightly increased chance of having conflicts --
+though in practice this is pretty rare, as the conditions required to cause it
+are quite specific. This risk can be reduced by using bisync's ["Graceful
+Shutdown"](#graceful-shutdown) mode (triggered by sending `SIGINT` or
+`Ctrl+C`), when you have the choice, instead of forcing a sudden termination.
+
+`--recover` and `--resilient` are similar, but distinct -- the main difference
+is that `--resilient` is about _retrying_, while `--recover` is about
+_recovering_. Most users will probably want both. `--resilient` allows retrying
+when bisync has chosen to abort itself due to safety features such as failing
+`--check-access` or detecting a filter change. `--resilient` does not cover
+external interruptions such as a user shutting down their computer in the
+middle of a sync -- that is what `--recover` is for.
+
+### --max-lock
+
+Bisync uses [lock files](#lock-file) as a safety feature to prevent
+interference from other bisync runs while it is running. Bisync normally
+removes these lock files at the end of a run, but if bisync is abruptly
+interrupted, these files will be left behind. By default, they will lock out
+all future runs, until the user has a chance to manually check things out and
+remove the lock. As an alternative, `--max-lock` can be used to make them
+automatically expire after a certain period of time, so that future runs are
+not locked out forever, and auto-recovery is possible. `--max-lock` can be any
+duration `2m` or greater (or `0` to disable). If set, lock files older than
+this will be considered "expired", and future runs will be allowed to disregard
+them and proceed. (Note that the `--max-lock` duration must be set by the
+process that left the lock file -- not the later one interpreting it.)
+
+If set, bisync will also "renew" these lock files every `--max-lock minus one
+minute` throughout a run, for extra safety. (For example, with `--max-lock 5m`,
+bisync would renew the lock file (for another 5 minutes) every 4 minutes until
+the run has completed.) In other words, it should not be possible for a lock
+file to pass its expiration time while the process that created it is still
+running -- and you can therefore be reasonably sure that any _expired_ lock
+file you may find was left there by an interrupted run, not one that is still
+running and just taking awhile.
+
+If `--max-lock` is `0` or not set, the default is that lock files will never
+expire, and will block future runs (of these same two bisync paths)
+indefinitely.
+
+For maximum resilience from disruptions, consider setting a relatively short
+duration like `--max-lock 2m` along with [`--resilient`](#resilient) and
+[`--recover`](#recover), and a relatively frequent [cron schedule](#cron). The
+result will be a very robust "set-it-and-forget-it" bisync run that can
+automatically bounce back from almost any interruption it might encounter,
+without requiring the user to get involved and run a `--resync`. (See also:
+[Graceful Shutdown](#graceful-shutdown) mode)
+
+
+### --backup-dir1 and --backup-dir2
+
+As of `v1.66`, [`--backup-dir`](https://rclone.org/docs/#backup-dir-dir) is supported in bisync.
+Because `--backup-dir` must be a non-overlapping path on the same remote,
+Bisync has introduced new `--backup-dir1` and `--backup-dir2` flags to support
+separate backup-dirs for `Path1` and `Path2` (bisyncing between different
+remotes with `--backup-dir` would not otherwise be possible.) `--backup-dir1`
+and `--backup-dir2` can use different remotes from each other, but
+`--backup-dir1` must use the same remote as `Path1`, and `--backup-dir2` must
+use the same remote as `Path2`. Each backup directory must not overlap its
+respective bisync Path without being excluded by a filter rule.
+
+The standard `--backup-dir` will also work, if both paths use the same remote
+(but note that deleted files from both paths would be mixed together in the
+same dir). If either `--backup-dir1` and `--backup-dir2` are set, they will
+override `--backup-dir`.
+
+Example:
+```
+rclone bisync /Users/someuser/some/local/path/Bisync gdrive:Bisync --backup-dir1 /Users/someuser/some/local/path/BackupDir --backup-dir2 gdrive:BackupDir --suffix -2023-08-26 --suffix-keep-extension --check-access --max-delete 10 --filters-file /Users/someuser/some/local/path/bisync_filters.txt --no-cleanup --ignore-listing-checksum --checkers=16 --drive-pacer-min-sleep=10ms --create-empty-src-dirs --resilient -MvP --drive-skip-gdocs --fix-case
+```
+
+In this example, if the user deletes a file in
+`/Users/someuser/some/local/path/Bisync`, bisync will propagate the delete to
+the other side by moving the corresponding file from `gdrive:Bisync` to
+`gdrive:BackupDir`. If the user deletes a file from `gdrive:Bisync`, bisync
+moves it from `/Users/someuser/some/local/path/Bisync` to
+`/Users/someuser/some/local/path/BackupDir`.
+
+In the event of a [rename due to a sync conflict](#conflict-loser), the
+rename is not considered a delete, unless a previous conflict with the same
+name already exists and would get overwritten.
+
+See also: [`--suffix`](https://rclone.org/docs/#suffix-suffix),
+[`--suffix-keep-extension`](https://rclone.org/docs/#suffix-keep-extension)
 
 ## Operation
 
@@ -20940,7 +21984,8 @@ On each successive run it will:
 - Lock file prevents multiple simultaneous runs when taking a while.
   This can be particularly useful if bisync is run by cron scheduler.
 - Handle change conflicts non-destructively by creating
-  `..path1` and `..path2` file versions.
+  `.conflict1`, `.conflict2`, etc. file versions, according to
+  [`--conflict-resolve`](#conflict-resolve), [`--conflict-loser`](#conflict-loser), and [`--conflict-suffix`](#conflict-suffix) settings.
 - File system access health check using `RCLONE_TEST` files
   (see the `--check-access` flag).
 - Abort on excessive deletes - protects against a failed listing
@@ -20967,8 +22012,8 @@ Path1 deleted | File no longer exists on Path1                | File is deleted 
  Type                           | Description                           | Result                             | Implementation
 --------------------------------|---------------------------------------|------------------------------------|-----------------------
 Path1 new/changed AND Path2 new/changed AND Path1 == Path2       | File is new/changed on Path1 AND new/changed on Path2 AND Path1 version is currently identical to Path2 | No change | None
-Path1 new AND Path2 new         | File is new on Path1 AND new on Path2 (and Path1 version is NOT identical to Path2) | Files renamed to _Path1 and _Path2 | `rclone copy` _Path2 file to Path1, `rclone copy` _Path1 file to Path2
-Path2 newer AND Path1 changed   | File is newer on Path2 AND also changed (newer/older/size) on Path1 (and Path1 version is NOT identical to Path2) | Files renamed to _Path1 and _Path2 | `rclone copy` _Path2 file to Path1, `rclone copy` _Path1 file to Path2
+Path1 new AND Path2 new         | File is new on Path1 AND new on Path2 (and Path1 version is NOT identical to Path2) | Conflicts handled according to [`--conflict-resolve`](#conflict-resolve) & [`--conflict-loser`](#conflict-loser) settings | default: `rclone copy` renamed `Path2.conflict2` file to Path1, `rclone copy` renamed `Path1.conflict1` file to Path2
+Path2 newer AND Path1 changed   | File is newer on Path2 AND also changed (newer/older/size) on Path1 (and Path1 version is NOT identical to Path2) | Conflicts handled according to [`--conflict-resolve`](#conflict-resolve) & [`--conflict-loser`](#conflict-loser) settings | default: `rclone copy` renamed `Path2.conflict2` file to Path1, `rclone copy` renamed `Path1.conflict1` file to Path2
 Path2 newer AND Path1 deleted   | File is newer on Path2 AND also deleted on Path1 | Path2 version survives  | `rclone copy` Path2 to Path1
 Path2 deleted AND Path1 changed | File is deleted on Path2 AND changed (newer/older/size) on Path1 | Path1 version survives |`rclone copy` Path1 to Path2
 Path1 deleted AND Path2 changed | File is deleted on Path1 AND changed (newer/older/size) on Path2 | Path2 version survives  | `rclone copy` Path2 to Path1
@@ -20979,7 +22024,7 @@ Now, when bisync comes to a file that it wants to rename (because it is new/chan
 it first checks whether the Path1 and Path2 versions are currently *identical* 
 (using the same underlying function as [`check`](commands/rclone_check/).) 
 If bisync concludes that the files are identical, it will skip them and move on. 
-Otherwise, it will create renamed `..Path1` and `..Path2` duplicates, as before. 
+Otherwise, it will create renamed duplicates, as before.
 This behavior also [improves the experience of renaming directories](https://forum.rclone.org/t/bisync-bugs-and-feature-requests/37636#:~:text=Renamed%20directories), 
 as a `--resync` is no longer required, so long as the same change has been made on both sides.
 
@@ -20996,19 +22041,12 @@ before you commit to the changes.
 
 ### Modification times
 
-Bisync relies on file timestamps to identify changed files and will
-_refuse_ to operate if backend lacks the modification time support.
-
+By default, bisync compares files by modification time and size.
 If you or your application should change the content of a file
-without changing the modification time then bisync will _not_
+without changing the modification time and size, then bisync will _not_
 notice the change, and thus will not copy it to the other side.
-
-Note that on some cloud storage systems it is not possible to have file
-timestamps that match _precisely_ between the local and other filesystems.
-
-Bisync's approach to this problem is by tracking the changes on each side
-_separately_ over time with a local database of files in that side then
-applying the resulting changes on the other side.
+As an alternative, consider comparing by checksum (if your remotes support it).
+See [`--compare`](#compare) for details.
 
 ### Error handling {#error-handling}
 
@@ -21032,7 +22070,8 @@ typically at `${HOME}/.cache/rclone/bisync/` on Linux.
 Some errors are considered temporary and re-running the bisync is not blocked.
 The _critical return_ blocks further bisync runs.
 
-See also: [`--resilient`](#resilient)
+See also: [`--resilient`](#resilient), [`--recover`](#recover),
+[`--max-lock`](#max-lock), [Graceful Shutdown](#graceful-shutdown)
 
 ### Lock file
 
@@ -21044,6 +22083,8 @@ Delete the lock file as part of debugging the situation.
 The lock file effectively blocks follow-on (e.g., scheduled by _cron_) runs
 when the prior invocation is taking a long time.
 The lock file contains _PID_ of the blocking process, which may help in debug.
+Lock files can be set to automatically expire after a certain amount of time,
+using the [`--max-lock`](#max-lock) flag.
 
 **Note**
 that while concurrent bisync runs are allowed, _be very cautious_
@@ -21057,6 +22098,32 @@ lest there be replicated files, deleted files and general mayhem.
 - `1` for a non-critical failing run (a rerun may be successful),
 - `2` for a critically aborted run (requires a `--resync` to recover).
 
+### Graceful Shutdown
+
+Bisync has a "Graceful Shutdown" mode which is activated by sending `SIGINT` or
+pressing `Ctrl+C` during a run. Once triggered, bisync will use best efforts to
+exit cleanly before the timer runs out. If bisync is in the middle of
+transferring files, it will attempt to cleanly empty its queue by finishing
+what it has started but not taking more. If it cannot do so within 30 seconds,
+it will cancel the in-progress transfers at that point and then give itself a
+maximum of 60 seconds to wrap up, save its state for next time, and exit. With
+the `-vP` flags you will see constant status updates and a final confirmation
+of whether or not the graceful shutdown was successful.
+
+At any point during the "Graceful Shutdown" sequence, a second `SIGINT` or
+`Ctrl+C` will trigger an immediate, un-graceful exit, which will leave things
+in a messier state. Usually a robust recovery will still be possible if using
+[`--recover`](#recover) mode, otherwise you will need to do a `--resync`.
+
+If you plan to use Graceful Shutdown mode, it is recommended to use
+[`--resilient`](#resilient) and [`--recover`](#recover), and it is important to
+NOT use [`--inplace`](https://rclone.org/docs/#inplace), otherwise you risk leaving
+partially-written files on one side, which may be confused for real files on
+the next run. Note also that in the event of an abrupt interruption, a [lock
+file](#lock-file) will be left behind to block concurrent runs. You will need
+to delete it before you can proceed with the next run (or wait for it to
+expire on its own, if using `--max-lock`.)
+
 ## Limitations
 
 ### Supported backends
@@ -21069,62 +22136,39 @@ Bisync is considered _BETA_ and has been tested with the following backends:
 - S3
 - SFTP
 - Yandex Disk
+- Crypt
 
 It has not been fully tested with other services yet.
 If it works, or sorta works, please let us know and we'll update the list.
 Run the test suite to check for proper operation as described below.
 
-First release of `rclone bisync` requires that underlying backend supports
-the modification time feature and will refuse to run otherwise.
-This limitation will be lifted in a future `rclone bisync` release.
+The first release of `rclone bisync` required both underlying backends to support
+modification times, and refused to run otherwise.
+This limitation has been lifted as of `v1.66`, as bisync now supports comparing 
+checksum and/or size instead of (or in addition to) modtime.
+See [`--compare`](#compare) for details.
 
 ### Concurrent modifications
 
-When using **Local, FTP or SFTP** remotes rclone does not create _temporary_
+When using **Local, FTP or SFTP** remotes with [`--inplace`](https://rclone.org/docs/#inplace), rclone does not create _temporary_
 files at the destination when copying, and thus if the connection is lost
 the created file may be corrupt, which will likely propagate back to the
 original path on the next sync, resulting in data loss.
-This will be solved in a future release, there is no workaround at the moment.
+It is therefore recommended to _omit_ `--inplace`.
 
 Files that **change during** a bisync run may result in data loss.
-This has been seen in a highly dynamic environment, where the filesystem
-is getting hammered by running processes during the sync.
-The currently recommended solution is to sync at quiet times or [filter out](#filtering)
-unnecessary directories and files.
-
-As an [alternative approach](https://forum.rclone.org/t/bisync-bugs-and-feature-requests/37636#:~:text=scans%2C%20to%20avoid-,errors%20if%20files%20changed%20during%20sync,-Given%20the%20number), 
-consider using `--check-sync=false` (and possibly `--resilient`) to make bisync more forgiving
-of filesystems that change during the sync. 
-Be advised that this may cause bisync to miss events that occur during a bisync run, 
-so it is a good idea to supplement this with a periodic independent integrity check, 
-and corrective sync if diffs are found. For example, a possible sequence could look like this:
-
-1. Normally scheduled bisync run:
-
-```
-rclone bisync Path1 Path2 -MPc --check-access --max-delete 10 --filters-file /path/to/filters.txt -v --check-sync=false --no-cleanup --ignore-listing-checksum --disable ListR --checkers=16 --drive-pacer-min-sleep=10ms --create-empty-src-dirs --resilient
-```
-
-2. Periodic independent integrity check (perhaps scheduled nightly or weekly):
-
-```
-rclone check -MvPc Path1 Path2 --filter-from /path/to/filters.txt
-```
-
-3. If diffs are found, you have some choices to correct them. 
-If one side is more up-to-date and you want to make the other side match it, you could run:
-
-```
-rclone sync Path1 Path2 --filter-from /path/to/filters.txt --create-empty-src-dirs -MPc -v  
-```
-(or switch Path1 and Path2 to make Path2 the source-of-truth)
-
-Or, if neither side is totally up-to-date, you could run a `--resync` to bring them back into agreement 
-(but remember that this could cause deleted files to re-appear.)
-
-*Note also that `rclone check` does not currently include empty directories, 
-so if you want to know if any empty directories are out of sync, 
-consider alternatively running the above `rclone sync` command with `--dry-run` added.
+Prior to `rclone v1.66`, this was commonly seen in highly dynamic environments, where the filesystem
+was getting hammered by running processes during the sync.
+As of `rclone v1.66`, bisync was redesigned to use a "snapshot" model,
+greatly reducing the risks from changes during a sync.
+Changes that are not detected during the current sync will now be detected during the following sync,
+and will no longer cause the entire run to throw a critical error.
+There is additionally a mechanism to mark files as needing to be internally rechecked next time, for added safety.
+It should therefore no longer be necessary to sync only at quiet times --
+however, note that an error can still occur if a file happens to change at the exact moment it's
+being read/written by bisync (same as would happen in `rclone sync`.)
+(See also: [`--ignore-checksum`](https://rclone.org/docs/#ignore-checksum),
+[`--local-no-check-updated`](https://rclone.org/local/#local-no-check-updated))
 
 ### Empty directories
 
@@ -21144,11 +22188,17 @@ and use `--resync` when you need to switch.
 
 ### Renamed directories
 
-Renaming a folder on the Path1 side results in deleting all files on
+By default, renaming a folder on the Path1 side results in deleting all files on
 the Path2 side and then copying all files again from Path1 to Path2.
 Bisync sees this as all files in the old directory name as deleted and all
 files in the new directory name as new. 
-Currently, the most effective and efficient method of renaming a directory
+
+A recommended solution is to use [`--track-renames`](https://rclone.org/docs/#track-renames),
+which is now supported in bisync as of `rclone v1.66`.
+Note that `--track-renames` is not available during `--resync`,
+as `--resync` does not delete anything (`--track-renames` only supports `sync`, not `copy`.)
+
+Otherwise, the most effective and efficient method of renaming a directory
 is to rename it to the same name on both sides. (As of `rclone v1.64`, 
 a `--resync` is no longer required after doing so, as bisync will automatically
 detect that Path1 and Path2 are in agreement.)
@@ -21162,25 +22212,20 @@ and there is also a [known issue concerning Google Drive users with many empty d
 For now, the recommended way to avoid using `--fast-list` is to add `--disable ListR` 
 to all bisync commands. The default behavior may change in a future version.
 
-### Overridden Configs
+### Case (and unicode) sensitivity {#case-sensitivity}
 
-When rclone detects an overridden config, it adds a suffix like `{ABCDE}` on the fly 
-to the internal name of the remote. Bisync follows suit by including this suffix in its listing filenames. 
-However, this suffix does not necessarily persist from run to run, especially if different flags are provided. 
-So if next time the suffix assigned is `{FGHIJ}`, bisync will get confused, 
-because it's looking for a listing file with `{FGHIJ}`, when the file it wants has `{ABCDE}`. 
-As a result, it throws 
-`Bisync critical error: cannot find prior Path1 or Path2 listings, likely due to critical error on prior run` 
-and refuses to run again until the user runs a `--resync` (unless using `--resilient`). 
-The best workaround at the moment is to set any backend-specific flags in the [config file](https://rclone.org/commands/rclone_config/) 
-instead of specifying them with command flags. (You can still override them as needed for other rclone commands.)
+As of `v1.66`, case and unicode form differences no longer cause critical errors,
+and normalization (when comparing between filesystems) is handled according to the same flags and defaults as `rclone sync`.
+See the following options (all of which are supported by bisync) to control this behavior more granularly:
+- [`--fix-case`](https://rclone.org/docs/#fix-case)
+- [`--ignore-case-sync`](https://rclone.org/docs/#ignore-case-sync)
+- [`--no-unicode-normalization`](https://rclone.org/docs/#no-unicode-normalization)
+- [`--local-unicode-normalization`](https://rclone.org/local/#local-unicode-normalization) and
+[`--local-case-sensitive`](https://rclone.org/local/#local-case-sensitive) (caution: these are normally not what you want.)
 
-### Case sensitivity
-
-Synching with **case-insensitive** filesystems, such as Windows or `Box`,
-can result in file name conflicts. This will be fixed in a future release.
-The near-term workaround is to make sure that files on both sides
-don't have spelling case differences (`Smile.jpg` vs. `smile.jpg`).
+Note that in the (probably rare) event that `--fix-case` is used AND a file is new/changed on both sides 
+AND the checksums match AND the filename case does not match, the Path1 filename is considered the winner, 
+for the purposes of `--fix-case` (Path2 will be renamed to match it).
 
 ## Windows support {#windows}
 
@@ -21461,23 +22506,58 @@ files are generating complaints. If the error is
 consider using the flag
 [--drive-acknowledge-abuse](https://rclone.org/drive/#drive-acknowledge-abuse).
 
-### Google Doc files
+### Google Docs (and other files of unknown size) {#gdocs}
 
-Google docs exist as virtual files on Google Drive and cannot be transferred
-to other filesystems natively. While it is possible to export a Google doc to
-a normal file (with `.xlsx` extension, for example), it is not possible
-to import a normal file back into a Google document.
+As of `v1.66`, [Google Docs](https://rclone.org/drive/#import-export-of-google-documents)
+(including Google Sheets, Slides, etc.) are now supported in bisync, subject to
+the same options, defaults, and limitations as in `rclone sync`. When bisyncing
+drive with non-drive backends, the drive -> non-drive direction is controlled
+by [`--drive-export-formats`](https://rclone.org/drive/#drive-export-formats) (default
+`"docx,xlsx,pptx,svg"`) and the non-drive -> drive direction is controlled by
+[`--drive-import-formats`](https://rclone.org/drive/#drive-import-formats) (default none.) 
 
-Bisync's handling of Google Doc files is to flag them in the run log output
-for user's attention and ignore them for any file transfers, deletes, or syncs.
-They will show up with a length of `-1` in the listings.
-This bisync run is otherwise successful:
+For example, with the default export/import formats, a Google Sheet on the
+drive side will be synced to an `.xlsx` file on the non-drive side. In the
+reverse direction, `.xlsx` files with filenames that match an existing Google
+Sheet will be synced to that Google Sheet, while `.xlsx` files that do NOT
+match an existing Google Sheet will be copied to drive as normal `.xlsx` files
+(without conversion to Sheets, although the Google Drive web browser UI may
+still give you the option to open it as one.)
 
-```
-2021/05/11 08:23:15 INFO  : Synching Path1 "/path/to/local/tree/base/" with Path2 "GDrive:"
-2021/05/11 08:23:15 INFO  : ...path2.lst-new: Ignoring incorrect line: "- -1 - - 2018-07-29T08:49:30.136000000+0000 GoogleDoc.docx"
-2021/05/11 08:23:15 INFO  : Bisync successful
-```
+If `--drive-import-formats` is set (it's not, by default), then all of the
+specified formats will be converted to Google Docs, if there is no existing
+Google Doc with a matching name. Caution: such conversion can be quite lossy,
+and in most cases it's probably not what you want!
+
+To bisync Google Docs as URL shortcut links (in a manner similar to "Drive for
+Desktop"), use: `--drive-export-formats url` (or
+[alternatives](https://rclone.org/drive/#exportformats:~:text=available%20Google%20Documents.-,Extension,macOS,-Standard%20options).)
+
+Note that these link files cannot be edited on the non-drive side -- you will
+get errors if you try to sync an edited link file back to drive. They CAN be
+deleted (it will result in deleting the corresponding Google Doc.) If you
+create a `.url` file on the non-drive side that does not match an existing
+Google Doc, bisyncing it will just result in copying the literal `.url` file
+over to drive (no Google Doc will be created.) So, as a general rule of thumb,
+think of them as read-only placeholders on the non-drive side, and make all
+your changes on the drive side.
+
+Likewise, even with other export-formats, it is best to only move/rename Google
+Docs on the drive side. This is because otherwise, bisync will interpret this
+as a file deleted and another created, and accordingly, it will delete the
+Google Doc and create a new file at the new path. (Whether or not that new file
+is a Google Doc depends on `--drive-import-formats`.)
+
+Lastly, take note that all Google Docs on the drive side have a size of `-1`
+and no checksum. Therefore, they cannot be reliably synced with the
+`--checksum` or `--size-only` flags. (To be exact: they will still get
+created/deleted, and bisync's delta engine will notice changes and queue them
+for syncing, but the underlying sync function will consider them identical and
+skip them.) To work around this, use the default (modtime and size) instead of
+`--checksum` or `--size-only`.
+
+To ignore Google Docs entirely, use
+[`--drive-skip-gdocs`](https://rclone.org/drive/#drive-skip-gdocs).
 
 ## Usage examples
 
@@ -21855,6 +22935,30 @@ about _Unison_ and synchronization in general.
 
 ## Changelog
 
+### `v1.66`
+* Copies and deletes are now handled in one operation instead of two
+* `--track-renames` and `--backup-dir` are now supported
+* Partial uploads known issue on `local`/`ftp`/`sftp` has been resolved (unless using `--inplace`)
+* Final listings are now generated from sync results, to avoid needing to re-list
+* Bisync is now much more resilient to changes that happen during a bisync run, and far less prone to critical errors / undetected changes
+* Bisync is now capable of rolling a file listing back in cases of uncertainty, essentially marking the file as needing to be rechecked next time.
+* A few basic terminal colors are now supported, controllable with [`--color`](https://rclone.org/docs/#color-when) (`AUTO`|`NEVER`|`ALWAYS`)
+* Initial listing snapshots of Path1 and Path2 are now generated concurrently, using the same "march" infrastructure as `check` and `sync`,
+for performance improvements and less [risk of error](https://forum.rclone.org/t/bisync-bugs-and-feature-requests/37636#:~:text=4.%20Listings%20should%20alternate%20between%20paths%20to%20minimize%20errors).
+* Fixed handling of unicode normalization and case insensitivity, support for [`--fix-case`](https://rclone.org/docs/#fix-case), [`--ignore-case-sync`](/docs/#ignore-case-sync), [`--no-unicode-normalization`](/docs/#no-unicode-normalization)
+* `--resync` is now much more efficient (especially for users of `--create-empty-src-dirs`)
+* Google Docs (and other files of unknown size) are now supported (with the same options as in `sync`)
+* Equality checks before a sync conflict rename now fall back to `cryptcheck` (when possible) or `--download`,
+instead of of `--size-only`, when `check` is not available.
+* Bisync no longer fails to find the correct listing file when configs are overridden with backend-specific flags.
+* Bisync now fully supports comparing based on any combination of size, modtime, and checksum, lifting the prior restriction on backends without modtime support.
+* Bisync now supports a "Graceful Shutdown" mode to cleanly cancel a run early without requiring `--resync`.
+* New `--recover` flag allows robust recovery in the event of interruptions, without requiring `--resync`.
+* A new `--max-lock` setting allows lock files to automatically renew and expire, for better automatic recovery when a run is interrupted.
+* Bisync now supports auto-resolving sync conflicts and customizing rename behavior with new [`--conflict-resolve`](#conflict-resolve), [`--conflict-loser`](#conflict-loser), and [`--conflict-suffix`](#conflict-suffix) flags.
+* A new [`--resync-mode`](#resync-mode) flag allows more control over which version of a file gets kept during a `--resync`.
+* Bisync now supports [`--retries`](https://rclone.org/docs/#retries-int) and [`--retries-sleep`](/docs/#retries-sleep-time) (when [`--resilient`](#resilient) is set.)
+
 ### `v1.64`
 * Fixed an [issue](https://forum.rclone.org/t/bisync-bugs-and-feature-requests/37636#:~:text=1.%20Dry%20runs%20are%20not%20completely%20dry) 
 causing dry runs to inadvertently commit filter changes
@@ -22217,6 +23321,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,SingleQuote,BackQuote,Dollar,BackSlash,Del,Ctl,LeftSpace,RightSpace,InvalidUtf8,Dot
 
+#### --fichier-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_FICHIER_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -22336,341 +23451,22 @@ Properties:
 - Type:        string
 - Required:    true
 
-
-
-#  Amazon Drive
-
-Amazon Drive, formerly known as Amazon Cloud Drive, is a cloud storage
-service run by Amazon for consumers.
-
-## Status
-
-**Important:** rclone supports Amazon Drive only if you have your own
-set of API keys. Unfortunately the [Amazon Drive developer
-program](https://developer.amazon.com/amazon-drive) is now closed to
-new entries so if you don't already have your own set of keys you will
-not be able to use rclone with Amazon Drive.
-
-For the history on why rclone no longer has a set of Amazon Drive API
-keys see [the forum](https://forum.rclone.org/t/rclone-has-been-banned-from-amazon-drive/2314).
-
-If you happen to know anyone who works at Amazon then please ask them
-to re-instate rclone into the Amazon Drive developer program - thanks!
-
-## Configuration
-
-The initial setup for Amazon Drive involves getting a token from
-Amazon which you need to do in your browser.  `rclone config` walks
-you through it.
-
-The configuration process for Amazon Drive may involve using an [oauth
-proxy](https://github.com/ncw/oauthproxy). This is used to keep the
-Amazon credentials out of the source code.  The proxy runs in Google's
-very secure App Engine environment and doesn't store any credentials
-which pass through it.
-
-Since rclone doesn't currently have its own Amazon Drive credentials
-so you will either need to have your own `client_id` and
-`client_secret` with Amazon Drive, or use a third-party oauth proxy
-in which case you will need to enter `client_id`, `client_secret`,
-`auth_url` and `token_url`.
-
-Note also if you are not using Amazon's `auth_url` and `token_url`,
-(ie you filled in something for those) then if setting up on a remote
-machine you can only use the [copying the config method of
-configuration](https://rclone.org/remote_setup/#configuring-by-copying-the-config-file)
-- `rclone authorize` will not work.
-
-Here is an example of how to make a remote called `remote`.  First run:
-
-     rclone config
-
-This will guide you through an interactive setup process:
-
-```
-No remotes found, make a new one?
-n) New remote
-r) Rename remote
-c) Copy remote
-s) Set configuration password
-q) Quit config
-n/r/c/s/q> n
-name> remote
-Type of storage to configure.
-Choose a number from below, or type in your own value
-[snip]
-XX / Amazon Drive
-   \ "amazon cloud drive"
-[snip]
-Storage> amazon cloud drive
-Amazon Application Client Id - required.
-client_id> your client ID goes here
-Amazon Application Client Secret - required.
-client_secret> your client secret goes here
-Auth server URL - leave blank to use Amazon's.
-auth_url> Optional auth URL
-Token server url - leave blank to use Amazon's.
-token_url> Optional token URL
-Remote config
-Make sure your Redirect URL is set to "http://127.0.0.1:53682/" in your custom config.
-Use web browser to automatically authenticate rclone with remote?
- * Say Y if the machine running rclone has a web browser you can use
- * Say N if running rclone on a (remote) machine without web browser access
-If not sure try Y. If Y failed, try N.
-y) Yes
-n) No
-y/n> y
-If your browser doesn't open automatically go to the following link: http://127.0.0.1:53682/auth
-Log in and authorize rclone for access
-Waiting for code...
-Got code
---------------------
-[remote]
-client_id = your client ID goes here
-client_secret = your client secret goes here
-auth_url = Optional auth URL
-token_url = Optional token URL
-token = {"access_token":"xxxxxxxxxxxxxxxxxxxxxxx","token_type":"bearer","refresh_token":"xxxxxxxxxxxxxxxxxx","expiry":"2015-09-06T16:07:39.658438471+01:00"}
---------------------
-y) Yes this is OK
-e) Edit this remote
-d) Delete this remote
-y/e/d> y
-```
-
-See the [remote setup docs](https://rclone.org/remote_setup/) for how to set it up on a
-machine with no Internet browser available.
-
-Note that rclone runs a webserver on your local machine to collect the
-token as returned from Amazon. This only runs from the moment it
-opens your browser to the moment you get back the verification
-code.  This is on `http://127.0.0.1:53682/` and this it may require
-you to unblock it temporarily if you are running a host firewall.
-
-Once configured you can then use `rclone` like this,
-
-List directories in top level of your Amazon Drive
-
-    rclone lsd remote:
-
-List all the files in your Amazon Drive
-
-    rclone ls remote:
-
-To copy a local directory to an Amazon Drive directory called backup
-
-    rclone copy /home/source remote:backup
-
-### Modification times and hashes
-
-Amazon Drive doesn't allow modification times to be changed via
-the API so these won't be accurate or used for syncing.
-
-It does support the MD5 hash algorithm, so for a more accurate sync,
-you can use the `--checksum` flag.
-
-### Restricted filename characters
-
-| Character | Value | Replacement |
-| --------- |:-----:|:-----------:|
-| NUL       | 0x00  | ␀           |
-| /         | 0x2F  | ／          |
-
-Invalid UTF-8 bytes will also be [replaced](https://rclone.org/overview/#invalid-utf8),
-as they can't be used in JSON strings.
-
-### Deleting files
-
-Any files you delete with rclone will end up in the trash.  Amazon
-don't provide an API to permanently delete files, nor to empty the
-trash, so you will have to do that with one of Amazon's apps or via
-the Amazon Drive website. As of November 17, 2016, files are
-automatically deleted by Amazon from the trash after 30 days.
-
-### Using with non `.com` Amazon accounts
-
-Let's say you usually use `amazon.co.uk`. When you authenticate with
-rclone it will take you to an `amazon.com` page to log in.  Your
-`amazon.co.uk` email and password should work here just fine.
-
-
-### Standard options
-
-Here are the Standard options specific to amazon cloud drive (Amazon Drive).
-
-#### --acd-client-id
-
-OAuth Client Id.
-
-Leave blank normally.
-
-Properties:
-
-- Config:      client_id
-- Env Var:     RCLONE_ACD_CLIENT_ID
-- Type:        string
-- Required:    false
-
-#### --acd-client-secret
-
-OAuth Client Secret.
-
-Leave blank normally.
-
-Properties:
-
-- Config:      client_secret
-- Env Var:     RCLONE_ACD_CLIENT_SECRET
-- Type:        string
-- Required:    false
-
 ### Advanced options
 
-Here are the Advanced options specific to amazon cloud drive (Amazon Drive).
+Here are the Advanced options specific to alias (Alias for an existing remote).
 
-#### --acd-token
+#### --alias-description
 
-OAuth Access Token as a JSON blob.
+Description of the remote
 
 Properties:
 
-- Config:      token
-- Env Var:     RCLONE_ACD_TOKEN
+- Config:      description
+- Env Var:     RCLONE_ALIAS_DESCRIPTION
 - Type:        string
 - Required:    false
 
-#### --acd-auth-url
 
-Auth server URL.
-
-Leave blank to use the provider defaults.
-
-Properties:
-
-- Config:      auth_url
-- Env Var:     RCLONE_ACD_AUTH_URL
-- Type:        string
-- Required:    false
-
-#### --acd-token-url
-
-Token server url.
-
-Leave blank to use the provider defaults.
-
-Properties:
-
-- Config:      token_url
-- Env Var:     RCLONE_ACD_TOKEN_URL
-- Type:        string
-- Required:    false
-
-#### --acd-checkpoint
-
-Checkpoint for internal polling (debug).
-
-Properties:
-
-- Config:      checkpoint
-- Env Var:     RCLONE_ACD_CHECKPOINT
-- Type:        string
-- Required:    false
-
-#### --acd-upload-wait-per-gb
-
-Additional time per GiB to wait after a failed complete upload to see if it appears.
-
-Sometimes Amazon Drive gives an error when a file has been fully
-uploaded but the file appears anyway after a little while.  This
-happens sometimes for files over 1 GiB in size and nearly every time for
-files bigger than 10 GiB. This parameter controls the time rclone waits
-for the file to appear.
-
-The default value for this parameter is 3 minutes per GiB, so by
-default it will wait 3 minutes for every GiB uploaded to see if the
-file appears.
-
-You can disable this feature by setting it to 0. This may cause
-conflict errors as rclone retries the failed upload but the file will
-most likely appear correctly eventually.
-
-These values were determined empirically by observing lots of uploads
-of big files for a range of file sizes.
-
-Upload with the "-v" flag to see more info about what rclone is doing
-in this situation.
-
-Properties:
-
-- Config:      upload_wait_per_gb
-- Env Var:     RCLONE_ACD_UPLOAD_WAIT_PER_GB
-- Type:        Duration
-- Default:     3m0s
-
-#### --acd-templink-threshold
-
-Files >= this size will be downloaded via their tempLink.
-
-Files this size or more will be downloaded via their "tempLink". This
-is to work around a problem with Amazon Drive which blocks downloads
-of files bigger than about 10 GiB. The default for this is 9 GiB which
-shouldn't need to be changed.
-
-To download files above this threshold, rclone requests a "tempLink"
-which downloads the file through a temporary URL directly from the
-underlying S3 storage.
-
-Properties:
-
-- Config:      templink_threshold
-- Env Var:     RCLONE_ACD_TEMPLINK_THRESHOLD
-- Type:        SizeSuffix
-- Default:     9Gi
-
-#### --acd-encoding
-
-The encoding for the backend.
-
-See the [encoding section in the overview](https://rclone.org/overview/#encoding) for more info.
-
-Properties:
-
-- Config:      encoding
-- Env Var:     RCLONE_ACD_ENCODING
-- Type:        Encoding
-- Default:     Slash,InvalidUtf8,Dot
-
-
-
-## Limitations
-
-Note that Amazon Drive is case insensitive so you can't have a
-file called "Hello.doc" and one called "hello.doc".
-
-Amazon Drive has rate limiting so you may notice errors in the
-sync (429 errors).  rclone will automatically retry the sync up to 3
-times by default (see `--retries` flag) which should hopefully work
-around this problem.
-
-Amazon Drive has an internal limit of file sizes that can be uploaded
-to the service. This limit is not officially published, but all files
-larger than this will fail.
-
-At the time of writing (Jan 2016) is in the area of 50 GiB per file.
-This means that larger files are likely to fail.
-
-Unfortunately there is no way for rclone to see that this failure is
-because of file size, so it will retry the operation, as any other
-failure. To avoid this problem, use `--max-size 50000M` option to limit
-the maximum size of uploaded files. Note that `--max-size` does not split
-files into segments, it only ignores files over this size.
-
-`rclone about` is not supported by the Amazon Drive backend. Backends without
-this capability cannot determine free space for an rclone mount or
-use policy `mfs` (most free space) as a member of an rclone union
-remote.
-
-See [List of backends that do not support rclone about](https://rclone.org/overview/#optional-features) and [rclone about](https://rclone.org/commands/rclone_about/)
 
 #  Amazon S3 Storage Providers
 
@@ -22752,7 +23548,7 @@ name> remote
 Type of storage to configure.
 Choose a number from below, or type in your own value
 [snip]
-XX / Amazon S3 Compliant Storage Providers including AWS, Ceph, ChinaMobile, ArvanCloud, Dreamhost, IBM COS, Liara, Minio, and Tencent COS
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ "s3"
 [snip]
 Storage> s3
@@ -24034,10 +24830,10 @@ Properties:
 
 #### --s3-upload-concurrency
 
-Concurrency for multipart uploads.
+Concurrency for multipart uploads and copies.
 
 This is the number of chunks of the same file that are uploaded
-concurrently.
+concurrently for multipart uploads and copies.
 
 If you are uploading small numbers of large files over high-speed links
 and these uploads do not fully utilize your bandwidth, then increasing
@@ -24083,6 +24879,19 @@ Properties:
 
 - Config:      v2_auth
 - Env Var:     RCLONE_S3_V2_AUTH
+- Type:        bool
+- Default:     false
+
+#### --s3-use-dual-stack
+
+If true use AWS S3 dual-stack endpoint (IPv6 support).
+
+See [AWS Docs on Dualstack Endpoints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/dual-stack-endpoints.html)
+
+Properties:
+
+- Config:      use_dual_stack
+- Env Var:     RCLONE_S3_USE_DUAL_STACK
 - Type:        bool
 - Default:     false
 
@@ -24390,6 +25199,25 @@ Properties:
 - Type:        Time
 - Default:     off
 
+#### --s3-version-deleted
+
+Show deleted file markers when using versions.
+
+This shows deleted file markers in the listing when using versions. These will appear
+as 0 size files. The only operation which can be performed on them is deletion.
+
+Deleting a delete marker will reveal the previous version.
+
+Deleted files will always show with a timestamp.
+
+
+Properties:
+
+- Config:      version_deleted
+- Env Var:     RCLONE_S3_VERSION_DELETED
+- Type:        bool
+- Default:     false
+
 #### --s3-decompress
 
 If set this will decompress gzip encoded objects.
@@ -24539,6 +25367,17 @@ Properties:
 - Env Var:     RCLONE_S3_USE_MULTIPART_UPLOADS
 - Type:        Tristate
 - Default:     unset
+
+#### --s3-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_S3_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -25120,10 +25959,10 @@ Option Storage.
 Type of storage to configure.
 Choose a number from below, or type in your own value.
 [snip]
- 5 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS and Wasabi
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
-Storage> 5
+Storage> s3
 Option provider.
 Choose your S3 provider.
 Choose a number from below, or type in your own value.
@@ -25244,18 +26083,11 @@ To configure access to IBM COS S3, follow the steps below:
 3. Select "s3" storage.
 ```
 Choose a number from below, or type in your own value
- 	1 / Alias for an existing remote
-   	\ "alias"
- 	2 / Amazon Drive
-   	\ "amazon cloud drive"
- 	3 / Amazon S3 Complaint Storage Providers (Dreamhost, Ceph, ChinaMobile, Liara, ArvanCloud, Minio, IBM COS)
-   	\ "s3"
- 	4 / Backblaze B2
-   	\ "b2"
 [snip]
-	23 / HTTP
-    \ "http"
-Storage> 3
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
+   \ "s3"
+[snip]
+Storage> s3
 ```
 
 4. Select IBM COS as the S3 Storage Provider.
@@ -25415,7 +26247,7 @@ Option Storage.
 Type of storage to configure.
 Choose a number from below, or type in your own value.
 [snip]
-XX / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS and Wasabi
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
 Storage> s3
@@ -25521,7 +26353,7 @@ Option Storage.
 Type of storage to configure.
 Choose a number from below, or type in your own value.
 [snip]
-XX / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, IONOS Cloud, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS and Wasabi
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
 Storage> s3
@@ -25759,15 +26591,8 @@ name> qiniu
 
 ```
 Choose a number from below, or type in your own value
- 1 / 1Fichier
-   \ (fichier)
- 2 / Akamai NetStorage
-   \ (netstorage)
- 3 / Alias for an existing remote
-   \ (alias)
- 4 / Amazon Drive
-   \ (amazon cloud drive)
- 5 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, Liara, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS, Qiniu and Wasabi
+[snip]
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
 Storage> s3
@@ -26032,7 +26857,7 @@ Choose `s3` backend
 Type of storage to configure.
 Choose a number from below, or type in your own value.
 [snip]
-XX / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, ChinaMobile, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, Liara, Lyve Cloud, Minio, RackCorp, SeaweedFS, and Tencent COS
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
 Storage> s3
@@ -26333,7 +27158,7 @@ Type of storage to configure.
 Enter a string value. Press Enter for the default ("").
 Choose a number from below, or type in your own value
 [snip]
- 4 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, ChinaMobile, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, Liara, Minio, and Tencent COS
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ "s3"
 [snip]
 Storage> s3
@@ -26443,7 +27268,7 @@ Option Storage.
 Type of storage to configure.
 Choose a number from below, or type in your own value.
  ...
- 5 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, ChinaMobile, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, Lyve Cloud, Minio, RackCorp, SeaweedFS, and Tencent COS
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
  ...
 Storage> s3
@@ -26699,15 +27524,8 @@ name> leviia
 
 ```
 Choose a number from below, or type in your own value
- 1 / 1Fichier
-   \ (fichier)
- 2 / Akamai NetStorage
-   \ (netstorage)
- 3 / Alias for an existing remote
-   \ (alias)
- 4 / Amazon Drive
-   \ (amazon cloud drive)
- 5 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, Liara, Lyve Cloud, Minio, Netease, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS, Qiniu and Wasabi
+[snip]
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ (s3)
 [snip]
 Storage> s3
@@ -26920,7 +27738,7 @@ Option Storage.
 Type of storage to configure.
 Choose a number from below, or type in your own value.
 [snip]
- X / Amazon S3 Compliant Storage Providers including AWS, ...Linode, ...and others
+XX / Amazon S3 Compliant Storage Providers including AWS, ...Linode, ...and others
    \ (s3)
 [snip]
 Storage> s3
@@ -27165,13 +27983,8 @@ name> cos
 
 ```
 Choose a number from below, or type in your own value
-1 / 1Fichier
-   \ "fichier"
- 2 / Alias for an existing remote
-   \ "alias"
- 3 / Amazon Drive
-   \ "amazon cloud drive"
- 4 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, ChinaMobile, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, Liara, Minio, and Tencent COS
+[snip]
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ "s3"
 [snip]
 Storage> s3
@@ -27579,7 +28392,7 @@ Type of storage to configure.
 Enter a string value. Press Enter for the default ("").
 Choose a number from below, or type in your own value
 
- 5 / Amazon S3 Compliant Storage Providers including AWS, Alibaba, Ceph, China Mobile, Cloudflare, GCS, ArvanCloud, DigitalOcean, Dreamhost, Huawei OBS, IBM COS, IDrive e2, IONOS Cloud, Liara, Lyve Cloud, Minio, Netease, Petabox, RackCorp, Scaleway, SeaweedFS, StackPath, Storj, Synology, Tencent COS, Qiniu and Wasabi
+XX / Amazon S3 Compliant Storage Providers including AWS, ...
    \ "s3"
 
 Storage> s3
@@ -28230,9 +29043,12 @@ Properties:
 
 #### --b2-download-auth-duration
 
-Time before the authorization token will expire in s or suffix ms|s|m|h|d.
+Time before the public link authorization token will expire in s or suffix ms|s|m|h|d.
 
-The duration before the download authorization token will expire.
+This is used in combination with "rclone link" for making files
+accessible to the public and sets the duration before the download
+authorization token will expire.
+
 The minimum value is 1 second. The maximum value is one week.
 
 Properties:
@@ -28307,6 +29123,17 @@ Properties:
 - Env Var:     RCLONE_B2_ENCODING
 - Type:        Encoding
 - Default:     Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot
+
+#### --b2-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_B2_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ## Backend commands
 
@@ -28854,6 +29681,17 @@ Properties:
 - Env Var:     RCLONE_BOX_ENCODING
 - Type:        Encoding
 - Default:     Slash,BackSlash,Del,Ctl,RightSpace,InvalidUtf8,Dot
+
+#### --box-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_BOX_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -29561,6 +30399,17 @@ Properties:
 - Type:        Duration
 - Default:     1s
 
+#### --cache-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_CACHE_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ## Backend commands
 
 Here are the commands specific to the cache backend.
@@ -30057,6 +30906,17 @@ Properties:
         - If meta format is set to "none", rename transactions will always be used.
         - This method is EXPERIMENTAL, don't use on production systems.
 
+#### --chunker-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_CHUNKER_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 #  Citrix ShareFile
@@ -30357,6 +31217,17 @@ Properties:
 - Env Var:     RCLONE_SHAREFILE_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,LeftSpace,LeftPeriod,RightSpace,RightPeriod,InvalidUtf8,Dot
+
+#### --sharefile-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SHAREFILE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 ## Limitations
@@ -30948,6 +31819,22 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --crypt-strict-names
+
+If set, this will raise an error when crypt comes across a filename that can't be decrypted.
+
+(By default, rclone will just log a NOTICE and continue as normal.)
+This can happen if encrypted and unencrypted files are stored in the same
+directory (which is not recommended.) It may also indicate a more serious
+problem that should be investigated.
+
+Properties:
+
+- Config:      strict_names
+- Env Var:     RCLONE_CRYPT_STRICT_NAMES
+- Type:        bool
+- Default:     false
+
 #### --crypt-filename-encoding
 
 How to encode the encrypted filename to text string.
@@ -30984,6 +31871,17 @@ Properties:
 - Env Var:     RCLONE_CRYPT_SUFFIX
 - Type:        string
 - Default:     ".bin"
+
+#### --crypt-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_CRYPT_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -31153,7 +32051,7 @@ encoding is modified in two ways:
   * we strip the padding character `=`
 
 `base32` is used rather than the more efficient `base64` so rclone can be
-used on case insensitive remotes (e.g. Windows, Amazon Drive).
+used on case insensitive remotes (e.g. Windows, Box, Dropbox, Onedrive etc).
 
 ### Key derivation
 
@@ -31323,6 +32221,17 @@ Properties:
 - Type:        SizeSuffix
 - Default:     20Mi
 
+#### --compress-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_COMPRESS_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ### Metadata
 
 Any metadata supported by the underlying remote is read and written.
@@ -31480,6 +32389,21 @@ Properties:
 - Env Var:     RCLONE_COMBINE_UPSTREAMS
 - Type:        SpaceSepList
 - Default:     
+
+### Advanced options
+
+Here are the Advanced options specific to combine (Combine several remotes into one).
+
+#### --combine-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_COMBINE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -31938,6 +32862,17 @@ Properties:
 - Type:        Duration
 - Default:     10m0s
 
+#### --dropbox-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_DROPBOX_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -32260,6 +33195,17 @@ Properties:
 - Env Var:     RCLONE_FILEFABRIC_ENCODING
 - Type:        Encoding
 - Default:     Slash,Del,Ctl,InvalidUtf8,Dot
+
+#### --filefabric-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_FILEFABRIC_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -32711,6 +33657,17 @@ Properties:
         - PureFTPd can't handle '[]' or '*' in file names
     - "Ctl,LeftPeriod,Slash"
         - VsFTPd can't handle file names starting with dot
+
+#### --ftp-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_FTP_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -33459,6 +34416,17 @@ Properties:
 - Env Var:     RCLONE_GCS_ENCODING
 - Type:        Encoding
 - Default:     Slash,CrLf,InvalidUtf8,Dot
+
+#### --gcs-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_GCS_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -34853,9 +35821,22 @@ Properties:
     - "true"
         - Get GCP IAM credentials from the environment (env vars or IAM).
 
+#### --drive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_DRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ### Metadata
 
 User metadata is stored in the properties field of the drive object.
+
+Metadata is supported on files and directories.
 
 Here are the possible system metadata items for the drive backend.
 
@@ -35683,6 +36664,17 @@ Properties:
 - Type:        Duration
 - Default:     10m0s
 
+#### --gphotos-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_GPHOTOS_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -35997,6 +36989,17 @@ Properties:
 - Env Var:     RCLONE_HASHER_AUTO_SIZE
 - Type:        SizeSuffix
 - Default:     0
+
+#### --hasher-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_HASHER_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -36346,6 +37349,17 @@ Properties:
 - Env Var:     RCLONE_HDFS_ENCODING
 - Type:        Encoding
 - Default:     Slash,Colon,Del,Ctl,InvalidUtf8,Dot
+
+#### --hdfs-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_HDFS_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -36768,6 +37782,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,Dot
 
+#### --hidrive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_HIDRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -37002,6 +38027,17 @@ Properties:
 - Env Var:     RCLONE_HTTP_NO_HEAD
 - Type:        bool
 - Default:     false
+
+#### --http-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_HTTP_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ## Backend commands
 
@@ -37240,6 +38276,17 @@ Properties:
 - Env Var:     RCLONE_IMAGEKIT_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Dollar,Question,Hash,Percent,BackSlash,Del,Ctl,InvalidUtf8,Dot,SquareBracket
+
+#### --imagekit-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_IMAGEKIT_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -37523,6 +38570,17 @@ Properties:
 - Env Var:     RCLONE_INTERNETARCHIVE_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,CrLf,Del,Ctl,InvalidUtf8,Dot
+
+#### --internetarchive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_INTERNETARCHIVE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ### Metadata
 
@@ -37998,6 +39056,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,Del,Ctl,InvalidUtf8,Dot
 
+#### --jottacloud-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_JOTTACLOUD_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ### Metadata
 
 Jottacloud has limited support for metadata, currently an extended set of timestamps.
@@ -38240,6 +39309,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot
 
+#### --koofr-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_KOOFR_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -38456,6 +39536,21 @@ Properties:
 - Env Var:     RCLONE_LINKBOX_TOKEN
 - Type:        string
 - Required:    true
+
+### Advanced options
+
+Here are the Advanced options specific to linkbox (Linkbox).
+
+#### --linkbox-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_LINKBOX_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -38872,6 +39967,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,InvalidUtf8,Dot
 
+#### --mailru-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_MAILRU_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -39161,6 +40267,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,InvalidUtf8,Dot
 
+#### --mega-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_MEGA_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ### Process `killed`
@@ -39235,6 +40352,21 @@ The memory backend supports MD5 hashes and modification times accurate to 1 nS.
 The memory backend replaces the [default restricted characters
 set](https://rclone.org/overview/#restricted-characters).
 
+
+### Advanced options
+
+Here are the Advanced options specific to memory (In memory object storage system.).
+
+#### --memory-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_MEMORY_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -39475,6 +40607,17 @@ Properties:
         - HTTP protocol
     - "https"
         - HTTPS protocol
+
+#### --netstorage-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_NETSTORAGE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ## Backend commands
 
@@ -40341,6 +41484,35 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --azureblob-delete-snapshots
+
+Set to specify how to deal with snapshots on blob deletion.
+
+Properties:
+
+- Config:      delete_snapshots
+- Env Var:     RCLONE_AZUREBLOB_DELETE_SNAPSHOTS
+- Type:        string
+- Required:    false
+- Choices:
+    - ""
+        - By default, the delete operation fails if a blob has snapshots
+    - "include"
+        - Specify 'include' to remove the root blob and all its snapshots
+    - "only"
+        - Specify 'only' to remove only the snapshots but keep the root blob.
+
+#### --azureblob-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_AZUREBLOB_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ### Custom upload headers
@@ -41067,6 +42239,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,RightPeriod,InvalidUtf8,Dot
 
+#### --azurefiles-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_AZUREFILES_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ### Custom upload headers
@@ -41706,7 +42889,7 @@ Properties:
 
 If set rclone will use delta listing to implement recursive listings.
 
-If this flag is set the the onedrive backend will advertise `ListR`
+If this flag is set the onedrive backend will advertise `ListR`
 support for recursive listings.
 
 Setting this flag speeds up these things greatly:
@@ -41739,6 +42922,30 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --onedrive-metadata-permissions
+
+Control whether permissions should be read or written in metadata.
+
+Reading permissions metadata from files can be done quickly, but it
+isn't always desirable to set the permissions from the metadata.
+
+
+Properties:
+
+- Config:      metadata_permissions
+- Env Var:     RCLONE_ONEDRIVE_METADATA_PERMISSIONS
+- Type:        Bits
+- Default:     off
+- Examples:
+    - "off"
+        - Do not read or write the value
+    - "read"
+        - Read the value only
+    - "write"
+        - Write the value only
+    - "read,write"
+        - Read and Write the value.
+
 #### --onedrive-encoding
 
 The encoding for the backend.
@@ -41751,6 +42958,191 @@ Properties:
 - Env Var:     RCLONE_ONEDRIVE_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Del,Ctl,LeftSpace,LeftTilde,RightSpace,RightPeriod,InvalidUtf8,Dot
+
+#### --onedrive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_ONEDRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
+
+### Metadata
+
+OneDrive supports System Metadata (not User Metadata, as of this writing) for
+both files and directories. Much of the metadata is read-only, and there are some
+differences between OneDrive Personal and Business (see table below for
+details).
+
+Permissions are also supported, if `--onedrive-metadata-permissions` is set. The
+accepted values for `--onedrive-metadata-permissions` are `read`, `write`,
+`read,write`, and `off` (the default). `write` supports adding new permissions,
+updating the "role" of existing permissions, and removing permissions. Updating
+and removing require the Permission ID to be known, so it is recommended to use
+`read,write` instead of `write` if you wish to update/remove permissions.
+
+Permissions are read/written in JSON format using the same schema as the
+[OneDrive API](https://learn.microsoft.com/en-us/onedrive/developer/rest-api/resources/permission?view=odsp-graph-online),
+which differs slightly between OneDrive Personal and Business.
+
+Example for OneDrive Personal:
+```json
+[
+	{
+		"id": "1234567890ABC!123",
+		"grantedTo": {
+			"user": {
+				"id": "ryan@contoso.com"
+			},
+			"application": {},
+			"device": {}
+		},
+		"invitation": {
+			"email": "ryan@contoso.com"
+		},
+		"link": {
+			"webUrl": "https://1drv.ms/t/s!1234567890ABC"
+		},
+		"roles": [
+			"read"
+		],
+		"shareId": "s!1234567890ABC"
+	}
+]
+```
+
+Example for OneDrive Business:
+```json
+[
+	{
+		"id": "48d31887-5fad-4d73-a9f5-3c356e68a038",
+		"grantedToIdentities": [
+			{
+				"user": {
+					"displayName": "ryan@contoso.com"
+				},
+				"application": {},
+				"device": {}
+			}
+		],
+		"link": {
+			"type": "view",
+			"scope": "users",
+			"webUrl": "https://contoso.sharepoint.com/:w:/t/design/a577ghg9hgh737613bmbjf839026561fmzhsr85ng9f3hjck2t5s"
+		},
+		"roles": [
+			"read"
+		],
+		"shareId": "u!LKj1lkdlals90j1nlkascl"
+	},
+	{
+		"id": "5D33DD65C6932946",
+		"grantedTo": {
+			"user": {
+				"displayName": "John Doe",
+				"id": "efee1b77-fb3b-4f65-99d6-274c11914d12"
+			},
+			"application": {},
+			"device": {}
+		},
+		"roles": [
+			"owner"
+		],
+		"shareId": "FWxc1lasfdbEAGM5fI7B67aB5ZMPDMmQ11U"
+	}
+]
+```
+
+To write permissions, pass in a "permissions" metadata key using this same
+format. The [`--metadata-mapper`](https://rclone.org/docs/#metadata-mapper) tool can
+be very helpful for this.
+
+When adding permissions, an email address can be provided in the `User.ID` or
+`DisplayName` properties of `grantedTo` or `grantedToIdentities`. Alternatively,
+an ObjectID can be provided in `User.ID`. At least one valid recipient must be
+provided in order to add a permission for a user. Creating a Public Link is also
+supported, if `Link.Scope` is set to `"anonymous"`.
+
+Example request to add a "read" permission:
+
+```json
+[
+	{
+			"id": "",
+			"grantedTo": {
+					"user": {},
+					"application": {},
+					"device": {}
+			},
+			"grantedToIdentities": [
+					{
+							"user": {
+									"id": "ryan@contoso.com"
+							},
+							"application": {},
+							"device": {}
+					}
+			],
+			"roles": [
+					"read"
+			]
+	}
+]
+```
+
+Note that adding a permission can fail if a conflicting permission already
+exists for the file/folder.
+
+To update an existing permission, include both the Permission ID and the new
+`roles` to be assigned. `roles` is the only property that can be changed.
+
+To remove permissions, pass in a blob containing only the permissions you wish
+to keep (which can be empty, to remove all.)
+
+Note that both reading and writing permissions requires extra API calls, so if
+you don't need to read or write permissions it is recommended to omit
+`--onedrive-metadata-permissions`.
+
+Metadata and permissions are supported for Folders (directories) as well as
+Files. Note that setting the `mtime` or `btime` on a Folder requires one extra
+API call on OneDrive Business only.
+
+OneDrive does not currently support User Metadata. When writing metadata, only
+writeable system properties will be written -- any read-only or unrecognized keys
+passed in will be ignored.
+
+TIP: to see the metadata and permissions for any file or folder, run:
+
+```
+rclone lsjson remote:path --stat -M --onedrive-metadata-permissions read
+```
+
+Here are the possible system metadata items for the onedrive backend.
+
+| Name | Help | Type | Example | Read Only |
+|------|------|------|---------|-----------|
+| btime | Time of file birth (creation) with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | N |
+| content-type | The MIME type of the file. | string | text/plain | **Y** |
+| created-by-display-name | Display name of the user that created the item. | string | John Doe | **Y** |
+| created-by-id | ID of the user that created the item. | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
+| description | A short description of the file. Max 1024 characters. Only supported for OneDrive Personal. | string | Contract for signing | N |
+| id | The unique identifier of the item within OneDrive. | string | 01BYE5RZ6QN3ZWBTUFOFD3GSPGOHDJD36K | **Y** |
+| last-modified-by-display-name | Display name of the user that last modified the item. | string | John Doe | **Y** |
+| last-modified-by-id | ID of the user that last modified the item. | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
+| malware-detected | Whether OneDrive has detected that the item contains malware. | boolean | true | **Y** |
+| mtime | Time of last modification with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | N |
+| package-type | If present, indicates that this item is a package instead of a folder or file. Packages are treated like files in some contexts and folders in others. | string | oneNote | **Y** |
+| permissions | Permissions in a JSON dump of OneDrive format. Enable with --onedrive-metadata-permissions. Properties: id, grantedTo, grantedToIdentities, invitation, inheritedFrom, link, roles, shareId | JSON | {} | N |
+| shared-by-id | ID of the user that shared the item (if shared). | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
+| shared-owner-id | ID of the owner of the shared item (if shared). | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
+| shared-scope | If shared, indicates the scope of how the item is shared: anonymous, organization, or users. | string | users | **Y** |
+| shared-time | Time when the item was shared, with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
+| utime | Time of upload with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
+
+See the [metadata](https://rclone.org/docs/#metadata) docs for more info.
 
 
 
@@ -42141,6 +43533,17 @@ Properties:
 - Type:        SizeSuffix
 - Default:     10Mi
 
+#### --opendrive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_OPENDRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -42215,13 +43618,17 @@ Press Enter for the default (env_auth).
  2 | you’ll need to put in a config file your tenancy OCID, user OCID, region, the path, fingerprint to an API key.
    | https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm
    \ (user_principal_auth)
-   / use instance principals to authorize an instance to make API calls. 
- 3 | each instance has its own identity, and authenticates using the certificates that are read from instance metadata. 
+   / use instance principals to authorize an instance to make API calls.
+ 3 | each instance has its own identity, and authenticates using the certificates that are read from instance metadata.
    | https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm
    \ (instance_principal_auth)
- 4 / use resource principals to make API calls
+   / use workload identity to grant Kubernetes pods policy-driven access to Oracle Cloud
+ 4 | Infrastructure (OCI) resources using OCI Identity and Access Management (IAM).
+   | https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm
+   \ (workload_identity_auth)
+ 5 / use resource principals to make API calls
    \ (resource_principal_auth)
- 5 / no credentials needed, this is typically for reading public buckets
+ 6 / no credentials needed, this is typically for reading public buckets
    \ (no_auth)
 provider> 2
 
@@ -42307,6 +43714,7 @@ Rclone supports the following OCI authentication provider.
     User Principal
     Instance Principal
     Resource Principal
+    Workload Identity
     No authentication
 
 ### User Principal
@@ -42379,6 +43787,14 @@ Sample rclone configuration file for Authentication Provider Resource Principal:
     compartment = ocid1.compartment.oc1..aa<redacted>ba
     region = us-ashburn-1
     provider = resource_principal_auth
+
+### Workload Identity
+Workload Identity auth may be used when running Rclone from Kubernetes pod on a Container Engine for Kubernetes (OKE) cluster.
+For more details on configuring Workload Identity, see [Granting Workloads Access to OCI Resources](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm).
+To use workload identity, ensure Rclone is started with these environment variables set in its process.
+
+    export OCI_RESOURCE_PRINCIPAL_VERSION=2.2
+    export OCI_RESOURCE_PRINCIPAL_REGION=us-ashburn-1
 
 ### No authentication
 
@@ -42462,6 +43878,9 @@ Properties:
         - use instance principals to authorize an instance to make API calls. 
         - each instance has its own identity, and authenticates using the certificates that are read from instance metadata. 
         - https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm
+    - "workload_identity_auth"
+        - use workload identity to grant OCI Container Engine for Kubernetes workloads policy-driven access to OCI resources using OCI Identity and Access Management (IAM).
+        - https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm
     - "resource_principal_auth"
         - use resource principals to make API calls
     - "no_auth"
@@ -42847,6 +44266,17 @@ Properties:
     - "AES256"
         - AES256
 
+#### --oos-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_OOS_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ## Backend commands
 
 Here are the commands specific to the oracleobjectstorage backend.
@@ -42926,6 +44356,47 @@ Durations are parsed as per the rest of rclone, 2h, 7d, 7w etc.
 Options:
 
 - "max-age": Max age of upload to delete
+
+### restore
+
+Restore objects from Archive to Standard storage
+
+    rclone backend restore remote: [options] [<arguments>+]
+
+This command can be used to restore one or more objects from Archive to Standard storage.
+
+	Usage Examples:
+
+    rclone backend restore oos:bucket/path/to/directory -o hours=HOURS
+    rclone backend restore oos:bucket -o hours=HOURS
+
+This flag also obeys the filters. Test first with --interactive/-i or --dry-run flags
+
+	rclone --interactive backend restore --include "*.txt" oos:bucket/path -o hours=72
+
+All the objects shown will be marked for restore, then
+
+	rclone backend restore --include "*.txt" oos:bucket/path -o hours=72
+
+	It returns a list of status dictionaries with Object Name and Status
+	keys. The Status will be "RESTORED"" if it was successful or an error message
+	if not.
+
+	[
+		{
+			"Object": "test.txt"
+			"Status": "RESTORED",
+		},
+		{
+			"Object": "test/file4.txt"
+			"Status": "RESTORED",
+		}
+	]
+
+
+Options:
+
+- "hours": The number of hours for which this object will be restored. Default is 24 hrs.
 
 
 
@@ -43238,6 +44709,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,Ctl,InvalidUtf8
 
+#### --qingstor-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_QINGSTOR_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -43472,7 +44954,7 @@ Properties:
 
 #### --quatrix-hard-delete
 
-Delete files permanently rather than putting them into the trash.
+Delete files permanently rather than putting them into the trash
 
 Properties:
 
@@ -43480,6 +44962,28 @@ Properties:
 - Env Var:     RCLONE_QUATRIX_HARD_DELETE
 - Type:        bool
 - Default:     false
+
+#### --quatrix-skip-project-folders
+
+Skip project folders in operations
+
+Properties:
+
+- Config:      skip_project_folders
+- Env Var:     RCLONE_QUATRIX_SKIP_PROJECT_FOLDERS
+- Type:        bool
+- Default:     false
+
+#### --quatrix-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_QUATRIX_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -43681,6 +45185,17 @@ Properties:
 - Env Var:     RCLONE_SIA_ENCODING
 - Type:        Encoding
 - Default:     Slash,Question,Hash,Percent,Del,Ctl,InvalidUtf8,Dot
+
+#### --sia-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SIA_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -44278,6 +45793,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,InvalidUtf8
 
+#### --swift-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SWIFT_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -44605,6 +46131,17 @@ Properties:
 - Type:        string
 - Required:    false
 
+#### --pcloud-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PCLOUD_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 #  PikPak
@@ -44842,6 +46379,17 @@ Properties:
 - Env Var:     RCLONE_PIKPAK_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,LeftSpace,RightSpace,RightPeriod,InvalidUtf8,Dot
+
+#### --pikpak-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PIKPAK_DESCRIPTION
+- Type:        string
+- Required:    false
 
 ## Backend commands
 
@@ -45112,6 +46660,17 @@ Properties:
 - Env Var:     RCLONE_PREMIUMIZEME_ENCODING
 - Type:        Encoding
 - Default:     Slash,DoubleQuote,BackSlash,Del,Ctl,InvalidUtf8,Dot
+
+#### --premiumizeme-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PREMIUMIZEME_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -45452,6 +47011,17 @@ Properties:
 - Type:        bool
 - Default:     true
 
+#### --protondrive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PROTONDRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -45673,6 +47243,17 @@ Properties:
 - Env Var:     RCLONE_PUTIO_ENCODING
 - Type:        Encoding
 - Default:     Slash,BackSlash,Del,Ctl,InvalidUtf8,Dot
+
+#### --putio-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PUTIO_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -46010,6 +47591,17 @@ Properties:
 - Env Var:     RCLONE_PROTONDRIVE_ENABLE_CACHING
 - Type:        bool
 - Default:     true
+
+#### --protondrive-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_PROTONDRIVE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -46422,6 +48014,17 @@ Properties:
 - Env Var:     RCLONE_SEAFILE_ENCODING
 - Type:        Encoding
 - Default:     Slash,DoubleQuote,BackSlash,Ctl,InvalidUtf8
+
+#### --seafile-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SEAFILE_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -47463,6 +49066,17 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --sftp-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SFTP_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -47743,6 +49357,17 @@ Properties:
 - Env Var:     RCLONE_SMB_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,Colon,Question,Asterisk,Pipe,BackSlash,Ctl,RightSpace,RightPeriod,InvalidUtf8,Dot
+
+#### --smb-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SMB_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -48032,6 +49657,21 @@ Properties:
 - Config:      passphrase
 - Env Var:     RCLONE_STORJ_PASSPHRASE
 - Provider:    new
+- Type:        string
+- Required:    false
+
+### Advanced options
+
+Here are the Advanced options specific to storj (Storj Decentralized Cloud Storage).
+
+#### --storj-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_STORJ_DESCRIPTION
 - Type:        string
 - Required:    false
 
@@ -48434,6 +50074,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,Ctl,InvalidUtf8,Dot
 
+#### --sugarsync-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_SUGARSYNC_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -48591,6 +50242,17 @@ Properties:
 - Env Var:     RCLONE_UPTOBOX_ENCODING
 - Type:        Encoding
 - Default:     Slash,LtGt,DoubleQuote,BackQuote,Del,Ctl,LeftSpace,InvalidUtf8,Dot
+
+#### --uptobox-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_UPTOBOX_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -48884,6 +50546,17 @@ Properties:
 - Type:        SizeSuffix
 - Default:     1Gi
 
+#### --union-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_UNION_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ### Metadata
 
 Any metadata supported by the underlying remote is read and written.
@@ -49160,13 +50833,35 @@ Properties:
 - Type:        SizeSuffix
 - Default:     10Mi
 
+#### --webdav-owncloud-exclude-shares
+
+Exclude ownCloud shares
+
+Properties:
+
+- Config:      owncloud_exclude_shares
+- Env Var:     RCLONE_WEBDAV_OWNCLOUD_EXCLUDE_SHARES
+- Type:        bool
+- Default:     false
+
+#### --webdav-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_WEBDAV_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Provider notes
 
 See below for notes on specific providers.
 
-## Fastmail Files
+### Fastmail Files
 
 Use `https://webdav.fastmail.com/` or a subdirectory as the URL,
 and your Fastmail email `username@domain.tld` as the username.
@@ -49561,6 +51256,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,Del,Ctl,InvalidUtf8,Dot
 
+#### --yandex-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_YANDEX_DESCRIPTION
+- Type:        string
+- Required:    false
+
 
 
 ## Limitations
@@ -49814,6 +51520,17 @@ Properties:
 - Env Var:     RCLONE_ZOHO_ENCODING
 - Type:        Encoding
 - Default:     Del,Ctl,InvalidUtf8
+
+#### --zoho-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_ZOHO_DESCRIPTION
+- Type:        string
+- Required:    false
 
 
 
@@ -50394,6 +52111,17 @@ Properties:
 - Type:        Encoding
 - Default:     Slash,Dot
 
+#### --local-description
+
+Description of the remote
+
+Properties:
+
+- Config:      description
+- Env Var:     RCLONE_LOCAL_DESCRIPTION
+- Type:        string
+- Required:    false
+
 ### Metadata
 
 Depending on which OS is in use the local backend may return only some
@@ -50404,6 +52132,8 @@ netbsd, macOS and Solaris. It is **not** supported on Windows yet
 
 User metadata is stored as extended attributes (which may not be
 supported by all file systems) under the "user.*" prefix.
+
+Metadata is supported on files and directories.
 
 Here are the possible system metadata items for the local backend.
 
@@ -50452,6 +52182,176 @@ Options:
 
 
 # Changelog
+
+## v1.66.0 - 2024-03-10
+
+[See commits](https://github.com/rclone/rclone/compare/v1.65.0...v1.66.0)
+
+* Major features
+    * Rclone will now sync directory modification times if the backend supports it.
+        * This can be disabled with [--no-update-dir-modtime](https://rclone.org/docs/#no-update-dir-modtime)
+        * See [the overview](https://rclone.org/overview/#features) and look for the `D` flags in the `ModTime` column to see which backends support it.
+    * Rclone will now sync directory metadata if the backend supports it when `-M`/`--metadata` is in use.
+        * See [the overview](https://rclone.org/overview/#features) and look for the `D` flags in the `Metadata` column to see which backends support it.
+    * Bisync has received many updates see below for more details or [bisync's changelog](https://rclone.org/bisync/#changelog)
+* Removed backends
+    * amazonclouddrive: Remove Amazon Drive backend code and docs (Nick Craig-Wood)
+* New Features
+    * backend
+        * Add description field for all backends (Paul Stern)
+    * build
+        * Update to go1.22 and make go1.20 the minimum required version (Nick Craig-Wood)
+        * Fix `CVE-2024-24786` by upgrading `google.golang.org/protobuf` (Nick Craig-Wood)
+    * check: Respect `--no-unicode-normalization` and `--ignore-case-sync` for `--checkfile` (nielash)
+    * cmd: Much improved shell auto completion which reduces the size of the completion file and works faster (Nick Craig-Wood)
+    * doc updates (albertony, ben-ba, Eli, emyarod, huajin tong, Jack Provance, kapitainsky, keongalvin, Nick Craig-Wood, nielash, rarspace01, rzitzer, Tera, Vincent Murphy)
+    * fs: Add more detailed logging for file includes/excludes (Kyle Reynolds)
+    * lsf
+        * Add `--time-format` flag (nielash)
+        * Make metadata appear for directories (Nick Craig-Wood)
+    * lsjson: Make metadata appear for directories (Nick Craig-Wood)
+    * rc
+        * Add `srcFs` and `dstFs` to `core/stats` and `core/transferred` stats (Nick Craig-Wood)
+        * Add `operations/hashsum` to the rc as `rclone hashsum` equivalent (Nick Craig-Wood)
+        * Add `config/paths` to the rc as `rclone config paths` equivalent (Nick Craig-Wood)
+    * sync
+        * Optionally report list of synced paths to file (nielash)
+        * Implement directory sync for mod times and metadata (Nick Craig-Wood)
+        * Don't set directory modtimes if already set (nielash)
+        * Don't sync directory modtimes from backends which don't have directories (Nick Craig-Wood)
+* Bug Fixes
+    * backend
+        * Make backends which use oauth implement the `Shutdown` and shutdown the oauth properly (rkonfj)
+    * bisync
+        * Handle unicode and case normalization consistently (nielash)
+        * Partial uploads known issue on `local`/`ftp`/`sftp` has been resolved (unless using `--inplace`) (nielash)
+        * Fixed handling of unicode normalization and case insensitivity, support for [`--fix-case`](https://rclone.org/docs/#fix-case), [`--ignore-case-sync`](/docs/#ignore-case-sync), [`--no-unicode-normalization`](/docs/#no-unicode-normalization) (nielash)
+        * Bisync no longer fails to find the correct listing file when configs are overridden with backend-specific flags. (nielash)
+    * nfsmount
+        * Fix exit after external unmount (nielash)
+        * Fix `--volname` being ignored (nielash)
+    * operations
+        * Fix renaming a file on macOS (nielash)
+        * Fix case-insensitive moves in operations.Move (nielash)
+        * Fix TestCaseInsensitiveMoveFileDryRun on chunker integration tests (nielash)
+        * Fix TestMkdirModTime test (Nick Craig-Wood)
+        * Fix TestSetDirModTime for backends with SetDirModTime but not Metadata (Nick Craig-Wood)
+        * Fix typo in log messages (nielash)
+    * serve nfs: Fix writing files via Finder on macOS (nielash)
+    * serve restic: Fix error handling (Michael Eischer)
+    * serve webdav: Fix `--baseurl` without leading / (Nick Craig-Wood)
+    * stats: Fix race between ResetCounters and stopAverageLoop called from time.AfterFunc (Nick Craig-Wood)
+    * sync
+        * `--fix-case` flag to rename case insensitive dest (nielash)
+        * Use operations.DirMove instead of sync.MoveDir for `--fix-case` (nielash)
+    * systemd: Fix detection and switch to the coreos package everywhere rather than having 2 separate libraries (Anagh Kumar Baranwal)
+* Mount
+    * Fix macOS not noticing errors with `--daemon` (Nick Craig-Wood)
+    * Notice daemon dying much quicker (Nick Craig-Wood)
+* VFS
+    * Fix unicode normalization on macOS (nielash)
+* Bisync
+    * Copies and deletes are now handled in one operation instead of two (nielash)
+    * `--track-renames` and `--backup-dir` are now supported (nielash)
+    * Final listings are now generated from sync results, to avoid needing to re-list (nielash)
+    * Bisync is now much more resilient to changes that happen during a bisync run, and far less prone to critical errors / undetected changes (nielash)
+    * Bisync is now capable of rolling a file listing back in cases of uncertainty, essentially marking the file as needing to be rechecked next time. (nielash)
+    * A few basic terminal colors are now supported, controllable with [`--color`](https://rclone.org/docs/#color-when) (`AUTO`|`NEVER`|`ALWAYS`) (nielash)
+    * Initial listing snapshots of Path1 and Path2 are now generated concurrently, using the same "march" infrastructure as `check` and `sync`, for performance improvements and less risk of error. (nielash)
+    * `--resync` is now much more efficient (especially for users of `--create-empty-src-dirs`) (nielash)
+    * Google Docs (and other files of unknown size) are now supported (with the same options as in `sync`) (nielash)
+    * Equality checks before a sync conflict rename now fall back to `cryptcheck` (when possible) or `--download`, (nielash)
+instead of of `--size-only`, when `check` is not available.
+    * Bisync now fully supports comparing based on any combination of size, modtime, and checksum, lifting the prior restriction on backends without modtime support. (nielash)
+    * Bisync now supports a "Graceful Shutdown" mode to cleanly cancel a run early without requiring `--resync`. (nielash)
+    * New `--recover` flag allows robust recovery in the event of interruptions, without requiring `--resync`. (nielash)
+    * A new `--max-lock` setting allows lock files to automatically renew and expire, for better automatic recovery when a run is interrupted. (nielash)
+    * Bisync now supports auto-resolving sync conflicts and customizing rename behavior with new [`--conflict-resolve`](#conflict-resolve), [`--conflict-loser`](#conflict-loser), and [`--conflict-suffix`](#conflict-suffix) flags. (nielash)
+    * A new [`--resync-mode`](#resync-mode) flag allows more control over which version of a file gets kept during a `--resync`. (nielash)
+    * Bisync now supports [`--retries`](https://rclone.org/docs/#retries-int) and [`--retries-sleep`](/docs/#retries-sleep-time) (when [`--resilient`](#resilient) is set.) (nielash)
+    * Clarify file operation directions in dry-run logs (Kyle Reynolds)
+* Local
+    * Fix cleanRootPath on Windows after go1.21.4 stdlib update (nielash)
+    * Implement setting modification time on directories (nielash)
+    * Implement modtime and metadata for directories (Nick Craig-Wood)
+    * Fix setting of btime on directories on Windows (Nick Craig-Wood)
+    * Delete backend implementation of Purge to speed up and make stats (Nick Craig-Wood)
+    * Support metadata setting and mapping on server side Move (Nick Craig-Wood)
+* Cache
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+* Crypt
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+    * Improve handling of undecryptable file names (nielash)
+    * Add missing error check spotted by linter (Nick Craig-Wood)
+* Azure Blob
+    * Implement `--azureblob-delete-snapshots` (Nick Craig-Wood)
+* B2
+    * Clarify exactly what `--b2-download-auth-duration` does in the docs (Nick Craig-Wood)
+* Chunker
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+* Combine
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+    * Fix directory metadata error on upstream root (nielash)
+    * Fix directory move across upstreams (nielash)
+* Compress
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+* Drive
+    * Implement setting modification time on directories (nielash)
+    * Implement modtime and metadata setting for directories (Nick Craig-Wood)
+    * Support metadata setting and mapping on server side Move,Copy (Nick Craig-Wood)
+* FTP
+    * Fix mkdir with rsftp which is returning the wrong code (Nick Craig-Wood)
+* Hasher
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+    * Fix error from trying to stop an already-stopped db (nielash)
+    * Look for cached hash if passed hash unexpectedly blank (nielash)
+* Imagekit
+    * Updated docs and web content (Harshit Budhraja)
+    * Updated overview - supported operations (Harshit Budhraja)
+* Mega
+    * Fix panic with go1.22 (Nick Craig-Wood)
+* Netstorage
+    * Fix Root to return correct directory when pointing to a file (Nick Craig-Wood)
+* Onedrive
+    * Add metadata support (nielash)
+* Opendrive
+    * Fix moving file/folder within the same parent dir (nielash)
+* Oracle Object Storage
+    * Support `backend restore` command (Nikhil Ahuja)
+    * Support workload identity authentication for OKE (Anders Swanson)
+* Protondrive
+    * Fix encoding of Root method (Nick Craig-Wood)
+* Quatrix
+    * Fix `Content-Range` header (Volodymyr)
+    * Add option to skip project folders (Oksana Zhykina)
+    * Fix Root to return correct directory when pointing to a file (Nick Craig-Wood)
+* S3
+    * Add `--s3-version-deleted` to show delete markers in listings when using versions. (Nick Craig-Wood)
+    * Add IPv6 support with option `--s3-use-dual-stack` (Anthony Metzidis)
+    * Copy parts in parallel when doing chunked server side copy (Nick Craig-Wood)
+    * GCS provider: fix server side copy of files bigger than 5G (Nick Craig-Wood)
+    * Support metadata setting and mapping on server side Copy (Nick Craig-Wood)
+* Seafile
+    * Fix download/upload error when `FILE_SERVER_ROOT` is relative (DanielEgbers)
+    * Fix Root to return correct directory when pointing to a file (Nick Craig-Wood)
+* SFTP
+    * Implement setting modification time on directories (nielash)
+    * Set directory modtimes update on write flag (Nick Craig-Wood)
+    * Shorten wait delay for external ssh binaries now that we are using go1.20 (Nick Craig-Wood)
+* Swift
+    * Avoid unnecessary container versioning check (Joe Cai)
+* Union
+    * Implement setting modification time on directories (if supported by wrapped remote) (nielash)
+    * Implement setting metadata on directories (Nick Craig-Wood)
+* WebDAV
+    * Reduce priority of chunks upload log (Gabriel Ramos)
+    * owncloud: Add config `owncloud_exclude_shares` which allows to exclude shared files and folders when listing remote resources (Thomas Müller)
 
 ## v1.65.2 - 2024-01-24
 
@@ -55431,10 +57331,13 @@ Point release to fix hubic and azureblob backends.
 
 ## Limitations
 
-### Directory timestamps aren't preserved
+### Directory timestamps aren't preserved on some backends
 
-Rclone doesn't currently preserve the timestamps of directories.  This
-is because rclone only really considers objects when syncing.
+As of `v1.66`, rclone supports syncing directory modtimes, if the backend
+supports it. Some backends do not support it -- see
+[overview](https://rclone.org/overview/) for a complete list. Additionally, note
+that empty directories are not synced by default (this can be enabled with
+`--create-empty-src-dirs`.)
 
 ### Rclone struggles with millions of files in a directory/bucket
 
@@ -56546,6 +58449,27 @@ put them back in again.` >}}
   * Alen Šiljak <dev@alensiljak.eu.org>
   * 你知道未来吗 <rkonfj@gmail.com>
   * Abhinav Dhiman <8640877+ahnv@users.noreply.github.com>
+  * halms <7513146+halms@users.noreply.github.com>
+  * ben-ba <benjamin.brauner@gmx.de>
+  * Eli Orzitzer <e_orz@yahoo.com>
+  * Anthony Metzidis <anthony.metzidis@gmail.com>
+  * emyarod <afw5059@gmail.com>
+  * keongalvin <keongalvin@gmail.com>
+  * rarspace01 <rarspace01@users.noreply.github.com>
+  * Paul Stern <paulstern45@gmail.com>
+  * Nikhil Ahuja <nikhilahuja@live.com>
+  * Harshit Budhraja <52413945+harshit-budhraja@users.noreply.github.com>
+  * Tera <24725862+teraa@users.noreply.github.com>
+  * Kyle Reynolds <kylereynoldsdev@gmail.com>
+  * Michael Eischer <michael.eischer@gmx.de>
+  * Thomas Müller <1005065+DeepDiver1975@users.noreply.github.com>
+  * DanielEgbers <27849724+DanielEgbers@users.noreply.github.com>
+  * Jack Provance <49460795+njprov@users.noreply.github.com>
+  * Gabriel Ramos <109390599+gabrielramos02@users.noreply.github.com>
+  * Dan McArdle <d@nmcardle.com>
+  * Joe Cai <joe.cai@bigcommerce.com>
+  * Anders Swanson <anders.swanson@oracle.com>
+  * huajin tong <137764712+thirdkeyword@users.noreply.github.com>
 
 # Contact the rclone project
 

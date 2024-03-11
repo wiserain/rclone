@@ -805,3 +805,24 @@ put them back in again.` >}}
   * Alen Šiljak <dev@alensiljak.eu.org>
   * 你知道未来吗 <rkonfj@gmail.com>
   * Abhinav Dhiman <8640877+ahnv@users.noreply.github.com>
+  * halms <7513146+halms@users.noreply.github.com>
+  * ben-ba <benjamin.brauner@gmx.de>
+  * Eli Orzitzer <e_orz@yahoo.com>
+  * Anthony Metzidis <anthony.metzidis@gmail.com>
+  * emyarod <afw5059@gmail.com>
+  * keongalvin <keongalvin@gmail.com>
+  * rarspace01 <rarspace01@users.noreply.github.com>
+  * Paul Stern <paulstern45@gmail.com>
+  * Nikhil Ahuja <nikhilahuja@live.com>
+  * Harshit Budhraja <52413945+harshit-budhraja@users.noreply.github.com>
+  * Tera <24725862+teraa@users.noreply.github.com>
+  * Kyle Reynolds <kylereynoldsdev@gmail.com>
+  * Michael Eischer <michael.eischer@gmx.de>
+  * Thomas Müller <1005065+DeepDiver1975@users.noreply.github.com>
+  * DanielEgbers <27849724+DanielEgbers@users.noreply.github.com>
+  * Jack Provance <49460795+njprov@users.noreply.github.com>
+  * Gabriel Ramos <109390599+gabrielramos02@users.noreply.github.com>
+  * Dan McArdle <d@nmcardle.com>
+  * Joe Cai <joe.cai@bigcommerce.com>
+  * Anders Swanson <anders.swanson@oracle.com>
+  * huajin tong <137764712+thirdkeyword@users.noreply.github.com>
