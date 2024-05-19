@@ -271,10 +271,10 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
-	// TODO: enable file upload
-	if true {
-		return nil, fs.ErrorNotImplemented
-	}
+	// // TODO: enable file upload
+	// if true {
+	// 	return nil, fs.ErrorNotImplemented
+	// }
 
 	o := f.createObject(src.Remote(), src.ModTime(ctx), src.Size())
 	return o, o.Update(ctx, in, src, options...)
@@ -563,10 +563,12 @@ func (f *Fs) readDir(ctx context.Context, remoteDir string) ([]*api.FileInfo, er
 		return value.([]*api.FileInfo), nil
 	}
 
+	fs.Infof(nil, "%s", remoteDir)
 	cid, err := f.getDirID(ctx, remoteDir)
 	if err != nil {
 		return nil, err
 	}
+	fs.Infof(nil, "%d", cid)
 
 	pageSize := int64(1000)
 	offset := int64(0)
@@ -578,6 +580,7 @@ func (f *Fs) readDir(ctx context.Context, remoteDir string) ([]*api.FileInfo, er
 		}
 
 		for idx := range resp.Data {
+			fs.Infof(nil, "%+v\n", &resp.Data[idx])
 			files = append(files, &resp.Data[idx])
 		}
 
@@ -879,27 +882,6 @@ func (f *Fs) createUploadTicket(ctx context.Context, cid int64, name string, in 
 	return &info, dr, nil
 }
 
-func (f *Fs) getUploadInfo(ctx context.Context) (*api.UploadInfoResponse, error) {
-	opts := rest.Opts{
-		Method:  http.MethodGet,
-		RootURL: "https://proapi.115.com",
-		Path:    "/app/uploadinfo",
-	}
-
-	var err error
-	var info api.UploadInfoResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &info, nil
-}
-
 func (f *Fs) getUploadToken(ctx context.Context) (*api.UploadOssTokenResponse, error) {
 	opts := rest.Opts{
 		Method:  http.MethodGet,
@@ -1090,9 +1072,9 @@ func (o *Object) ID() string {
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
 	// TODO: enable file upload
-	if true {
-		return fs.ErrorNotImplemented
-	}
+	// if true {
+	// 	return fs.ErrorNotImplemented
+	// }
 
 	f := o.fs
 	obj, err := f.NewObject(ctx, src.Remote())
@@ -1111,6 +1093,23 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		if err != nil {
 			return err
 		}
+	}
+
+	uinfo, err := f.getUploadInfo(ctx)
+	if err != nil {
+		return err
+	}
+	if src.Size() > uinfo.UploadLimit {
+		return fmt.Errorf("file size limit exceeded: %d > %d", src.Size(), uinfo.UploadLimit)
+	}
+
+	// Hash
+	var buf bytes.Buffer
+	tee := io.TeeReader(in, &buf)
+	dr := &crypto.DigestResult{}
+	err = crypto.Digest(in, dr)
+	if err != nil {
+		return err
 	}
 
 	ossClient, err := f.getOssClient(ctx)

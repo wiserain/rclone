@@ -12,7 +12,7 @@ type BaseResponse struct {
 	State bool        `json:"state"`
 }
 
-type UploadInfoResponse struct {
+type UploadInfo struct {
 	Error       string      `json:"error,omitempty"`
 	State       bool        `json:"state"`
 	AppID       json.Number `json:"app_id"`
