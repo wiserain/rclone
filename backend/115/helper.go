@@ -187,3 +187,17 @@ func (f *Fs) moveFile(ctx context.Context, fid, pid string) (info *api.Base, err
 	}
 	return
 }
+
+func (f *Fs) indexInfo(ctx context.Context) (info *api.IndexInfo, err error) {
+	opts := rest.Opts{
+		Method: "GET",
+		Path:   "/files/index_info",
+	}
+
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	return
+}

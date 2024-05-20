@@ -126,7 +126,7 @@ type GetDirIDResponse struct {
 	State      bool        `json:"state"`
 }
 
-type IndexInfoResponse struct {
+type IndexInfo struct {
 	Error string        `json:"error,omitempty"`
 	State bool          `json:"state"`
 	Data  IndexInfoData `json:"data"`

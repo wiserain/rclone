@@ -592,7 +592,7 @@ func (f *Fs) Purge(ctx context.Context, dir string) error {
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	info, err := f.indexInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get usage info: %w", err)
 	}
 
 	usage := &fs.Usage{}
@@ -754,26 +754,6 @@ func (f *Fs) getURL(ctx context.Context, remote string, pickCode string) (string
 	}
 
 	return "", fs.ErrorObjectNotFound
-}
-
-func (f *Fs) indexInfo(ctx context.Context) (*api.IndexInfoResponse, error) {
-	opts := rest.Opts{
-		Method: http.MethodGet,
-		Path:   "/files/index_info",
-	}
-
-	var err error
-	var info api.IndexInfoResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &info, nil
 }
 
 // Creates from the parameters passed in a half finished Object which
