@@ -528,6 +528,58 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	return nil
 }
 
+// Copy src to this remote using server side copy operations.
+//
+// This is stored with the remote path given.
+//
+// It returns the destination Object and a possible error.
+//
+// Will only be called if src.Fs().Name() == f.Name()
+//
+// If it isn't possible then return fs.ErrorCantCopy
+func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	srcObj, ok := src.(*Object)
+	if !ok {
+		fs.Debugf(src, "Can't copy - not same remote type")
+		return nil, fs.ErrorCantCopy
+	}
+	err := srcObj.readMetaData(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create temporary object
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	if err != nil {
+		return nil, err
+	}
+	if srcObj.parent == dstParentID {
+		// api restriction
+		fs.Debugf(src, "Can't copy - same parent")
+		return nil, fs.ErrorCantCopy
+	}
+	// Copy the object
+	if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
+		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	}
+
+	// Can't copy and change name in one step so we have to check if we have
+	// the correct name after copy
+	srcLeaf, _, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if srcLeaf != dstLeaf {
+		// Rename
+		_, err := f.renameFile(ctx, dstObj.id, dstLeaf)
+		if err != nil {
+			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
+		}
+	}
+	return dstObj, dstObj.readMetaData(ctx)
+}
+
 // purgeCheck removes the root directory, if check is set then it
 // refuses to do so if it has anything in
 func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
@@ -937,18 +989,20 @@ func (o *Object) readMetaData(ctx context.Context) error {
 
 // Check the interfaces are satisfied
 var (
-	_ fs.Fs     = (*Fs)(nil)
-	_ fs.Purger = (*Fs)(nil)
-	// _ fs.Copier       = (*Fs)(nil)
+	// _ fs.Commander       = (*Fs)(nil)
+	// _ fs.PublicLinker    = (*Fs)(nil)
+	// _ fs.CleanUpper      = (*Fs)(nil)
+	// _ fs.UserInfoer      = (*Fs)(nil)
+	// _ fs.MimeTyper = (*Object)(nil)
+	_ fs.Fs              = (*Fs)(nil)
+	_ fs.Purger          = (*Fs)(nil)
+	_ fs.Copier          = (*Fs)(nil)
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
-	// _ fs.PublicLinker = (*Fs)(nil)
-	// _ fs.CleanUpper   = (*Fs)(nil)
-	_ fs.Abouter    = (*Fs)(nil)
-	_ fs.Object     = (*Object)(nil)
-	_ fs.ObjectInfo = (*Object)(nil)
-	_ fs.IDer       = (*Object)(nil)
-	_ fs.ParentIDer = (*Object)(nil)
-	// _ fs.MimeTyper = (*Object)(nil)
+	_ fs.Abouter         = (*Fs)(nil)
+	_ fs.Object          = (*Object)(nil)
+	_ fs.ObjectInfo      = (*Object)(nil)
+	_ fs.IDer            = (*Object)(nil)
+	_ fs.ParentIDer      = (*Object)(nil)
 )

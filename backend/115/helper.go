@@ -188,6 +188,34 @@ func (f *Fs) moveFile(ctx context.Context, fid, pid string) (info *api.Base, err
 	return
 }
 
+func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
+	if len(fids) == 0 {
+		return
+	}
+	params := url.Values{}
+	params.Set("pid", pid)
+	for i, fid := range fids {
+		params.Set(fmt.Sprintf("fid[%d]", i), fid)
+	}
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/copy",
+		MultipartParams: url.Values{},
+	}
+
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err == nil && !info.State {
+		return fmt.Errorf("failed to move: %s (%v)", info.Error, info.Errno)
+	}
+	return
+}
+
 func (f *Fs) indexInfo(ctx context.Context) (info *api.IndexInfo, err error) {
 	opts := rest.Opts{
 		Method: "GET",
