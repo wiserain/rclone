@@ -337,10 +337,6 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	return f.newObjectWithInfo(ctx, remote, nil)
 }
 
-func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	return "", nil
-}
-
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
 	// Find the leaf in pathID
@@ -390,14 +386,14 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 	return entries, nil
 }
 
-// // CreateDir makes a directory with pathID as parent and name leaf
-// func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-// 	err = f.makeDir(ctx, pathID, leaf)
-// 	if err != nil {
-// 		return
-// 	}
-// 	return info.File.ID, nil
-// }
+// CreateDir makes a directory with pathID as parent and name leaf
+func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
+	info, err := f.makeDir(ctx, pathID, leaf)
+	if err != nil {
+		return
+	}
+	return info.CID, nil
+}
 
 // Put in to the remote path with the modTime given of the given size
 //
@@ -425,34 +421,8 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 //
 // Shouldn't return an error if it already exists
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
-	paths := strings.Split(f.remotePath(dir), "/")
-	prefix := ""
-	if len(paths) == 0 {
-		return nil
-	}
-
-	for idx := 0; idx+1 < len(paths); idx++ {
-		prefix += "/" + paths[idx]
-		cid, err := f.getDirID(ctx, prefix)
-		if err != nil {
-			return err
-		}
-		if cid == -1 {
-			fs.Logf(f, "make dir fail, cid is -1")
-			return nil
-		}
-
-		err = f.makeDir(ctx, cid, paths[idx+1])
-		if errors.Is(err, fs.ErrorDirExists) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-
-		f.flushDir(prefix)
-	}
-	return nil
+	_, err := f.dirCache.FindDir(ctx, dir, true)
+	return err
 }
 
 // Move src to this remote using server-side move operations.
@@ -703,36 +673,6 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Fi
 		return nil, fs.ErrorObjectNotFound
 	}
 	return info, nil
-}
-
-func (f *Fs) makeDir(ctx context.Context, pid int64, name string) error {
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/add",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-	opts.MultipartParams.Set("cname", f.opt.Enc.FromStandardName(name))
-
-	var err error
-	var info api.MkdirResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		if info.GetErrno() == 20004 {
-			return fs.ErrorDirExists
-		}
-		fs.Logf(f, "make dir fail, pid: %v, name: %v, err: %v, errno: %v", pid, name, info.Error, info.Errno)
-		return nil
-	}
-
-	return nil
 }
 
 func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -76,6 +77,34 @@ OUTER:
 		if offset >= info.Count {
 			break
 		}
+	}
+	return
+}
+
+func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, err error) {
+	params := url.Values{}
+	params.Set("pid", pid)
+	params.Set("cname", f.opt.Enc.FromStandardName(name))
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/add",
+		MultipartParams: params,
+	}
+
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return
+	}
+	if !info.State {
+		if info.Errno == "20004" {
+			return nil, fs.ErrorDirExists
+		}
+		return nil, fmt.Errorf("failed to make a new dir: pid: %v, name: %v, info: %+v", pid, name, info)
 	}
 	return
 }

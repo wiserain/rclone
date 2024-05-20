@@ -37,67 +37,6 @@ type BaseResponse struct {
 	State bool        `json:"state"`
 }
 
-type UploadInfo struct {
-	Error       string      `json:"error,omitempty"`
-	State       bool        `json:"state"`
-	AppID       json.Number `json:"app_id"`
-	AppVersion  json.Number `json:"app_version"`
-	UploadLimit int64       `json:"size_limit"`
-	IspType     int64       `json:"isp_type"`
-	UserID      int64       `json:"user_id"`
-	UserKey     string      `json:"userkey"`
-}
-
-type UploadInitResponse struct {
-	Request   string `json:"request"`
-	ErrorCode int    `json:"statuscode"`
-	ErrorMsg  string `json:"statusmsg"`
-
-	Status   json.Number `json:"status"`
-	PickCode string      `json:"pickcode"`
-
-	// OSS upload fields
-	Bucket   string `json:"bucket"`
-	Object   string `json:"object"`
-	Callback struct {
-		Callback    string `json:"callback"`
-		CallbackVar string `json:"callback_var"`
-	} `json:"callback"`
-
-	// Useless fields
-	FileID   int    `json:"fileid"`
-	FileInfo string `json:"fileinfo"`
-	Target   string `json:"target"`
-}
-
-type UploadOssTokenResponse struct {
-	StatusCode      string `json:"StatusCode"`
-	AccessKeyID     string `json:"AccessKeyId"`
-	AccessKeySecret string `json:"AccessKeySecret"`
-	SecurityToken   string `json:"SecurityToken"`
-	Expiration      string `json:"Expiration"`
-}
-
-// type GetFilesResponse struct {
-// 	AreaID     string      `json:"aid"`
-// 	CategoryID json.Number `json:"cid"`
-// 	Count      int64       `json:"count"`
-// 	Cur        int64       `json:"cur"`
-// 	Data       []FileInfo  `json:"data"`
-// 	DataSource string      `json:"data_source"`
-// 	Errno      int64       `json:"errNo"`
-// 	Error      string      `json:"error"`
-// 	Limit      int64       `json:"limit"`
-// 	MaxSize    int64       `json:"max_size"`
-// 	MinSize    int64       `json:"min_size"`
-// 	Offset     int64       `json:"offset"`
-// 	Order      string      `json:"order"`
-// 	PageSize   int64       `json:"page_size"`
-// 	Path       []FileInfo  `json:"path"`
-// 	State      bool        `json:"state"`
-// 	Suffix     string      `json:"suffix"`
-// }
-
 type File struct {
 	FID       string      `json:"fid,omitempty"` // file; empty if dir
 	UID       json.Number `json:"uid,omitempty"` // user
@@ -168,6 +107,17 @@ type FileList struct {
 	ErrNo          int         `json:"errNo,omitempty"`
 }
 
+type NewDir struct {
+	State    bool   `json:"state,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Errno    string `json:"errno,omitempty"`
+	AID      int    `json:"aid,omitempty"`
+	CID      string `json:"cid,omitempty"`
+	Cname    string `json:"cname,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	FileName string `json:"file_name,omitempty"`
+}
+
 type GetDirIDResponse struct {
 	Errno      json.Number `json:"errno"`
 	Error      string      `json:"error"`
@@ -199,12 +149,6 @@ type GetURLResponse struct {
 	Data  json.RawMessage `json:"data,omitempty"`
 }
 
-type MkdirResponse struct {
-	Errno interface{} `json:"errno"`
-	Error string      `json:"error,omitempty"`
-	State bool        `json:"state"`
-}
-
 type DownloadURL struct {
 	URL    string      `json:"url"`
 	Client json.Number `json:"client"`
@@ -220,18 +164,3 @@ type DownloadInfo struct {
 }
 
 type DownloadData map[string]*DownloadInfo
-
-func (r *MkdirResponse) GetErrno() int64 {
-	if val, ok := r.Errno.(string); ok {
-		errno, _ := strconv.ParseInt(val, 10, 64)
-		return errno
-	}
-	if val, ok := r.Errno.(int64); ok {
-		return val
-	}
-	if val, ok := r.Errno.(float64); ok {
-		return int64(val)
-	}
-
-	return 0
-}
