@@ -31,8 +31,8 @@ func (t *Time) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type BaseResponse struct {
-	Errno interface{} `json:"errno"`
+type Base struct {
+	Errno interface{} `json:"errno"` // string or int...
 	Error string      `json:"error,omitempty"`
 	State bool        `json:"state"`
 }

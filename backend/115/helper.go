@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
@@ -104,7 +105,85 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 		if info.Errno == "20004" {
 			return nil, fs.ErrorDirExists
 		}
-		return nil, fmt.Errorf("failed to make a new dir: pid: %v, name: %v, info: %+v", pid, name, info)
+		return nil, fmt.Errorf("failed to make a new dir: %s (%s)", info.Error, info.Errno)
+	}
+	return
+}
+
+func (f *Fs) renameFile(ctx context.Context, fid, newName string) (info *api.Base, err error) {
+	params := url.Values{}
+	params.Set("fid", fid)
+	params.Set("file_name", newName)
+	params.Set(fmt.Sprintf("files_new_name[%s]", fid), newName)
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/batch_rename",
+		MultipartParams: params,
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return
+	}
+	if !info.State {
+		return nil, fmt.Errorf("failed to rename: %s (%v)", info.Error, info.Errno)
+	}
+	return
+}
+
+func (f *Fs) deleteFile(ctx context.Context, fid, pid string) (info *api.Base, err error) {
+	params := url.Values{}
+	params.Set("fid[0]", fid)
+	params.Set("pid", pid)
+	params.Set("ignore_warn", "1")
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/rb/delete",
+		MultipartParams: params,
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return
+	}
+	if !info.State {
+		if errno, ok := info.Errno.(int64); ok && errno == 990009 {
+			time.Sleep(time.Second)
+		}
+		return nil, fmt.Errorf("failed to delete: %s (%v)", info.Error, info.Errno)
+	}
+	return
+}
+
+func (f *Fs) moveFile(ctx context.Context, fid, pid string) (info *api.Base, err error) {
+	params := url.Values{}
+	params.Set("fid[0]", fid)
+	params.Set("pid", pid)
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/move",
+		MultipartParams: url.Values{},
+	}
+
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return
+	}
+	if !info.State {
+		return nil, fmt.Errorf("failed to move: %s (%v)", info.Error, info.Errno)
 	}
 	return
 }

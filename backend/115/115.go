@@ -3,7 +3,6 @@ package _115
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -408,7 +407,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
-	// // TODO: enable file upload
+	// TODO: enable file upload
 	// if true {
 	// 	return nil, fs.ErrorNotImplemented
 	// }
@@ -486,57 +485,57 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
-	if src.Name() != f.Name() {
-		return fs.ErrorCantDirMove
-	}
+	// if src.Name() != f.Name() {
+	// 	return fs.ErrorCantDirMove
+	// }
 
-	srcFs := src.(*Fs)
-	cid, err := f.getDirID(ctx, srcFs.remotePath(srcRemote))
-	if err != nil {
-		return err
-	}
+	// srcFs := src.(*Fs)
+	// cid, err := f.getDirID(ctx, srcFs.remotePath(srcRemote))
+	// if err != nil {
+	// 	return err
+	// }
 
-	srcParent, srcName := path.Split(srcFs.remotePath(srcRemote))
-	dstParent, dstName := path.Split(f.remotePath(dstRemote))
-	if srcParent == dstParent {
-		if srcName == dstName {
-			return fs.ErrorDirExists
-		}
+	// srcParent, srcName := path.Split(srcFs.remotePath(srcRemote))
+	// dstParent, dstName := path.Split(f.remotePath(dstRemote))
+	// if srcParent == dstParent {
+	// 	if srcName == dstName {
+	// 		return fs.ErrorDirExists
+	// 	}
 
-		err = f.renameFile(ctx, cid, dstName)
-		if err != nil {
-			return err
-		}
-	} else {
-		pid, err := f.getDirID(ctx, dstParent)
-		if errors.Is(err, fs.ErrorDirNotFound) {
-			newDir, _ := path.Split(path.Clean(dstRemote))
-			err = f.Mkdir(ctx, newDir)
-			if err != nil {
-				return err
-			}
-			pid, err = f.getDirID(ctx, dstParent)
-		}
-		if err != nil {
-			return err
-		}
+	// 	err = f.renameFile(ctx, cid, dstName)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// } else {
+	// 	pid, err := f.getDirID(ctx, dstParent)
+	// 	if errors.Is(err, fs.ErrorDirNotFound) {
+	// 		newDir, _ := path.Split(path.Clean(dstRemote))
+	// 		err = f.Mkdir(ctx, newDir)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		pid, err = f.getDirID(ctx, dstParent)
+	// 	}
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-		err = f.moveFile(ctx, cid, pid)
-		if err != nil {
-			return err
-		}
-		if srcName != dstName {
-			err = f.renameFile(ctx, cid, dstName)
-			if err != nil {
-				return err
-			}
-		}
-	}
+	// 	err = f.moveFile(ctx, cid, pid)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if srcName != dstName {
+	// 		err = f.renameFile(ctx, cid, dstName)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	}
+	// }
 
-	for _, dir := range []string{srcParent, dstParent, srcFs.remotePath(srcRemote), f.remotePath(dstRemote)} {
-		f.flushDir(dir)
-		srcFs.flushDir(dir)
-	}
+	// for _, dir := range []string{srcParent, dstParent, srcFs.remotePath(srcRemote), f.remotePath(dstRemote)} {
+	// 	f.flushDir(dir)
+	// 	srcFs.flushDir(dir)
+	// }
 	return nil
 }
 
@@ -700,93 +699,6 @@ func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {
 
 	cid, _ := info.CategoryID.Int64()
 	return cid, nil
-}
-
-func (f *Fs) deleteFile(ctx context.Context, fid int64, pid int64) error {
-	fs.Logf(f, "delete file, fid: %v, pid: %v", fid, pid)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/rb/delete",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("fid[0]", strconv.FormatInt(fid, 10))
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-	opts.MultipartParams.Set("ignore_warn", "1")
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		if errno, ok := info.Errno.(int64); ok && errno == 990009 {
-			time.Sleep(time.Second)
-		}
-		fs.Logf(f, "delete file fail, not state, err: %v, errno: %v", info.Error, info.Errno)
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) moveFile(ctx context.Context, fid int64, pid int64) error {
-	fs.Logf(f, "move file, fid: %v, pid: %v", fid, pid)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/move",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("fid[0]", strconv.FormatInt(fid, 10))
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		fs.Logf(f, "move file fail, not state")
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) renameFile(ctx context.Context, fid int64, name string) error {
-	fs.Logf(f, "rename file, fid: %v, name: %v", fid, name)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/batch_rename",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set(fmt.Sprintf("files_new_name[%d]", fid), name)
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		fs.Logf(f, "rename file fail, not state, err: %v", info.Error)
-		return nil
-	}
-
-	return nil
 }
 
 func (f *Fs) getURL(ctx context.Context, remote string, pickCode string) (string, error) {
