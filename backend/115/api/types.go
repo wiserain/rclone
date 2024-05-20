@@ -3,8 +3,33 @@ package api
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// Time represents date and time information
+type Time time.Time
+
+// MarshalJSON turns a Time into JSON (in UTC)
+func (t *Time) MarshalJSON() (out []byte, err error) {
+	timeString := strconv.Itoa(int((*time.Time)(t).Unix()))
+	return []byte(timeString), nil
+}
+
+// UnmarshalJSON turns JSON into a Time
+func (t *Time) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	if s == "null" || s == "" {
+		return nil
+	}
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	newT := time.Unix(i, 0)
+	*t = Time(newT)
+	return nil
+}
 
 type BaseResponse struct {
 	Errno interface{} `json:"errno"`
@@ -53,24 +78,94 @@ type UploadOssTokenResponse struct {
 	Expiration      string `json:"Expiration"`
 }
 
-type GetFilesResponse struct {
-	AreaID     string      `json:"aid"`
-	CategoryID json.Number `json:"cid"`
-	Count      int64       `json:"count"`
-	Cur        int64       `json:"cur"`
-	Data       []FileInfo  `json:"data"`
-	DataSource string      `json:"data_source"`
-	Errno      int64       `json:"errNo"`
-	Error      string      `json:"error"`
-	Limit      int64       `json:"limit"`
-	MaxSize    int64       `json:"max_size"`
-	MinSize    int64       `json:"min_size"`
-	Offset     int64       `json:"offset"`
-	Order      string      `json:"order"`
-	PageSize   int64       `json:"page_size"`
-	Path       []FileInfo  `json:"path"`
-	State      bool        `json:"state"`
-	Suffix     string      `json:"suffix"`
+// type GetFilesResponse struct {
+// 	AreaID     string      `json:"aid"`
+// 	CategoryID json.Number `json:"cid"`
+// 	Count      int64       `json:"count"`
+// 	Cur        int64       `json:"cur"`
+// 	Data       []FileInfo  `json:"data"`
+// 	DataSource string      `json:"data_source"`
+// 	Errno      int64       `json:"errNo"`
+// 	Error      string      `json:"error"`
+// 	Limit      int64       `json:"limit"`
+// 	MaxSize    int64       `json:"max_size"`
+// 	MinSize    int64       `json:"min_size"`
+// 	Offset     int64       `json:"offset"`
+// 	Order      string      `json:"order"`
+// 	PageSize   int64       `json:"page_size"`
+// 	Path       []FileInfo  `json:"path"`
+// 	State      bool        `json:"state"`
+// 	Suffix     string      `json:"suffix"`
+// }
+
+type File struct {
+	FID       string      `json:"fid,omitempty"` // file; empty if dir
+	UID       json.Number `json:"uid,omitempty"` // user
+	AID       json.Number `json:"aid,omitempty"` // area
+	CID       string      `json:"cid,omitempty"` // category == directory
+	PID       string      `json:"pid,omitempty"` // parent
+	Name      string      `json:"n,omitempty"`
+	Size      int64       `json:"s,omitempty"`
+	PickCode  string      `json:"pc,omitempty"`
+	T         string      `json:"t,omitempty"`  // mtime "2024-05-19 03:54" or "1715919337"
+	Te        Time        `json:"te,omitempty"` // mtime
+	Tp        Time        `json:"tp,omitempty"` // ctime
+	Tu        Time        `json:"tu,omitempty"` // mtime
+	To        Time        `json:"to,omitempty"` // atime 0 if never accessed or "1716165082"
+	Ico       string      `json:"ico,omitempty"`
+	Class     string      `json:"class,omitempty"`
+	Sha       string      `json:"sha,omitempty"`
+	CheckCode int         `json:"check_code,omitempty"`
+	CheckMsg  string      `json:"check_msg,omitempty"`
+	Score     int         `json:"score,omitempty"`
+	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
+}
+
+type FilePath struct {
+	Name string      `json:"name,omitempty"`
+	AID  json.Number `json:"aid,omitempty"` // area
+	CID  json.Number `json:"cid,omitempty"` // category
+	PID  json.Number `json:"pid,omitempty"` // parent
+	Isp  json.Number `json:"isp,omitempty"`
+	PCid string      `json:"p_cid,omitempty"`
+	Iss  string      `json:"iss,omitempty"`
+	Fv   string      `json:"fv,omitempty"`
+	Fvs  string      `json:"fvs,omitempty"`
+}
+
+type FileList struct {
+	Files          []*File     `json:"data,omitempty"`
+	Count          int         `json:"count,omitempty"`
+	DataSource     string      `json:"data_source,omitempty"`
+	SysCount       int         `json:"sys_count,omitempty"`
+	FileCount      int         `json:"file_count,omitempty"`
+	FolderCount    int         `json:"folder_count,omitempty"`
+	PageSize       int         `json:"page_size,omitempty"`
+	AID            string      `json:"aid,omitempty"`
+	CID            json.Number `json:"cid,omitempty"`
+	IsAsc          int         `json:"is_asc,omitempty"`
+	Star           int         `json:"star,omitempty"`
+	IsShare        int         `json:"is_share,omitempty"`
+	Type           int         `json:"type,omitempty"`
+	IsQ            int         `json:"is_q,omitempty"`
+	RAll           int         `json:"r_all,omitempty"`
+	Stdir          int         `json:"stdir,omitempty"`
+	Cur            int         `json:"cur,omitempty"`
+	MinSize        int         `json:"min_size,omitempty"`
+	MaxSize        int         `json:"max_size,omitempty"`
+	RecordOpenTime string      `json:"record_open_time,omitempty"`
+	Path           []*FilePath `json:"path,omitempty"`
+	Fields         string      `json:"fields,omitempty"`
+	Order          string      `json:"order,omitempty"`
+	FcMix          int         `json:"fc_mix,omitempty"`
+	Natsort        int         `json:"natsort,omitempty"`
+	UID            int         `json:"uid,omitempty"`
+	Offset         int         `json:"offset,omitempty"`
+	Limit          int         `json:"limit,omitempty"`
+	Suffix         string      `json:"suffix,omitempty"`
+	State          bool        `json:"state,omitempty"`
+	Error          string      `json:"error,omitempty"`
+	ErrNo          int         `json:"errNo,omitempty"`
 }
 
 type GetDirIDResponse struct {
@@ -125,60 +220,6 @@ type DownloadInfo struct {
 }
 
 type DownloadData map[string]*DownloadInfo
-
-type FileInfo struct {
-	AreaID     json.Number `json:"aid"`
-	CategoryID json.Number `json:"cid"`
-	FileID     json.Number `json:"fid"`
-	ParentID   json.Number `json:"pid"`
-
-	Name     string      `json:"n"`
-	Type     string      `json:"ico"`
-	Size     json.Number `json:"s"`
-	Sha1     string      `json:"sha"`
-	PickCode string      `json:"pc"`
-
-	CreateTime json.Number `json:"tp"`
-	UpdateTime json.Number `json:"te"`
-}
-
-func (f *FileInfo) GetName() string {
-	return f.Name
-}
-
-func (f *FileInfo) GetSize() int64 {
-	size, _ := f.Size.Int64()
-	return size
-}
-
-func (f *FileInfo) GetUpdateTime() time.Time {
-	updateTime, _ := f.UpdateTime.Int64()
-	return time.Unix(updateTime, 0).UTC()
-}
-
-func (f *FileInfo) GetCreateTime() time.Time {
-	updateTime, _ := f.UpdateTime.Int64()
-	return time.Unix(updateTime, 0).UTC()
-}
-
-func (f *FileInfo) IsDir() bool {
-	return f.GetFileID() == 0
-}
-
-func (f *FileInfo) GetFileID() int64 {
-	fid, _ := f.FileID.Int64()
-	return fid
-}
-
-func (f *FileInfo) GetCategoryID() int64 {
-	cid, _ := f.CategoryID.Int64()
-	return cid
-}
-
-func (f *FileInfo) GetParentID() int64 {
-	pid, _ := f.ParentID.Int64()
-	return pid
-}
 
 func (r *MkdirResponse) GetErrno() int64 {
 	if val, ok := r.Errno.(string); ok {
