@@ -83,14 +83,14 @@ OUTER:
 }
 
 func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, err error) {
-	params := url.Values{}
-	params.Set("pid", pid)
-	params.Set("cname", f.opt.Enc.FromStandardName(name))
+	form := url.Values{}
+	form.Set("pid", pid)
+	form.Set("cname", f.opt.Enc.FromStandardName(name))
 
 	opts := rest.Opts{
 		Method:          "POST",
 		Path:            "/files/add",
-		MultipartParams: params,
+		MultipartParams: form,
 	}
 
 	var resp *http.Response
@@ -98,10 +98,7 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err != nil {
-		return
-	}
-	if !info.State {
+	if err == nil && !info.State {
 		if info.Errno == "20004" {
 			return nil, fs.ErrorDirExists
 		}
@@ -110,98 +107,66 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 	return
 }
 
-func (f *Fs) renameFile(ctx context.Context, fid, newName string) (info *api.Base, err error) {
-	params := url.Values{}
-	params.Set("fid", fid)
-	params.Set("file_name", newName)
-	params.Set(fmt.Sprintf("files_new_name[%s]", fid), newName)
+func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
+	form := url.Values{}
+	form.Set("fid", fid)
+	form.Set("file_name", newName)
+	form.Set(fmt.Sprintf("files_new_name[%s]", fid), newName)
 
 	opts := rest.Opts{
 		Method:          "POST",
 		Path:            "/files/batch_rename",
-		MultipartParams: params,
+		MultipartParams: form,
 	}
+	var info *api.Base
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err != nil {
-		return
-	}
-	if !info.State {
-		return nil, fmt.Errorf("failed to rename: %s (%v)", info.Error, info.Errno)
+	if err == nil && !info.State {
+		return fmt.Errorf("failed to rename: %s (%v)", info.Error, info.Errno)
 	}
 	return
 }
 
-func (f *Fs) deleteFile(ctx context.Context, fid, pid string) (info *api.Base, err error) {
-	params := url.Values{}
-	params.Set("fid[0]", fid)
-	params.Set("pid", pid)
-	params.Set("ignore_warn", "1")
+func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
+	form := url.Values{}
+	for i, fid := range fids {
+		form.Set(fmt.Sprintf("fid[%d]", i), fid)
+	}
 
 	opts := rest.Opts{
 		Method:          "POST",
 		Path:            "/rb/delete",
-		MultipartParams: params,
+		MultipartParams: form,
 	}
+	var info *api.Base
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err != nil {
-		return
-	}
-	if !info.State {
+	if err == nil && !info.State {
 		if errno, ok := info.Errno.(int64); ok && errno == 990009 {
 			time.Sleep(time.Second)
 		}
-		return nil, fmt.Errorf("failed to delete: %s (%v)", info.Error, info.Errno)
+		return fmt.Errorf("failed to delete: %s (%v)", info.Error, info.Errno)
 	}
 	return
 }
 
-func (f *Fs) moveFile(ctx context.Context, fid, pid string) (info *api.Base, err error) {
-	params := url.Values{}
-	params.Set("fid[0]", fid)
-	params.Set("pid", pid)
+func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
+	form := url.Values{}
+	for i, fid := range fids {
+		form.Set(fmt.Sprintf("fid[%d]", i), fid)
+	}
+	form.Set("pid", pid)
 
 	opts := rest.Opts{
 		Method:          "POST",
 		Path:            "/files/move",
-		MultipartParams: url.Values{},
-	}
-
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return
-	}
-	if !info.State {
-		return nil, fmt.Errorf("failed to move: %s (%v)", info.Error, info.Errno)
-	}
-	return
-}
-
-func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
-	if len(fids) == 0 {
-		return
-	}
-	params := url.Values{}
-	params.Set("pid", pid)
-	for i, fid := range fids {
-		params.Set(fmt.Sprintf("fid[%d]", i), fid)
-	}
-
-	opts := rest.Opts{
-		Method:          "POST",
-		Path:            "/files/copy",
-		MultipartParams: url.Values{},
+		MultipartParams: form,
 	}
 
 	var info *api.Base
@@ -212,6 +177,31 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 	})
 	if err == nil && !info.State {
 		return fmt.Errorf("failed to move: %s (%v)", info.Error, info.Errno)
+	}
+	return
+}
+
+func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
+	form := url.Values{}
+	for i, fid := range fids {
+		form.Set(fmt.Sprintf("fid[%d]", i), fid)
+	}
+	form.Set("pid", pid)
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/copy",
+		MultipartParams: form,
+	}
+
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err == nil && !info.State {
+		return fmt.Errorf("failed to copy: %s (%v)", info.Error, info.Errno)
 	}
 	return
 }

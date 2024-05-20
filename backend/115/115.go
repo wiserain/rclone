@@ -463,7 +463,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcParentID != dstParentID {
 		// Do the move
-		if _, err = f.moveFile(ctx, srcObj.id, dstParentID); err != nil {
+		if err = f.moveFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
 			return nil, err
 		}
 	}
@@ -471,17 +471,12 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcLeaf != dstLeaf {
 		// Rename
-		_, err = f.renameFile(ctx, srcObj.id, dstLeaf)
+		err = f.renameFile(ctx, srcObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("move: couldn't rename moved file: %w", err)
 		}
 	}
-	// Update info
-	err = dstObj.readMetaData(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("move: couldn't locate moved file: %w", err)
-	}
-	return dstObj, nil
+	return dstObj, dstObj.readMetaData(ctx)
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
@@ -510,7 +505,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 
 	if srcParentID != dstParentID {
 		// Do the move
-		_, err = f.moveFile(ctx, srcID, dstParentID)
+		err = f.moveFiles(ctx, []string{srcID}, dstParentID)
 		if err != nil {
 			return fmt.Errorf("couldn't dir move: %w", err)
 		}
@@ -519,7 +514,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	// Can't copy and change name in one step so we have to check if we have
 	// the correct name after copy
 	if srcLeaf != dstLeaf {
-		_, err = f.renameFile(ctx, srcID, dstLeaf)
+		err = f.renameFile(ctx, srcID, dstLeaf)
 		if err != nil {
 			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
 		}
@@ -572,7 +567,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcLeaf != dstLeaf {
 		// Rename
-		_, err := f.renameFile(ctx, dstObj.id, dstLeaf)
+		err = f.renameFile(ctx, dstObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
@@ -605,11 +600,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 		}
 	}
 	if root != "" {
-		info, err := f.readMetaDataForPath(ctx, root)
-		if err != nil {
-			return err
-		}
-		_, err = f.deleteFile(ctx, rootID, info.PID)
+		err = f.deleteFiles(ctx, []string{rootID})
 		if err != nil {
 			return err
 		}
@@ -942,8 +933,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // Remove this object
 func (o *Object) Remove(ctx context.Context) error {
-	_, err := o.fs.deleteFile(ctx, o.id, o.parent)
-	return err
+	return o.fs.deleteFiles(ctx, []string{o.id})
 }
 
 // Update in to the object with the modTime given of the given size
