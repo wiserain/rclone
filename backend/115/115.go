@@ -3,6 +3,7 @@ package _115
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -412,8 +413,9 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	// 	return nil, fs.ErrorNotImplemented
 	// }
 
-	o := f.createObject(src.Remote(), src.ModTime(ctx), src.Size())
-	return o, o.Update(ctx, in, src, options...)
+	// o := f.createObject(src.Remote(), src.ModTime(ctx), src.Size())
+	// return o, o.Update(ctx, in, src, options...)
+	return nil, fs.ErrorCantUploadEmptyFiles
 }
 
 // Mkdir makes the directory (container, bucket)
@@ -434,46 +436,52 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	return nil, fs.ErrorCantMove
-	// if src.Fs().Name() != f.Name() {
-	// 	return nil, fs.ErrorCantMove
-	// }
+	if src.Fs().Name() != f.Name() {
+		return nil, fs.ErrorCantMove
+	}
 
-	// srcObj, ok := src.(*Object)
-	// if !ok {
-	// 	fs.Errorf(f, "can not move, not same remote type")
-	// 	return nil, fs.ErrorCantMove
-	// }
+	srcObj, ok := src.(*Object)
+	if !ok {
+		fs.Debugf(src, "Can't move - not same remote type")
+		return nil, fs.ErrorCantMove
+	}
+	err := srcObj.readMetaData(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	// srcParent, srcName := path.Split(f.remotePath(srcObj.remote))
-	// dstParent, dstName := path.Split(f.remotePath(remote))
-	// if srcParent == dstParent {
-	// 	if srcName == dstName {
-	// 		return srcObj, nil
-	// 	}
+	srcLeaf, srcParentID, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	if err != nil {
+		return nil, err
+	}
 
-	// 	err := f.renameFile(ctx, srcObj.id, dstName)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// } else {
-	// 	if srcObj.remote != dstName {
-	// 		return nil, fs.ErrorCantMove
-	// 	}
+	// Create temporary object
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	if err != nil {
+		return nil, err
+	}
 
-	// 	cid, err := f.getDirID(ctx, dstParent)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	err = f.moveFile(ctx, srcObj.id, cid)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// }
+	if srcParentID != dstParentID {
+		// Do the move
+		if _, err = f.moveFile(ctx, srcObj.id, dstParentID); err != nil {
+			return nil, err
+		}
+	}
+	dstObj.id = srcObj.id
 
-	// f.flushDir(srcParent)
-	// f.flushDir(dstParent)
-	// return f.NewObject(ctx, remote)
+	if srcLeaf != dstLeaf {
+		// Rename
+		_, err = f.renameFile(ctx, srcObj.id, dstLeaf)
+		if err != nil {
+			return nil, fmt.Errorf("move: couldn't rename moved file: %w", err)
+		}
+	}
+	// Update info
+	err = dstObj.readMetaData(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("move: couldn't locate moved file: %w", err)
+	}
+	return dstObj, nil
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
@@ -485,57 +493,81 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
-	// if src.Name() != f.Name() {
-	// 	return fs.ErrorCantDirMove
-	// }
+	if src.Name() != f.Name() {
+		return fs.ErrorCantDirMove
+	}
 
-	// srcFs := src.(*Fs)
-	// cid, err := f.getDirID(ctx, srcFs.remotePath(srcRemote))
-	// if err != nil {
-	// 	return err
-	// }
+	srcFs, ok := src.(*Fs)
+	if !ok {
+		fs.Debugf(srcFs, "Can't move directory - not same remote type")
+		return fs.ErrorCantDirMove
+	}
 
-	// srcParent, srcName := path.Split(srcFs.remotePath(srcRemote))
-	// dstParent, dstName := path.Split(f.remotePath(dstRemote))
-	// if srcParent == dstParent {
-	// 	if srcName == dstName {
-	// 		return fs.ErrorDirExists
-	// 	}
+	srcID, srcParentID, srcLeaf, dstParentID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
+	if err != nil {
+		return err
+	}
 
-	// 	err = f.renameFile(ctx, cid, dstName)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// } else {
-	// 	pid, err := f.getDirID(ctx, dstParent)
-	// 	if errors.Is(err, fs.ErrorDirNotFound) {
-	// 		newDir, _ := path.Split(path.Clean(dstRemote))
-	// 		err = f.Mkdir(ctx, newDir)
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 		pid, err = f.getDirID(ctx, dstParent)
-	// 	}
-	// 	if err != nil {
-	// 		return err
-	// 	}
+	if srcParentID != dstParentID {
+		// Do the move
+		_, err = f.moveFile(ctx, srcID, dstParentID)
+		if err != nil {
+			return fmt.Errorf("couldn't dir move: %w", err)
+		}
+	}
 
-	// 	err = f.moveFile(ctx, cid, pid)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if srcName != dstName {
-	// 		err = f.renameFile(ctx, cid, dstName)
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 	}
-	// }
+	// Can't copy and change name in one step so we have to check if we have
+	// the correct name after copy
+	if srcLeaf != dstLeaf {
+		_, err = f.renameFile(ctx, srcID, dstLeaf)
+		if err != nil {
+			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
+		}
+	}
+	srcFs.dirCache.FlushDir(srcRemote)
+	return nil
+}
 
-	// for _, dir := range []string{srcParent, dstParent, srcFs.remotePath(srcRemote), f.remotePath(dstRemote)} {
-	// 	f.flushDir(dir)
-	// 	srcFs.flushDir(dir)
-	// }
+// purgeCheck removes the root directory, if check is set then it
+// refuses to do so if it has anything in
+func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
+	root := path.Join(f.root, dir)
+	if root == "" {
+		return errors.New("can't purge root directory")
+	}
+	rootID, err := f.dirCache.FindDir(ctx, dir, false)
+	if err != nil {
+		return err
+	}
+
+	if check {
+		found, err := f.listAll(ctx, rootID, func(item *api.File) bool {
+			fs.Debugf(dir, "Rmdir: contains file: %q", item.Name)
+			return true
+		})
+		if err != nil {
+			return err
+		}
+		if found {
+			return fs.ErrorDirectoryNotEmpty
+		}
+	}
+	if root != "" {
+		info, err := f.readMetaDataForPath(ctx, root)
+		if err != nil {
+			return err
+		}
+		_, err = f.deleteFile(ctx, rootID, info.PID)
+		if err != nil {
+			return err
+		}
+	} else if check {
+		return errors.New("can't purge root directory")
+	}
+	f.dirCache.FlushDir(dir)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -543,18 +575,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	return nil
-	// files, err := f.readDir(ctx, f.remotePath(dir))
-	// if err != nil {
-	// 	return err
-	// }
-
-	// if len(files) > 0 {
-	// 	fs.Logf(f, "rmdir, is not empty, dir: %v", dir)
-	// 	return fs.ErrorDirectoryNotEmpty
-	// }
-
-	// return f.Purge(ctx, dir)
+	return f.purgeCheck(ctx, dir, true)
 }
 
 // Purge all files in the directory specified
@@ -564,31 +585,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
-	// info, err := f.readMetaDataForPath(ctx, f.remotePath(dir))
-	// if err != nil {
-	// 	fs.Errorf(f, "purge fail, err: %v, dir: %v", err, f.remotePath(dir))
-	// 	if errors.Is(err, fs.ErrorObjectNotFound) {
-	// 		return fs.ErrorDirNotFound
-	// 	}
-	// 	return err
-	// }
-	// if !info.IsDir() {
-	// 	return fs.ErrorIsFile
-	// }
-	// if info.GetCategoryID() == 0 {
-	// 	fs.Logf(f, "is root dir, can not purge")
-	// 	return nil
-	// }
-
-	// err = f.deleteFile(ctx, info.GetCategoryID(), info.GetParentID())
-	// if err != nil {
-	// 	return err
-	// }
-
-	// parent, _ := path.Split(f.remotePath(dir))
-	// f.flushDir(parent)
-
-	return nil
+	return f.purgeCheck(ctx, dir, false)
 }
 
 // About gets quota information from the Fs
@@ -779,13 +776,26 @@ func (f *Fs) indexInfo(ctx context.Context) (*api.IndexInfoResponse, error) {
 	return &info, nil
 }
 
-func (f *Fs) createObject(remote string, modTime time.Time, size int64) *Object {
-	return &Object{
+// Creates from the parameters passed in a half finished Object which
+// must have setMetaData called on it
+//
+// Returns the object, leaf, dirID and error.
+//
+// Used to create new objects
+func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time, size int64) (o *Object, leaf string, dirID string, err error) {
+	// Create the directory for the object if it doesn't exist
+	leaf, dirID, err = f.dirCache.FindPath(ctx, remote, true)
+	if err != nil {
+		return
+	}
+	// Temporary Object under construction
+	o = &Object{
 		fs:     f,
 		remote: remote,
 		size:   size,
 		mTime:  modTime,
 	}
+	return o, leaf, dirID, nil
 }
 
 func (f *Fs) remotePath(name string) string {
@@ -900,25 +910,8 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // Remove this object
 func (o *Object) Remove(ctx context.Context) error {
-	// info, err := o.fs.readMetaDataForPath(ctx, o.fs.remotePath(o.Remote()))
-	// if err != nil {
-	// 	fs.Errorf(o.fs, "remove object fail, err: %v, remote: %v", err, o.remote)
-	// 	return err
-	// }
-
-	// if info.IsDir() {
-	// 	return fs.ErrorIsDir
-	// }
-
-	// err = o.fs.deleteFile(ctx, info.GetFileID(), info.GetCategoryID())
-	// if err != nil {
-	// 	return err
-	// }
-
-	// parent, _ := path.Split(o.fs.remotePath(o.remote))
-	// o.fs.flushDir(parent)
-
-	return nil
+	_, err := o.fs.deleteFile(ctx, o.id, o.parent)
+	return err
 }
 
 // Update in to the object with the modTime given of the given size
