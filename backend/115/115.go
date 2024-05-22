@@ -252,7 +252,7 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
 
 	// Find the current root
-	err = f.dirCache.FindRoot(ctx, false)
+	err = f.dirCache.FindRoot(ctx, false) // TODO: can be improved using FileList.Path
 	if err != nil {
 		// Assume it is a file
 		newRoot, remote := dircache.SplitPath(f.root)
@@ -839,7 +839,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	// 	// zero-byte objects may have no download link
 	// 	return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 	// }
-	downURL, err := o.fs.getDwonURL(ctx, o.pickCode, "")
+	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
 	if err != nil {
 		return nil, err
 	}

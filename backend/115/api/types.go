@@ -12,8 +12,8 @@ type Time time.Time
 
 // MarshalJSON turns a Time into JSON (in UTC)
 func (t *Time) MarshalJSON() (out []byte, err error) {
-	timeString := strconv.Itoa(int((*time.Time)(t).Unix()))
-	return []byte(timeString), nil
+	s := strconv.Itoa(int((*time.Time)(t).Unix()))
+	return []byte(s), nil
 }
 
 // UnmarshalJSON turns JSON into a Time
@@ -56,8 +56,21 @@ func (e *Int) UnmarshalJSON(in []byte) (err error) {
 	if s == "" {
 		s = "0"
 	}
-	if n, err := strconv.Atoi(s); err == nil {
-		*e = Int(n)
+	if i, err := strconv.Atoi(s); err == nil {
+		*e = Int(i)
+	}
+	return
+}
+
+type Int64 int64
+
+func (e *Int64) UnmarshalJSON(in []byte) (err error) {
+	s := strings.Trim(string(in), `"`)
+	if s == "" {
+		s = "0"
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		*e = Int64(i)
 	}
 	return
 }
@@ -131,7 +144,7 @@ type FileList struct {
 	Order          string      `json:"order,omitempty"`
 	FcMix          int         `json:"fc_mix,omitempty"`
 	Natsort        int         `json:"natsort,omitempty"`
-	UID            int         `json:"uid,omitempty"`
+	UID            json.Number `json:"uid,omitempty"`
 	Offset         int         `json:"offset,omitempty"`
 	Limit          int         `json:"limit,omitempty"`
 	Suffix         string      `json:"suffix,omitempty"`
@@ -151,6 +164,7 @@ type NewDir struct {
 	FileName string `json:"file_name,omitempty"`
 }
 
+// TODO
 type GetDirIDResponse struct {
 	Errno      json.Number `json:"errno"`
 	Error      string      `json:"error"`
@@ -177,7 +191,7 @@ type DownloadURL struct {
 
 type DownloadInfo struct {
 	FileName string      `json:"file_name"`
-	FileSize json.Number `json:"file_size"`
+	FileSize Int64       `json:"file_size"`
 	PickCode string      `json:"pick_code"`
 	URL      DownloadURL `json:"url"`
 }

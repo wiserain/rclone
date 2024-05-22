@@ -231,7 +231,7 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	return
 }
 
-func (f *Fs) getDownloadData(ctx context.Context, data, UA string) (encData string, err error) {
+func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, err error) {
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
@@ -257,13 +257,13 @@ func (f *Fs) getDownloadData(ctx context.Context, data, UA string) (encData stri
 	return
 }
 
-func (f *Fs) getDwonURL(ctx context.Context, pickCode, UA string) (string, error) {
+func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (string, error) {
 	// pickCode -> data -> reqData
 	key := crypto.GenerateKey()
 	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
 	reqData := crypto.Encode(data, key)
 
-	encData, err := f.getDownloadData(ctx, reqData, UA)
+	encData, err := f.getDownData(ctx, reqData, UA)
 	if err != nil {
 		return "", err
 	}
@@ -279,8 +279,7 @@ func (f *Fs) getDwonURL(ctx context.Context, pickCode, UA string) (string, error
 	}
 
 	for _, downInfo := range downData {
-		fileSize, _ := downInfo.FileSize.Int64()
-		if fileSize == 0 { // TODO
+		if downInfo.FileSize == 0 { // TODO
 			return "", fs.ErrorObjectNotFound
 		}
 		return downInfo.URL.URL, nil
