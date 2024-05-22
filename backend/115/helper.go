@@ -2,6 +2,8 @@ package _115
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/backend/115/crypto"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -38,7 +41,6 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	params.Set("show_dir", "1")
 	params.Set("limit", strconv.Itoa(ListLimit))
 	params.Set("snap", "0")
-	params.Set("natsort", "1")
 	params.Set("record_open_time", "1")
 	params.Set("count_folders", "1")
 	params.Set("format", "json")
@@ -63,6 +65,8 @@ OUTER:
 		})
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)
+		} else if !info.State {
+			return found, fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
 		}
 		if len(info.Files) == 0 {
 			break
@@ -99,10 +103,10 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		if info.Errno == "20004" {
+		if info.Errno == 20004 {
 			return nil, fs.ErrorDirExists
 		}
-		return nil, fmt.Errorf("failed to make a new dir: %s (%s)", info.Error, info.Errno)
+		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -125,7 +129,7 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		return fmt.Errorf("failed to rename: %s (%v)", info.Error, info.Errno)
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -148,10 +152,10 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		if errno, ok := info.Errno.(int64); ok && errno == 990009 {
+		if info.Errno == 990009 {
 			time.Sleep(time.Second)
 		}
-		return fmt.Errorf("failed to delete: %s (%v)", info.Error, info.Errno)
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -176,7 +180,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		return fmt.Errorf("failed to move: %s (%v)", info.Error, info.Errno)
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -201,21 +205,85 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		return fmt.Errorf("failed to copy: %s (%v)", info.Error, info.Errno)
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
 
-func (f *Fs) indexInfo(ctx context.Context) (info *api.IndexInfo, err error) {
+func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	opts := rest.Opts{
 		Method: "GET",
 		Path:   "/files/index_info",
 	}
 
+	var info *api.Base
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
+	if err == nil && !info.State {
+		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	if data = info.Data.IndexInfo; data == nil {
+		return nil, errors.New("no data")
+	}
 	return
+}
+
+func (f *Fs) getDownloadData(ctx context.Context, data, UA string) (encData string, err error) {
+	t := strconv.Itoa(int(time.Now().Unix()))
+	opts := rest.Opts{
+		Method:          "POST",
+		RootURL:         "https://proapi.115.com/app/chrome/downurl",
+		Parameters:      url.Values{"t": {t}},
+		MultipartParams: url.Values{"data": {data}},
+	}
+	if UA != "" {
+		opts.ExtraHeaders = map[string]string{"User-Agent": UA}
+	}
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err == nil && !info.State {
+		return "", fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	if encData = info.Data.EncodedData; encData == "" {
+		return "", errors.New("no data")
+	}
+	return
+}
+
+func (f *Fs) getDwonURL(ctx context.Context, pickCode, UA string) (string, error) {
+	// pickCode -> data -> reqData
+	key := crypto.GenerateKey()
+	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
+	reqData := crypto.Encode(data, key)
+
+	encData, err := f.getDownloadData(ctx, reqData, UA)
+	if err != nil {
+		return "", err
+	}
+
+	decData, err := crypto.Decode(encData, key)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode data: %w", err)
+	}
+
+	downData := api.DownloadData{}
+	if err := json.Unmarshal(decData, &downData); err != nil {
+		return "", fmt.Errorf("failed to json.Unmarshal %q", string(decData))
+	}
+
+	for _, downInfo := range downData {
+		fileSize, _ := downInfo.FileSize.Int64()
+		if fileSize == 0 { // TODO
+			return "", fs.ErrorObjectNotFound
+		}
+		return downInfo.URL.URL, nil
+	}
+	return "", fs.ErrorObjectNotFound
 }

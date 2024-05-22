@@ -2,20 +2,16 @@ package _115
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/patrickmn/go-cache"
 	"github.com/rclone/rclone/backend/115/api"
-	"github.com/rclone/rclone/backend/115/crypto"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -108,7 +104,6 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
-	cache        *cache.Cache
 }
 
 // Object describes a 115 object
@@ -224,10 +219,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	root := strings.Trim(path, "/")
 
 	f := &Fs{
-		name:  name,
-		root:  root,
-		opt:   *opt,
-		cache: cache.New(time.Minute, time.Minute*2),
+		name: name,
+		root: root,
+		opt:  *opt,
 	}
 	f.features = (&fs.Features{
 		CanHaveEmptyDirectories: true, // can have empty directories
@@ -639,13 +633,13 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	}
 
 	usage := &fs.Usage{}
-	if totalInfo, ok := info.Data.SpaceInfo["all_total"]; ok {
+	if totalInfo, ok := info.SpaceInfo["all_total"]; ok {
 		usage.Total = fs.NewUsageValue(int64(totalInfo.Size))
 	}
-	if useInfo, ok := info.Data.SpaceInfo["all_use"]; ok {
+	if useInfo, ok := info.SpaceInfo["all_use"]; ok {
 		usage.Used = fs.NewUsageValue(int64(useInfo.Size))
 	}
-	if remainInfo, ok := info.Data.SpaceInfo["all_remain"]; ok {
+	if remainInfo, ok := info.SpaceInfo["all_remain"]; ok {
 		usage.Free = fs.NewUsageValue(int64(remainInfo.Size))
 	}
 
@@ -741,64 +735,6 @@ func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {
 	return cid, nil
 }
 
-func (f *Fs) getURL(ctx context.Context, remote string, pickCode string) (string, error) {
-	cacheKey := fmt.Sprintf("url:%s", pickCode)
-	if value, ok := f.cache.Get(cacheKey); ok {
-		return value.(string), nil
-	}
-
-	key := crypto.GenerateKey()
-	data, _ := json.Marshal(map[string]string{
-		"pickcode": pickCode,
-	})
-
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		RootURL:         "https://proapi.115.com",
-		Path:            "/app/chrome/downurl",
-		Parameters:      url.Values{},
-		MultipartParams: url.Values{},
-	}
-	opts.Parameters.Add("t", strconv.FormatInt(time.Now().Unix(), 10))
-	opts.MultipartParams.Set("data", crypto.Encode(data, key))
-	var err error
-	var info api.GetURLResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	var encodedData string
-	if err := json.Unmarshal(info.Data, &encodedData); err != nil {
-		return "", fmt.Errorf("api get download url, call json.Unmarshal fail, body: %s", string(info.Data))
-	}
-	decodedData, err := crypto.Decode(encodedData, key)
-	if err != nil {
-		return "", fmt.Errorf("api get download url, call Decode fail, err: %w", err)
-	}
-
-	result := api.DownloadData{}
-	if err := json.Unmarshal(decodedData, &result); err != nil {
-		return "", fmt.Errorf("api get download url, call json.Unmarshal fail, body: %s", string(decodedData))
-	}
-
-	for _, info := range result {
-		fileSize, _ := info.FileSize.Int64()
-		if fileSize == 0 {
-			return "", fs.ErrorObjectNotFound
-		}
-		f.cache.SetDefault(cacheKey, info.URL.URL)
-		return info.URL.URL, nil
-	}
-
-	return "", fs.ErrorObjectNotFound
-}
-
 // Creates from the parameters passed in a half finished Object which
 // must have setMetaData called on it
 //
@@ -819,19 +755,6 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		mTime:  modTime,
 	}
 	return o, leaf, dirID, nil
-}
-
-func (f *Fs) remotePath(name string) string {
-	name = path.Join(f.root, name)
-	if name == "" || name[0] != '/' {
-		name = "/" + name
-	}
-	return path.Clean(name)
-}
-
-func (f *Fs) flushDir(dir string) {
-	cacheKey := fmt.Sprintf("files:%v", path.Clean(dir))
-	f.cache.Delete(cacheKey)
 }
 
 // ------------------------------------------------------------
@@ -907,15 +830,23 @@ func (o *Object) Storable() bool {
 
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
-	fs.Logf(o.fs, "open %v, options: %v", o.remote, options)
-	targetURL, err := o.fs.getURL(ctx, o.remote, o.pickCode)
+	if o.id == "" {
+		return nil, errors.New("can't download - no id")
+	}
+	// TODO: handling of size zero objects
+	// TODO: multithread download, linkMu, linkCache
+	// if o.size == 0 {
+	// 	// zero-byte objects may have no download link
+	// 	return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
+	// }
+	downURL, err := o.fs.getDwonURL(ctx, o.pickCode, "")
 	if err != nil {
 		return nil, err
 	}
 	fs.FixRangeOption(options, o.size)
 	opts := rest.Opts{
-		Method:  http.MethodGet,
-		RootURL: targetURL,
+		Method:  "GET",
+		RootURL: downURL,
 		Options: options,
 	}
 

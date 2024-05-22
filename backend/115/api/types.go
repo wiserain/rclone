@@ -31,10 +31,43 @@ func (t *Time) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type Data struct {
+	IndexInfo   *IndexInfo
+	EncodedData string
+}
+
+func (d *Data) UnmarshalJSON(in []byte) (err error) {
+	idx, str := IndexInfo{}, ""
+	if err = json.Unmarshal(in, &idx); err == nil {
+		d.IndexInfo = &idx
+		return
+	}
+	if err = json.Unmarshal(in, &str); err == nil {
+		d.EncodedData = str
+		return
+	}
+	return
+}
+
+type Int int
+
+func (e *Int) UnmarshalJSON(in []byte) (err error) {
+	s := strings.Trim(string(in), `"`)
+	if s == "" {
+		s = "0"
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		*e = Int(n)
+	}
+	return
+}
+
 type Base struct {
-	Errno interface{} `json:"errno"` // string or int...
-	Error string      `json:"error,omitempty"`
-	State bool        `json:"state"`
+	Msg   string `json:"msg,omitempty"`
+	Errno Int    `json:"errno,omitempty"`
+	Error string `json:"error,omitempty"`
+	State bool   `json:"state,omitempty"`
+	Data  Data   `json:"data,omitempty"`
 }
 
 type File struct {
@@ -110,7 +143,7 @@ type FileList struct {
 type NewDir struct {
 	State    bool   `json:"state,omitempty"`
 	Error    string `json:"error,omitempty"`
-	Errno    string `json:"errno,omitempty"`
+	Errno    Int    `json:"errno,omitempty"`
 	AID      int    `json:"aid,omitempty"`
 	CID      string `json:"cid,omitempty"`
 	Cname    string `json:"cname,omitempty"`
@@ -127,12 +160,6 @@ type GetDirIDResponse struct {
 }
 
 type IndexInfo struct {
-	Error string        `json:"error,omitempty"`
-	State bool          `json:"state"`
-	Data  IndexInfoData `json:"data"`
-}
-
-type IndexInfoData struct {
 	SpaceInfo map[string]SizeInfo `json:"space_info"`
 }
 
@@ -141,19 +168,11 @@ type SizeInfo struct {
 	SizeFormat string  `json:"size_format"`
 }
 
-type GetURLResponse struct {
-	State bool            `json:"state"`
-	Msg   string          `json:"msg"`
-	Errno json.Number     `json:"errno"`
-	Error string          `json:"error,omitempty"`
-	Data  json.RawMessage `json:"data,omitempty"`
-}
-
 type DownloadURL struct {
-	URL    string      `json:"url"`
-	Client json.Number `json:"client"`
-	Desc   string      `json:"desc"`
-	OssID  string      `json:"oss_id"`
+	URL    string `json:"url"`
+	Client Int    `json:"client"`
+	Desc   string `json:"desc"`
+	OssID  string `json:"oss_id"`
 }
 
 type DownloadInfo struct {
