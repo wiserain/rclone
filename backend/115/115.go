@@ -27,10 +27,8 @@ import (
 
 // Constants
 const (
-	domain = "www.115.com"
-	// userAgent = "Mozilla/5.0 115Browser/23.9.3.2"
-	// userAgent = driver115.UA115Desktop
-	userAgent = "Mozilla/5.0 115Desktop/2.0.3.6" // TODO make it configurable
+	domain    = "www.115.com"
+	userAgent = "Mozilla/5.0 115Desktop/2.0.3.6" // TODO: make it configurable
 	rootURL   = "https://webapi.115.com"
 
 	minSleep      = 150 * time.Millisecond
@@ -77,20 +75,16 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
-			// TODO check encoding later
-			Default: (encoder.Display |
-				encoder.EncodeCtl |
-				encoder.EncodeLeftSpace |
-				encoder.EncodeRightSpace |
-				encoder.EncodeBackSlash |
-				encoder.EncodeColon |
-				encoder.EncodeAsterisk |
-				encoder.EncodeQuestion |
+			Default: (encoder.EncodeLtGt |
 				encoder.EncodeDoubleQuote |
-				encoder.EncodeLtGt |
-				encoder.EncodePipe |
-				encoder.EncodePercent |
-				encoder.EncodeInvalidUtf8),
+				encoder.EncodeLeftSpace |
+				encoder.EncodeLeftSpace |
+				encoder.EncodeLeftTilde |
+				encoder.EncodeCtl |
+				encoder.EncodeLeftPeriod |
+				encoder.EncodeRightSpace |
+				encoder.EncodeRightPeriod |
+				encoder.EncodeInvalidUtf8), // 文件名不能包含以下任意字符之一""<>" (20003)
 		}},
 	})
 }
