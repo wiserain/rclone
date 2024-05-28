@@ -331,6 +331,7 @@ backends:
  - backend:  "115"
    remote:   "Test115:"
    fastlist: false
+   oneonly:  true
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false

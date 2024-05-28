@@ -44,7 +44,7 @@ func (f *Fs) getUploadInfo(ctx context.Context) (info *api.UploadInfo, err error
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err == nil && !info.State {
 		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
@@ -178,7 +178,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, nil)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, nil, err)
 	})
 	if err != nil {
 		return
@@ -211,7 +211,7 @@ func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err == nil && info.StatusCode != "200" {
 		return nil, fmt.Errorf("StateCode: %s", info.StatusCode)

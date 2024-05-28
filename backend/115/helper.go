@@ -61,7 +61,7 @@ OUTER:
 		var resp *http.Response
 		err = f.pacer.Call(func() (bool, error) {
 			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-			return shouldRetry(ctx, resp, err)
+			return shouldRetry(ctx, resp, &info, err)
 		})
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)
@@ -100,7 +100,7 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -128,7 +128,7 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -153,14 +153,11 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
 	} else if !info.State {
-		if info.Errno == 990009 {
-			time.Sleep(time.Second)
-		}
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
@@ -183,7 +180,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -210,7 +207,7 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -230,7 +227,7 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -258,7 +255,7 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return

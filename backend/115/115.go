@@ -144,11 +144,19 @@ var retryErrorCodes = []int{
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, error) {
+func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err error) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
 	if err == nil {
+		switch apiInfo := info.(type) {
+		case *api.Base:
+			if !apiInfo.State && apiInfo.Errno == 990009 {
+				time.Sleep(time.Second)
+				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
+				return true, fserrors.RetryErrorf("API State false: %s (%d)", apiInfo.Error, apiInfo.Errno)
+			}
+		}
 		return false, nil
 	}
 	if fserrors.ShouldRetry(err) {
@@ -824,7 +832,7 @@ func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, nil, err)
 	})
 	if err != nil {
 		return -1, err
@@ -955,7 +963,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, nil, err)
 	})
 	if err != nil {
 		return nil, err
