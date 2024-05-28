@@ -13,6 +13,7 @@ import (
 
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
@@ -26,8 +27,10 @@ import (
 
 // Constants
 const (
-	domain    = "www.115.com"
-	userAgent = "Mozilla/5.0 115Browser/23.9.3.2"
+	domain = "www.115.com"
+	// userAgent = "Mozilla/5.0 115Browser/23.9.3.2"
+	// userAgent = driver115.UA115Desktop
+	userAgent = "Mozilla/5.0 115Desktop/2.0.3.6" // TODO make it configurable
 	rootURL   = "https://webapi.115.com"
 
 	minSleep      = 150 * time.Millisecond
@@ -66,10 +69,17 @@ Fill in for rclone to use a non root folder as its starting point.
 			Advanced:  true,
 			Sensitive: true,
 		}, {
+			Name:     "hash_memory_limit",
+			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
+			Default:  fs.SizeSuffix(10 * 1024 * 1024),
+			Advanced: true,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
+			// TODO check encoding later
 			Default: (encoder.Display |
+				encoder.EncodeCtl |
 				encoder.EncodeLeftSpace |
 				encoder.EncodeRightSpace |
 				encoder.EncodeBackSlash |
@@ -87,11 +97,12 @@ Fill in for rclone to use a non root folder as its starting point.
 
 // Options defines the configguration of this backend
 type Options struct {
-	UID          string               `config:"uid"`
-	CID          string               `config:"cid"`
-	SEID         string               `config:"seid"`
-	RootFolderID string               `config:"root_folder_id"`
-	Enc          encoder.MultiEncoder `config:"encoding"`
+	UID                 string               `config:"uid"`
+	CID                 string               `config:"cid"`
+	SEID                string               `config:"seid"`
+	RootFolderID        string               `config:"root_folder_id"`
+	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
+	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
 // Fs represents a remote 115 drive
@@ -104,6 +115,8 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
+	// drv          *driver115.Pan115Client
+	ui *api.UploadInfo
 }
 
 // Object describes a 115 object
@@ -205,6 +218,24 @@ func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
 	return nil
 }
 
+// func (f *Fs) newDriver115() (err error) {
+// 	TlsInsecureSkipVerify := true
+// 	opts := []driver115.Option{
+// 		driver115.UA(userAgent),
+// 		func(c *driver115.Pan115Client) {
+// 			c.Client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: TlsInsecureSkipVerify})
+// 		},
+// 	}
+// 	f.drv = driver115.New(opts...)
+// 	cr := &driver115.Credential{}
+// 	cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s", f.opt.UID, f.opt.CID, f.opt.SEID)
+// 	if err = cr.FromCookie(cookie); err != nil {
+// 		return fmt.Errorf("failed to login by cookies: %w", err)
+// 	}
+// 	f.drv.ImportCredential(cr)
+// 	return f.drv.LoginCheck()
+// }
+
 // newFs partially constructs Fs from the path
 //
 // It constructs a valid Fs but doesn't attempt to figure out whether
@@ -224,12 +255,20 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		opt:  *opt,
 	}
 	f.features = (&fs.Features{
+		DuplicateFiles:          true, // allows duplicate files
 		CanHaveEmptyDirectories: true, // can have empty directories
+		// NoMultiThreading         bool // set if can't have multiplethreads on one download open
+		// Overlay                  bool // this wraps one or more backends to add functionality
+		// ChunkWriterDoesntSeek    bool // set if the chunk writer doesn't need to read the data more than once
+		// TODO check other features
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx); err != nil {
 		return nil, err
 	}
+	// if err := f.newDriver115(); err != nil {
+	// 	return nil, err
+	// }
 
 	return f, nil
 }
@@ -307,7 +346,9 @@ func (f *Fs) Features() *fs.Features {
 
 // Precision of the ModTimes in this Fs
 func (f *Fs) Precision() time.Duration {
-	return time.Second
+	return fs.ModTimeNotSupported // TODO: check further
+	// meaning that the modification times from the backend shouldn't be used for syncing
+	// as they can't be set.
 }
 
 // DirCacheFlush resets the directory cache - used in testing as an
@@ -399,17 +440,127 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	fs.Debugf(nil, "Put %s", src)
 	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
-	// TODO: enable file upload
-	// if true {
-	// 	return nil, fs.ErrorNotImplemented
-	// }
+	existingObj, err := f.NewObject(ctx, src.Remote())
+	switch err {
+	case nil:
+		return existingObj, existingObj.Update(ctx, in, src, options...)
+	case fs.ErrorObjectNotFound:
+		// Not found so create it
+		return f.PutUnchecked(ctx, in, src, options...)
+		// newObj := &Object{
+		// 	fs:     f,
+		// 	remote: src.Remote(),
+		// }
+		// return newObj, newObj.Update(ctx, in, src, options...)
+	default:
+		return nil, err
+	}
+}
 
-	// o := f.createObject(src.Remote(), src.ModTime(ctx), src.Size())
-	// return o, o.Update(ctx, in, src, options...)
-	return nil, fs.ErrorCantUploadEmptyFiles
+// PutStream uploads to the remote path with the modTime given of indeterminate size
+func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	// return f.Put(ctx, in, src, options...)
+	return nil, fs.ErrorNotImplemented
+}
+
+// putUnchecked uploads the object with the given name and size
+//
+// This will create a duplicate if we upload a new file without
+// checking to see if there is one already - use Put() for that.
+func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, remote string, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	newObj := &Object{
+		fs: f,
+		// remote: src.Remote(),
+		remote: remote,
+	}
+	if err := newObj.upload(ctx, in, src, options...); err != nil {
+		return nil, fmt.Errorf("failed to upload: %w", err)
+	}
+
+	var info *api.File
+	found, err := f.listAll(ctx, newObj.parent, func(item *api.File) bool {
+		if strings.ToLower(item.Sha) == newObj.sha1sum && item.FID != "" {
+			info = item
+			return true
+		}
+		return false
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to located updated file: %w", err)
+	}
+	if !found {
+		return nil, fs.ErrorObjectNotFound
+	}
+	return newObj, newObj.setMetaData(info)
+}
+
+// PutUnchecked uploads the object
+//
+// This will create a duplicate if we upload a new file without
+// checking to see if there is one already - use Put() for that.
+func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	return f.putUnchecked(ctx, in, src.Remote(), src, options...)
+}
+
+// MergeDirs merges the contents of all the directories passed
+// in into the first one and rmdirs the other directories.
+func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
+	return fs.ErrorNotImplemented
+	// if len(dirs) < 2 {
+	// 	return nil
+	// }
+	// newDirs := dirs[:0]
+	// for _, dir := range dirs {
+	// 	if isShortcutID(dir.ID()) {
+	// 		fs.Infof(dir, "skipping shortcut directory")
+	// 		continue
+	// 	}
+	// 	newDirs = append(newDirs, dir)
+	// }
+	// dirs = newDirs
+	// if len(dirs) < 2 {
+	// 	return nil
+	// }
+	// dstDir := dirs[0]
+	// for _, srcDir := range dirs[1:] {
+	// 	// list the objects
+	// 	infos := []*drive.File{}
+	// 	_, err := f.list(ctx, []string{srcDir.ID()}, "", false, false, f.opt.TrashedOnly, true, func(info *drive.File) bool {
+	// 		infos = append(infos, info)
+	// 		return false
+	// 	})
+	// 	if err != nil {
+	// 		return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
+	// 	}
+	// 	// move them into place
+	// 	for _, info := range infos {
+	// 		fs.Infof(srcDir, "merging %q", info.Name)
+	// 		// Move the file into the destination
+	// 		err = f.pacer.Call(func() (bool, error) {
+	// 			_, err = f.svc.Files.Update(info.Id, nil).
+	// 				RemoveParents(srcDir.ID()).
+	// 				AddParents(dstDir.ID()).
+	// 				Fields("").
+	// 				SupportsAllDrives(true).
+	// 				Context(ctx).Do()
+	// 			return f.shouldRetry(ctx, err)
+	// 		})
+	// 		if err != nil {
+	// 			return fmt.Errorf("MergeDirs move failed on %q in %v: %w", info.Name, srcDir, err)
+	// 		}
+	// 	}
+	// 	// rmdir (into trash) the now empty source directory
+	// 	fs.Infof(srcDir, "removing empty directory")
+	// 	err = f.delete(ctx, srcDir.ID(), true)
+	// 	if err != nil {
+	// 		return fmt.Errorf("MergeDirs move failed to rmdir %q: %w", srcDir, err)
+	// 	}
+	// }
+	// return nil
 }
 
 // Mkdir makes the directory (container, bucket)
@@ -682,6 +833,8 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	return o, nil
 }
 
+// TODO any quicker way
+// If there is a quicker way of finding a given file than listing the parent, then this readMetaDataForPath should implement it. It makes quite a difference to performance if such a call is available.
 func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.File, err error) {
 	leaf, dirID, err := f.dirCache.FindPath(ctx, path, false)
 	if err != nil {
@@ -819,8 +972,9 @@ func (o *Object) ParentID() string {
 
 // SetModTime sets the metadata on the object to set the modification date
 func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
-	o.mTime = modTime
-	return nil
+	// o.mTime = modTime
+	// return nil
+	return fs.ErrorCantSetModTime // TODO check later
 }
 
 // Storable says whether this object can be stored
@@ -839,7 +993,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	// 	// zero-byte objects may have no download link
 	// 	return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 	// }
-	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
+	downURL, reqh, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
 	if err != nil {
 		return nil, err
 	}
@@ -849,6 +1003,11 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		RootURL: downURL,
 		Options: options,
 	}
+	cookie := ""
+	for _, cks := range reqh {
+		cookie += fmt.Sprintf("%s=%s;", cks.Name, cks.Value)
+	}
+	opts.ExtraHeaders = map[string]string{"Cookie": cookie}
 
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
@@ -873,8 +1032,131 @@ func (o *Object) Remove(ctx context.Context) error {
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	// TODO: enable file upload
-	return fs.ErrorNotImplemented
+	fs.Debugf(o, "Update %s", src)
+	if src.Size() < 0 {
+		return errors.New("refusing to update with unknown size")
+	}
+
+	// upload with new size but old name
+	info, err := o.fs.putUnchecked(ctx, in, o.Remote(), src, options...)
+	// info, err := o.fs.putUnchecked(ctx, in, o.Remote(), src.Size(), options...)
+	if err != nil {
+		return err
+	}
+
+	// Delete duplicate after successful upload
+	err = o.Remove(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to remove old version: %w", err)
+	}
+
+	// Replace guts of old object with new one
+	*o = *info.(*Object)
+
+	return nil
+}
+
+// upload uploads the object with or without using a temporary file name
+func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (err error) {
+	size := src.Size()
+	remote := o.Remote()
+
+	// Create the directory for the object if it doesn't exist
+	leaf, dirID, err := o.fs.dirCache.FindPath(ctx, remote, true)
+	if err != nil {
+		return err
+	}
+
+	// check upload info
+	if o.fs.ui == nil {
+		// TODO: fixed values?
+		ui, err := o.fs.getUploadInfo(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get upload info: %w", err)
+		}
+		o.fs.ui = ui
+	}
+	if size > o.fs.ui.SizeLimit {
+		return fmt.Errorf("file size exceeds the upload limit: %d > %d", size, o.fs.ui.SizeLimit)
+	}
+
+	var wrap accounting.WrapFn
+	var cleanup func()
+
+	// Calculate sha1sum; grabbed from package jottacloud
+	hashStr, err := src.Hash(ctx, hash.SHA1)
+	if err != nil || hashStr == "" {
+		// unwrap the accounting from the input, we use wrap to put it
+		// back on after the buffering
+		in, wrap = accounting.UnWrap(in)
+		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(o.fs.opt.HashMemoryThreshold))
+		defer cleanup()
+		if err != nil {
+			return fmt.Errorf("failed to calculate SHA1: %w", err)
+		}
+	}
+
+	o.sha1sum = strings.ToLower(hashStr)
+	o.parent = dirID
+
+	var uii *api.UploadInitInfo
+	signKey, signVal := "", ""
+	err = o.fs.pacer.Call(func() (bool, error) {
+		uii, err = o.fs.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
+		if err != nil {
+			return false, err
+		}
+		if uii.Status == 7 {
+			if wrap == nil {
+				in, wrap = accounting.UnWrap(in)
+				in, cleanup, err = bufferIO(in, size, int64(o.fs.opt.HashMemoryThreshold))
+				defer cleanup()
+				if err != nil {
+					return false, fmt.Errorf("failed to buffer io: %w", err)
+				}
+			}
+			signKey = uii.SignKey
+			signVal, err = calcBlockSHA1(in, uii.SignCheck)
+			if err != nil {
+				return false, fmt.Errorf("failed to calculate block hash: %w", err)
+			}
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return
+	}
+	switch uii.Status {
+	case 1:
+		fs.Debugf(o, "Starting upload...")
+	case 2:
+		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
+		return
+	default:
+		return fmt.Errorf("unexpected status: %#v", uii)
+	}
+
+	// Wrap the accounting back onto the stream
+	// if wrap != nil {
+	// 	in = wrap(in)
+	// }
+
+	_ = options // TODO: pass options to uploader
+	return o.fs.uploadSinglepart(ctx, uii, in)
+	// if size <= int64(fs.Kibi) { // 文件大小小于1KB，改用普通模式上传
+	// 	return o.fs.uploadSinglepart(ctx, uii, in)
+	// }
+	// if wrap == nil {
+	// 	in, wrap = accounting.UnWrap(in)
+	// 	in, cleanup, err = bufferIO(in, size, int64(o.fs.opt.HashMemoryThreshold))
+	// 	defer cleanup()
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to buffer io: %w", err)
+	// 	}
+	// 	in = wrap(in)
+	// }
+	// return o.fs.uploadMultipart(ctx, uii, size, in)
 }
 
 // setMetaData sets the metadata from info
@@ -921,6 +1203,7 @@ var (
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
+	_ fs.PutUncheckeder  = (*Fs)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
 	_ fs.ObjectInfo      = (*Object)(nil)

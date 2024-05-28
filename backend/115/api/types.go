@@ -182,6 +182,8 @@ type SizeInfo struct {
 	SizeFormat string  `json:"size_format"`
 }
 
+// ------------------------------------------------------------
+
 type DownloadURL struct {
 	URL    string `json:"url"`
 	Client Int    `json:"client"`
@@ -197,3 +199,59 @@ type DownloadInfo struct {
 }
 
 type DownloadData map[string]*DownloadInfo
+
+// ------------------------------------------------------------
+
+type UploadInfo struct {
+	Uploadinfo       string      `json:"uploadinfo,omitempty"`
+	UserID           json.Number `json:"user_id,omitempty"`
+	AppVersion       int         `json:"app_version,omitempty"`
+	AppID            int         `json:"app_id,omitempty"`
+	Userkey          string      `json:"userkey,omitempty"`
+	SizeLimit        int64       `json:"size_limit,omitempty"`
+	SizeLimitYun     int64       `json:"size_limit_yun,omitempty"`
+	MaxDirLevel      int64       `json:"max_dir_level,omitempty"`
+	MaxDirLevelYun   int64       `json:"max_dir_level_yun,omitempty"`
+	MaxFileNum       int64       `json:"max_file_num,omitempty"`
+	MaxFileNumYun    int64       `json:"max_file_num_yun,omitempty"`
+	UploadAllowed    bool        `json:"upload_allowed,omitempty"`
+	UploadAllowedMsg string      `json:"upload_allowed_msg,omitempty"`
+	State            bool        `json:"state,omitempty"`
+	Error            string      `json:"error,omitempty"`
+	Errno            Int         `json:"errno,omitempty"`
+}
+
+type UploadInitInfo struct {
+	Request   string `json:"request"`
+	ErrorCode int    `json:"statuscode"`
+	ErrorMsg  string `json:"statusmsg"`
+
+	Status   Int    `json:"status"`
+	PickCode string `json:"pickcode"`
+	Target   string `json:"target"`
+	Version  string `json:"version"`
+
+	// OSS upload fields
+	Bucket   string `json:"bucket"`
+	Object   string `json:"object"`
+	Callback struct {
+		Callback    string `json:"callback"`
+		CallbackVar string `json:"callback_var"`
+	} `json:"callback"`
+
+	// Useless fields
+	FileID   int    `json:"fileid"`
+	FileInfo string `json:"fileinfo"`
+
+	// New fields in upload v4.0
+	SignKey   string `json:"sign_key"`
+	SignCheck string `json:"sign_check"`
+}
+
+type OSSToken struct {
+	AccessKeyID     string    `json:"AccessKeyID"`
+	AccessKeySecret string    `json:"AccessKeySecret"`
+	Expiration      time.Time `json:"Expiration"`
+	SecurityToken   string    `json:"SecurityToken"`
+	StatusCode      string    `json:"StatusCode"`
+}

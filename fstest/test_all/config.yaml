@@ -328,6 +328,9 @@ backends:
  - backend:  "pcloud"
    remote:   "TestPcloud:"
    fastlist: true
+ - backend:  "115"
+   remote:   "Test115:"
+   fastlist: false
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false

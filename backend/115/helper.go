@@ -231,7 +231,7 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	return
 }
 
-func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, err error) {
+func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, cookies []*http.Cookie, err error) {
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
@@ -249,40 +249,63 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 		return shouldRetry(ctx, resp, err)
 	})
 	if err == nil && !info.State {
-		return "", fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return "", nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	if encData = info.Data.EncodedData; encData == "" {
-		return "", errors.New("no data")
+		return "", nil, errors.New("no data")
 	}
+	// // reqh = resp.Request.Header
+	// // fs.Infof(nil, ">>>RESPONSE HEADER>>>")
+	// for k, v := range resp.Header {
+	// 	if strings.ToLower(k) == "set-cookie" {
+	// 		fs.Debugf(nil, "set-cookie: %s", strings.Join(v, "||"))
+	// 		cookie = strings.Join(v, ", ")
+	// 	}
+	// 	// fs.Infof(nil, "%s=%s", k, v)
+	// }
+	cookies = append(cookies, resp.Cookies()...)
+	// for _, dd := range resp.Cookies() {
+	// 	// fs.Debugf(nil, ">AAA> %s=%s %s", dd.Name, dd.Value, dd.Domain)
+	// 	cookies = append(cookies, dd)
+	// }
+	// for _, dd := range resp.Cookies() {
+	// 	fs.Debugf(nil, ">AAA> %s=%s", dd.Name, dd.Value)
+	// }
+	cookies = append(cookies, resp.Request.Cookies()...)
+	// for _, dd := range resp.Request.Cookies() {
+	// 	// fs.Debugf(nil, ">BBB> %s=%s", dd.Name, dd.Value)
+	// 	cookies = append(cookies, dd)
+	// }
+	// fs.Infof(nil, "<<<RESPONSE HEADER<<<")
 	return
 }
 
-func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (string, error) {
+func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (string, []*http.Cookie, error) {
 	// pickCode -> data -> reqData
 	key := crypto.GenerateKey()
 	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
 	reqData := crypto.Encode(data, key)
 
-	encData, err := f.getDownData(ctx, reqData, UA)
+	encData, reqh, err := f.getDownData(ctx, reqData, UA)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	decData, err := crypto.Decode(encData, key)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode data: %w", err)
+		return "", nil, fmt.Errorf("failed to decode data: %w", err)
 	}
 
 	downData := api.DownloadData{}
 	if err := json.Unmarshal(decData, &downData); err != nil {
-		return "", fmt.Errorf("failed to json.Unmarshal %q", string(decData))
+		return "", nil, fmt.Errorf("failed to json.Unmarshal %q", string(decData))
 	}
 
 	for _, downInfo := range downData {
 		if downInfo.FileSize == 0 { // TODO
-			return "", fs.ErrorObjectNotFound
+			return "", nil, fs.ErrorObjectNotFound
 		}
-		return downInfo.URL.URL, nil
+		return downInfo.URL.URL, reqh, nil
 	}
-	return "", fs.ErrorObjectNotFound
+	return "", nil, fs.ErrorObjectNotFound
 }
