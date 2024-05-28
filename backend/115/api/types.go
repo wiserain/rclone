@@ -77,6 +77,26 @@ func (e *Int64) UnmarshalJSON(in []byte) (err error) {
 	return
 }
 
+type Error struct {
+	Status    int    `json:"status,omitempty"`
+	Message   string `json:"message,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+}
+
+// Error returns a string for the error and satisfies the error interface
+func (e *Error) Error() string {
+	out := fmt.Sprintf("Status %d %q", e.Status, e.Message)
+	if e.RequestID != "" {
+		out += ": " + e.RequestID
+	}
+	return out
+}
+
+// Check Error satisfies the error interface
+var _ error = (*Error)(nil)
+
+// ------------------------------------------------------------
+
 type Base struct {
 	Msg   string `json:"msg,omitempty"`
 	Errno Int    `json:"errno,omitempty"`

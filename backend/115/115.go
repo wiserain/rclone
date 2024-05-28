@@ -157,6 +157,16 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 	authRetry := false
 
 	// TODO
+	switch apiErr := err.(type) {
+	case *api.Error:
+		if apiErr.Status == 403 {
+			if apiErr.Message == "no cookie" {
+				return false, fserrors.FatalError(err)
+			}
+			time.Sleep(time.Second)
+			return true, err
+		}
+	}
 
 	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
@@ -165,28 +175,19 @@ func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, err
 
 // errorHandler parses a non 2xx error response into an error
 func errorHandler(resp *http.Response) error {
-	// TODO
-	// // Decode error response
-	// errResponse := new(api.Error)
-	// err := rest.DecodeJSON(resp, &errResponse)
-	// if err != nil {
-	// 	fs.Debugf(nil, "Couldn't decode error response: %v", err)
-	// }
-	// if errResponse.Reason == "" {
-	// 	errResponse.Reason = resp.Status
-	// }
-	// if errResponse.Code == 0 {
-	// 	errResponse.Code = resp.StatusCode
-	// }
-	// return errResponse
-	body, err := rest.ReadBody(resp)
+	// Decode error response
+	errResponse := new(api.Error)
+	err := rest.DecodeJSON(resp, &errResponse)
 	if err != nil {
-		return fmt.Errorf("error reading error out of body: %w", err)
+		fs.Debugf(nil, "Couldn't decode error response: %v", err)
 	}
-	if resp.StatusCode == http.StatusForbidden {
-		time.Sleep(time.Second)
+	if errResponse.Message == "" {
+		errResponse.Message = resp.Status
 	}
-	return fmt.Errorf("HTTP error %v (%v) returned body: %q", resp.StatusCode, resp.Status, body)
+	if errResponse.Status == 0 {
+		errResponse.Status = resp.StatusCode
+	}
+	return errResponse
 }
 
 // newClientWithPacer sets a new http/rest client with a pacer to Fs
