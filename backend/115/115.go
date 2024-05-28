@@ -1,6 +1,7 @@
 package _115
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
@@ -123,9 +125,11 @@ type Object struct {
 	size        int64
 	sha1sum     string
 	pickCode    string
-	mTime       time.Time // modified/updated at
-	cTime       time.Time // created at
-	aTime       time.Time // last accessed at
+	mTime       time.Time        // modified/updated at
+	cTime       time.Time        // created at
+	aTime       time.Time        // last accessed at
+	durl        *api.DownloadURL // link to download the object
+	durlMu      *sync.Mutex
 }
 
 // retryErrorCodes is a slice of error codes that we will retry
@@ -208,7 +212,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
 		HttpOnly: true,
 	})
 	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
-	f.pacer.SetMaxConnections(2)
+	f.pacer.SetMaxConnections(2) // TODO: tune rate limit
 	return nil
 }
 
@@ -251,10 +255,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	f.features = (&fs.Features{
 		DuplicateFiles:          true, // allows duplicate files
 		CanHaveEmptyDirectories: true, // can have empty directories
-		// NoMultiThreading         bool // set if can't have multiplethreads on one download open
-		// Overlay                  bool // this wraps one or more backends to add functionality
+		NoMultiThreading:        true, // set if can't have multiplethreads on one download open
 		// ChunkWriterDoesntSeek    bool // set if the chunk writer doesn't need to read the data more than once
-		// TODO check other features
+		// TODO: check other features available/possible
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx); err != nil {
@@ -285,7 +288,7 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
 
 	// Find the current root
-	err = f.dirCache.FindRoot(ctx, false) // TODO: can be improved using FileList.Path
+	err = f.dirCache.FindRoot(ctx, false)
 	if err != nil {
 		// Assume it is a file
 		newRoot, remote := dircache.SplitPath(f.root)
@@ -455,11 +458,12 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	}
 }
 
-// PutStream uploads to the remote path with the modTime given of indeterminate size
-func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	// return f.Put(ctx, in, src, options...)
-	return nil, fs.ErrorNotImplemented
-}
+// TODO
+// // PutStream uploads to the remote path with the modTime given of indeterminate size
+// func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+// 	// return f.Put(ctx, in, src, options...)
+// 	return nil, fs.ErrorNotImplemented
+// }
 
 // putUnchecked uploads the object with the given name and size
 //
@@ -470,6 +474,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, remote string, src 
 		fs: f,
 		// remote: src.Remote(),
 		remote: remote,
+		durlMu: new(sync.Mutex),
 	}
 	if err := newObj.upload(ctx, in, src, options...); err != nil {
 		return nil, fmt.Errorf("failed to upload: %w", err)
@@ -500,62 +505,12 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	return f.putUnchecked(ctx, in, src.Remote(), src, options...)
 }
 
-// MergeDirs merges the contents of all the directories passed
-// in into the first one and rmdirs the other directories.
-func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
-	return fs.ErrorNotImplemented
-	// if len(dirs) < 2 {
-	// 	return nil
-	// }
-	// newDirs := dirs[:0]
-	// for _, dir := range dirs {
-	// 	if isShortcutID(dir.ID()) {
-	// 		fs.Infof(dir, "skipping shortcut directory")
-	// 		continue
-	// 	}
-	// 	newDirs = append(newDirs, dir)
-	// }
-	// dirs = newDirs
-	// if len(dirs) < 2 {
-	// 	return nil
-	// }
-	// dstDir := dirs[0]
-	// for _, srcDir := range dirs[1:] {
-	// 	// list the objects
-	// 	infos := []*drive.File{}
-	// 	_, err := f.list(ctx, []string{srcDir.ID()}, "", false, false, f.opt.TrashedOnly, true, func(info *drive.File) bool {
-	// 		infos = append(infos, info)
-	// 		return false
-	// 	})
-	// 	if err != nil {
-	// 		return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
-	// 	}
-	// 	// move them into place
-	// 	for _, info := range infos {
-	// 		fs.Infof(srcDir, "merging %q", info.Name)
-	// 		// Move the file into the destination
-	// 		err = f.pacer.Call(func() (bool, error) {
-	// 			_, err = f.svc.Files.Update(info.Id, nil).
-	// 				RemoveParents(srcDir.ID()).
-	// 				AddParents(dstDir.ID()).
-	// 				Fields("").
-	// 				SupportsAllDrives(true).
-	// 				Context(ctx).Do()
-	// 			return f.shouldRetry(ctx, err)
-	// 		})
-	// 		if err != nil {
-	// 			return fmt.Errorf("MergeDirs move failed on %q in %v: %w", info.Name, srcDir, err)
-	// 		}
-	// 	}
-	// 	// rmdir (into trash) the now empty source directory
-	// 	fs.Infof(srcDir, "removing empty directory")
-	// 	err = f.delete(ctx, srcDir.ID(), true)
-	// 	if err != nil {
-	// 		return fmt.Errorf("MergeDirs move failed to rmdir %q: %w", srcDir, err)
-	// 	}
-	// }
-	// return nil
-}
+// TODO
+// // MergeDirs merges the contents of all the directories passed
+// // in into the first one and rmdirs the other directories.
+// func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
+// 	return fs.ErrorNotImplemented
+// }
 
 // Mkdir makes the directory (container, bucket)
 //
@@ -814,6 +769,7 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	o := &Object{
 		fs:     f,
 		remote: remote,
+		durlMu: new(sync.Mutex),
 	}
 	var err error
 	if info != nil {
@@ -827,7 +783,6 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	return o, nil
 }
 
-// TODO any quicker way
 // If there is a quicker way of finding a given file than listing the parent, then this readMetaDataForPath should implement it. It makes quite a difference to performance if such a call is available.
 func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.File, err error) {
 	leaf, dirID, err := f.dirCache.FindPath(ctx, path, false)
@@ -900,6 +855,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 		remote: remote,
 		size:   size,
 		mTime:  modTime,
+		durlMu: new(sync.Mutex),
 	}
 	return o, leaf, dirID, nil
 }
@@ -979,30 +935,22 @@ func (o *Object) Storable() bool {
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
 	if o.id == "" {
-		return nil, errors.New("can't download - no id")
+		return nil, errors.New("can't download: no id")
 	}
-	// TODO: handling of size zero objects
-	// TODO: multithread download, linkMu, linkCache
-	// if o.size == 0 {
-	// 	// zero-byte objects may have no download link
-	// 	return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
-	// }
-	downURL, reqh, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
-	if err != nil {
-		return nil, err
+	if o.size == 0 {
+		// this shouldn't happen as no zero-byte files allowed by api but just in case
+		return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
+	}
+	if err = o.setDownloadURL(ctx); err != nil {
+		return nil, fmt.Errorf("can't download: %w", err)
 	}
 	fs.FixRangeOption(options, o.size)
 	opts := rest.Opts{
-		Method:  "GET",
-		RootURL: downURL,
-		Options: options,
+		Method:       "GET",
+		RootURL:      o.durl.URL,
+		Options:      options,
+		ExtraHeaders: map[string]string{"Cookie": o.durl.Cookie()},
 	}
-	cookie := ""
-	for _, cks := range reqh {
-		cookie += fmt.Sprintf("%s=%s;", cks.Name, cks.Value)
-	}
-	opts.ExtraHeaders = map[string]string{"Cookie": cookie}
-
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
@@ -1167,6 +1115,24 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.mTime = time.Time(info.Te)
 	o.cTime = time.Time(info.Tp)
 	o.aTime = time.Time(info.To)
+	return nil
+}
+
+// setDownloadURL ensures a link for opening an object
+func (o *Object) setDownloadURL(ctx context.Context) error {
+	o.durlMu.Lock()
+	defer o.durlMu.Unlock()
+
+	// check if the current link is valid
+	if o.durl.Valid() {
+		return nil
+	}
+
+	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
+	if err != nil {
+		return err
+	}
+	o.durl = downURL
 	return nil
 }
 

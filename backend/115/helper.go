@@ -102,7 +102,9 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		if info.Errno == 20004 {
 			return nil, fs.ErrorDirExists
 		}
@@ -128,7 +130,9 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
@@ -151,7 +155,9 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		if info.Errno == 990009 {
 			time.Sleep(time.Second)
 		}
@@ -179,7 +185,9 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
@@ -204,7 +212,9 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
@@ -222,7 +232,9 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	if data = info.Data.IndexInfo; data == nil {
@@ -239,7 +251,7 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 		Parameters:      url.Values{"t": {t}},
 		MultipartParams: url.Values{"data": {data}},
 	}
-	if UA != "" {
+	if UA != "" { // TODO: handling of UA
 		opts.ExtraHeaders = map[string]string{"User-Agent": UA}
 	}
 	var info *api.Base
@@ -248,64 +260,48 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, err)
 	})
-	if err == nil && !info.State {
+	if err != nil {
+		return
+	} else if !info.State {
 		return "", nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	if encData = info.Data.EncodedData; encData == "" {
 		return "", nil, errors.New("no data")
 	}
-	// // reqh = resp.Request.Header
-	// // fs.Infof(nil, ">>>RESPONSE HEADER>>>")
-	// for k, v := range resp.Header {
-	// 	if strings.ToLower(k) == "set-cookie" {
-	// 		fs.Debugf(nil, "set-cookie: %s", strings.Join(v, "||"))
-	// 		cookie = strings.Join(v, ", ")
-	// 	}
-	// 	// fs.Infof(nil, "%s=%s", k, v)
-	// }
-	cookies = append(cookies, resp.Cookies()...)
-	// for _, dd := range resp.Cookies() {
-	// 	// fs.Debugf(nil, ">AAA> %s=%s %s", dd.Name, dd.Value, dd.Domain)
-	// 	cookies = append(cookies, dd)
-	// }
-	// for _, dd := range resp.Cookies() {
-	// 	fs.Debugf(nil, ">AAA> %s=%s", dd.Name, dd.Value)
-	// }
-	cookies = append(cookies, resp.Request.Cookies()...)
-	// for _, dd := range resp.Request.Cookies() {
-	// 	// fs.Debugf(nil, ">BBB> %s=%s", dd.Name, dd.Value)
-	// 	cookies = append(cookies, dd)
-	// }
-	// fs.Infof(nil, "<<<RESPONSE HEADER<<<")
+	cookies = append(cookies, resp.Cookies()...)         // including uid, cid, and seid
+	cookies = append(cookies, resp.Request.Cookies()...) // including access key value pari with Max-Age=900
 	return
 }
 
-func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (string, []*http.Cookie, error) {
+func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (durl *api.DownloadURL, err error) {
 	// pickCode -> data -> reqData
 	key := crypto.GenerateKey()
 	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
 	reqData := crypto.Encode(data, key)
 
-	encData, reqh, err := f.getDownData(ctx, reqData, UA)
+	encData, cookies, err := f.getDownData(ctx, reqData, UA)
 	if err != nil {
-		return "", nil, err
+		return
 	}
 
 	decData, err := crypto.Decode(encData, key)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to decode data: %w", err)
+		return nil, fmt.Errorf("failed to decode data: %w", err)
 	}
 
 	downData := api.DownloadData{}
 	if err := json.Unmarshal(decData, &downData); err != nil {
-		return "", nil, fmt.Errorf("failed to json.Unmarshal %q", string(decData))
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(decData))
 	}
 
 	for _, downInfo := range downData {
 		if downInfo.FileSize == 0 { // TODO
-			return "", nil, fs.ErrorObjectNotFound
+			return nil, fs.ErrorObjectNotFound
 		}
-		return downInfo.URL.URL, reqh, nil
+		durl = &downInfo.URL
+		durl.Cookies = cookies
+		durl.CreateTime = time.Now()
+		return
 	}
-	return "", nil, fs.ErrorObjectNotFound
+	return nil, fs.ErrorObjectNotFound
 }

@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -185,10 +187,26 @@ type SizeInfo struct {
 // ------------------------------------------------------------
 
 type DownloadURL struct {
-	URL    string `json:"url"`
-	Client Int    `json:"client"`
-	Desc   string `json:"desc"`
-	OssID  string `json:"oss_id"`
+	URL        string `json:"url"`
+	Client     Int    `json:"client"`
+	Desc       string `json:"desc"`
+	OssID      string `json:"oss_id"`
+	Cookies    []*http.Cookie
+	CreateTime time.Time
+}
+
+// Valid reports whether u is non-nil, has an URL, and is not expired.
+func (u *DownloadURL) Valid() bool {
+	return u != nil && u.URL != "" && time.Since(u.CreateTime) < 100*time.Second
+	// TODO: how sure for 100s expiry
+}
+
+func (u *DownloadURL) Cookie() string {
+	cookie := ""
+	for _, ck := range u.Cookies {
+		cookie += fmt.Sprintf("%s=%s;", ck.Name, ck.Value)
+	}
+	return cookie
 }
 
 type DownloadInfo struct {
