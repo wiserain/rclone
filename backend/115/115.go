@@ -122,6 +122,7 @@ type Fs struct {
 	pacer        *fs.Pacer
 	rootFolderID string
 	ui           *api.UploadInfo
+	fileObj      *fs.Object // mod
 	// drv          *driver115.Pan115Client
 }
 
@@ -269,6 +270,12 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		return nil, err
 	}
 
+	// mod - override rootID from path remote:{ID}
+	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+		name += rootID
+		path = path[strings.Index(path, "}")+1:]
+	}
+
 	root := strings.Trim(path, "/")
 
 	f := &Fs{
@@ -301,6 +308,25 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
+	// mod - parse object id from path remote:{ID}
+	var srcFile *api.File
+	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+		f.opt.RootFolderID = rootID
+
+		srcFile, err = f.getFile(ctx, rootID)
+		if err != nil {
+			return nil, fmt.Errorf("115: failed checking filetype: %w", err)
+		}
+		if !srcFile.IsDir() {
+			fs.Debugf(nil, "Root ID (File): %s", rootID)
+		} else {
+			// assume it is a file
+			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+			f.opt.RootFolderID = rootID
+			srcFile = nil
+		}
+	}
+
 	// Set the root folder ID
 	if f.opt.RootFolderID != "" {
 		// use root_folder ID if set
@@ -310,6 +336,21 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 	}
 
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
+
+	// mod - in case parsed rootID is pointing to a file
+	if srcFile != nil {
+		tempF := *f
+		newRoot := ""
+		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
+		tempF.root = newRoot
+		f.dirCache = tempF.dirCache
+		f.root = tempF.root
+
+		obj, _ := f.newObjectWithInfo(ctx, srcFile.Name, srcFile)
+		f.root = "isFile:" + srcFile.Name
+		f.fileObj = &obj
+		return f, fs.ErrorIsFile
+	}
 
 	// Find the current root
 	err = f.dirCache.FindRoot(ctx, false)
@@ -390,6 +431,10 @@ func (f *Fs) Hashes() hash.Set {
 // ErrorIsDir if possible without doing any extra work,
 // otherwise ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	// mod - in case parsed rootID is pointing to a file
+	if f.fileObj != nil {
+		return *f.fileObj, nil
+	}
 	return f.newObjectWithInfo(ctx, remote, nil)
 }
 
