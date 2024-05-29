@@ -175,6 +175,13 @@ type FileList struct {
 	ErrNo          int         `json:"errNo,omitempty"`
 }
 
+type FileInfo struct {
+	State   bool    `json:"state,omitempty"`
+	Code    Int     `json:"code,omitempty"`
+	Message string  `json:"message,omitempty"`
+	Data    []*File `json:"data,omitempty"`
+}
+
 type NewDir struct {
 	State    bool   `json:"state,omitempty"`
 	Error    string `json:"error,omitempty"`

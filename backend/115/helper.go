@@ -329,3 +329,30 @@ func (f *Fs) getDirID(ctx context.Context, remoteDir string) (cid string, err er
 	}
 	return
 }
+
+// getFile gets information of a file or directory by its ID
+func (f *Fs) getFile(ctx context.Context, fid string) (file *api.File, err error) {
+	params := url.Values{}
+	params.Set("file_id", fid)
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/files/get_info",
+		Parameters: params,
+	}
+
+	var info *api.FileInfo
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		return nil, fmt.Errorf("API State false: %s (%d)", info.Message, info.Code)
+	}
+	if len(info.Data) > 0 {
+		return info.Data[0], nil
+	}
+	return nil, fmt.Errorf("no data")
+}
