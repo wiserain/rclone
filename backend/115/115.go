@@ -20,6 +20,7 @@ import (
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/fserrors"
+	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
@@ -111,8 +112,8 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
+	ui           *api.UploadInfo
 	// drv          *driver115.Pan115Client
-	ui *api.UploadInfo
 }
 
 // Object describes a 115 object
@@ -200,7 +201,7 @@ func errorHandler(resp *http.Response) error {
 
 // newClientWithPacer sets a new http/rest client with a pacer to Fs
 func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
-	f.srv = rest.NewClient(&http.Client{}).SetRoot(rootURL).SetErrorHandler(errorHandler)
+	f.srv = rest.NewClient(fshttp.NewClient(ctx)).SetRoot(rootURL).SetErrorHandler(errorHandler)
 	f.srv.SetHeader("User-Agent", userAgent).SetCookie(&http.Cookie{
 		Name:     "UID",
 		Value:    f.opt.UID,
@@ -446,7 +447,6 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	fs.Debugf(nil, "Put %s", src)
 	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
@@ -457,11 +457,6 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	case fs.ErrorObjectNotFound:
 		// Not found so create it
 		return f.PutUnchecked(ctx, in, src, options...)
-		// newObj := &Object{
-		// 	fs:     f,
-		// 	remote: src.Remote(),
-		// }
-		// return newObj, newObj.Update(ctx, in, src, options...)
 	default:
 		return nil, err
 	}
@@ -478,7 +473,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 //
 // This will create a duplicate if we upload a new file without
 // checking to see if there is one already - use Put() for that.
-func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, remote string, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
 	newObj := &Object{
 		fs: f,
 		// remote: src.Remote(),
@@ -511,7 +506,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, remote string, src 
 // This will create a duplicate if we upload a new file without
 // checking to see if there is one already - use Put() for that.
 func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	return f.putUnchecked(ctx, in, src.Remote(), src, options...)
+	return f.putUnchecked(ctx, in, src, src.Remote(), options...)
 }
 
 // TODO
@@ -989,7 +984,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	// upload with new size but old name
-	info, err := o.fs.putUnchecked(ctx, in, o.Remote(), src, options...)
+	newObj, err := o.fs.putUnchecked(ctx, in, src, o.Remote(), options...)
 	// info, err := o.fs.putUnchecked(ctx, in, o.Remote(), src.Size(), options...)
 	if err != nil {
 		return err
@@ -1002,7 +997,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	}
 
 	// Replace guts of old object with new one
-	*o = *info.(*Object)
+	*o = *newObj.(*Object)
 
 	return nil
 }
@@ -1020,12 +1015,10 @@ func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 	// check upload info
 	if o.fs.ui == nil {
-		// TODO: fixed values?
-		ui, err := o.fs.getUploadInfo(ctx)
+		err = o.fs.setUploadInfo(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to get upload info: %w", err)
+			return fmt.Errorf("failed to get/set upload info: %w", err)
 		}
-		o.fs.ui = ui
 	}
 	if size > o.fs.ui.SizeLimit {
 		return fmt.Errorf("file size exceeds the upload limit: %d > %d", size, o.fs.ui.SizeLimit)

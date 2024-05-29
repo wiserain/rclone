@@ -36,19 +36,23 @@ const (
 	OssSecurityTokenHeaderName = "X-OSS-Security-Token"
 )
 
-func (f *Fs) getUploadInfo(ctx context.Context) (info *api.UploadInfo, err error) {
+func (f *Fs) setUploadInfo(ctx context.Context) (err error) {
 	opts := rest.Opts{
 		Method:  "POST",
 		RootURL: "https://proapi.115.com/app/uploadinfo",
 	}
+	var info *api.UploadInfo
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
-	if err == nil && !info.State {
-		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	if err != nil {
+		return
+	} else if !info.State {
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
+	f.ui = info
 	return
 }
 
