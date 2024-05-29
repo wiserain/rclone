@@ -21,6 +21,9 @@ import (
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/orzogc/fake115uploader/cipher"
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -506,3 +509,102 @@ func calcBlockSHA1(in io.Reader, rangeSpec string) (sha1sum string, err error) {
 // 	}
 // 	return nil
 // }
+
+// upload uploads the object with or without using a temporary file name
+func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
+	size := src.Size()
+
+	// check upload available
+	if f.ui == nil {
+		if err := f.setUploadInfo(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get/set upload info: %w", err)
+		}
+	}
+	if size > f.ui.SizeLimit {
+		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, f.ui.SizeLimit)
+	}
+
+	// Create a new object with its parent directory if it doesn't exist
+	o, leaf, dirID, err := f.createObject(ctx, remote, src.ModTime(ctx), size)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrap accounting.WrapFn
+	var cleanup func()
+
+	// Calculate sha1sum; grabbed from package jottacloud
+	hashStr, err := src.Hash(ctx, hash.SHA1)
+	if err != nil || hashStr == "" {
+		// unwrap the accounting from the input, we use wrap to put it
+		// back on after the buffering
+		in, wrap = accounting.UnWrap(in)
+		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(f.opt.HashMemoryThreshold))
+		defer cleanup()
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
+		}
+	}
+
+	// set calculated sha1 hash
+	o.sha1sum = strings.ToLower(hashStr)
+
+	var uii *api.UploadInitInfo
+	signKey, signVal := "", ""
+	err = f.pacer.Call(func() (bool, error) {
+		uii, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
+		if err != nil {
+			return false, err
+		}
+		if uii.Status == 7 {
+			if wrap == nil {
+				in, wrap = accounting.UnWrap(in)
+				in, cleanup, err = bufferIO(in, size, int64(f.opt.HashMemoryThreshold))
+				defer cleanup()
+				if err != nil {
+					return false, fmt.Errorf("failed to buffer io: %w", err)
+				}
+			}
+			signKey = uii.SignKey
+			signVal, err = calcBlockSHA1(in, uii.SignCheck)
+			if err != nil {
+				return false, fmt.Errorf("failed to calculate block hash: %w", err)
+			}
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	switch uii.Status {
+	case 1:
+		fs.Debugf(o, "Starting upload...")
+	case 2:
+		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
+		return o, nil
+	default:
+		return nil, fmt.Errorf("unexpected status: %#v", uii)
+	}
+
+	// Wrap the accounting back onto the stream
+	if wrap != nil {
+		in = wrap(in)
+	}
+
+	_ = options // TODO: pass options to uploader
+	return o, f.uploadSinglepart(ctx, uii, in)
+	// if size <= int64(fs.Kibi) { // 文件大小小于1KB，改用普通模式上传
+	// 	return o.fs.uploadSinglepart(ctx, uii, in)
+	// }
+	// if wrap == nil {
+	// 	in, wrap = accounting.UnWrap(in)
+	// 	in, cleanup, err = bufferIO(in, size, int64(o.fs.opt.HashMemoryThreshold))
+	// 	defer cleanup()
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to buffer io: %w", err)
+	// 	}
+	// 	in = wrap(in)
+	// }
+	// return o.fs.uploadMultipart(ctx, uii, size, in)
+}
