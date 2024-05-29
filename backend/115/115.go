@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -824,33 +823,6 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Fi
 		return nil, fs.ErrorObjectNotFound
 	}
 	return info, nil
-}
-
-func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {
-	opts := rest.Opts{
-		Method:     http.MethodGet,
-		Path:       "/files/getid",
-		Parameters: url.Values{},
-	}
-	opts.Parameters.Set("path", f.opt.Enc.FromStandardPath(remoteDir))
-
-	var err error
-	var info api.GetDirIDResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, nil, err)
-	})
-	if err != nil {
-		return -1, err
-	}
-	if !info.State || (remoteDir != "/" && info.CategoryID.String() == "0") {
-		fs.Logf(f, "get dir id fail, not state, error: %v, errno: %v, resp: %+v", info.Error, info.Errno, info)
-		return -1, fs.ErrorDirNotFound
-	}
-
-	cid, _ := info.CategoryID.Int64()
-	return cid, nil
 }
 
 // Creates from the parameters passed in a half finished Object which

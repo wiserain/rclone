@@ -302,3 +302,30 @@ func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (durl *api.Dow
 	}
 	return nil, fs.ErrorObjectNotFound
 }
+
+func (f *Fs) getDirID(ctx context.Context, remoteDir string) (cid string, err error) {
+	params := url.Values{}
+	params.Set("path", f.opt.Enc.FromStandardPath(remoteDir))
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/files/getid",
+		Parameters: params,
+	}
+
+	var info *api.DirID
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		return "", fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	cid = info.ID.String()
+	if cid == "0" && remoteDir != "/" {
+		return "", fs.ErrorDirNotFound
+	}
+	return
+}

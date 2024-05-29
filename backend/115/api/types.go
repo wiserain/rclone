@@ -186,13 +186,12 @@ type NewDir struct {
 	FileName string `json:"file_name,omitempty"`
 }
 
-// TODO
-type GetDirIDResponse struct {
-	Errno      json.Number `json:"errno"`
-	Error      string      `json:"error"`
-	CategoryID json.Number `json:"id"`
-	IsPrivate  json.Number `json:"is_private"`
-	State      bool        `json:"state"`
+type DirID struct {
+	State     bool        `json:"state,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	Errno     Int         `json:"errno,omitempty"`
+	ID        json.Number `json:"id,omitempty"`
+	IsPrivate json.Number `json:"is_private,omitempty"`
 }
 
 type IndexInfo struct {

@@ -592,6 +592,12 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		in = wrap(in)
 	}
 
+	// Apply upload options
+	for _, option := range options {
+		key, value := option.Header()
+		// lowerKey := strings.ToLower(key)
+		fs.Debugf(nil, "fsOpenOption: %s=%s", key, value)
+	}
 	_ = options // TODO: pass options to uploader
 	return o, f.uploadSinglepart(ctx, uii, in)
 	// if size <= int64(fs.Kibi) { // 文件大小小于1KB，改用普通模式上传
