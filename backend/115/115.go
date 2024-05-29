@@ -474,19 +474,16 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 // This will create a duplicate if we upload a new file without
 // checking to see if there is one already - use Put() for that.
 func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
-	newObj := &Object{
-		fs: f,
-		// remote: src.Remote(),
-		remote: remote,
-		durlMu: new(sync.Mutex),
-	}
-	if err := newObj.upload(ctx, in, src, options...); err != nil {
+	// upload src with the name of remote
+	newObj, err := f.upload(ctx, in, src, remote, options...)
+	if err != nil {
 		return nil, fmt.Errorf("failed to upload: %w", err)
 	}
+	o := newObj.(*Object)
 
 	var info *api.File
-	found, err := f.listAll(ctx, newObj.parent, func(item *api.File) bool {
-		if strings.ToLower(item.Sha) == newObj.sha1sum && item.FID != "" {
+	found, err := f.listAll(ctx, o.parent, func(item *api.File) bool {
+		if strings.ToLower(item.Sha) == o.sha1sum && item.PickCode == o.pickCode && item.FID != "" {
 			info = item
 			return true
 		}
@@ -498,7 +495,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	if !found {
 		return nil, fs.ErrorObjectNotFound
 	}
-	return newObj, newObj.setMetaData(info)
+	return o, o.setMetaData(info)
 }
 
 // PutUnchecked uploads the object
@@ -857,6 +854,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	o = &Object{
 		fs:     f,
 		remote: remote,
+		parent: dirID,
 		size:   size,
 		mTime:  modTime,
 		durlMu: new(sync.Mutex),
@@ -978,14 +976,12 @@ func (o *Object) Remove(ctx context.Context) error {
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	fs.Debugf(o, "Update %s", src)
 	if src.Size() < 0 {
 		return errors.New("refusing to update with unknown size")
 	}
 
 	// upload with new size but old name
 	newObj, err := o.fs.putUnchecked(ctx, in, src, o.Remote(), options...)
-	// info, err := o.fs.putUnchecked(ctx, in, o.Remote(), src.Size(), options...)
 	if err != nil {
 		return err
 	}
@@ -1003,25 +999,23 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 }
 
 // upload uploads the object with or without using a temporary file name
-func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (err error) {
+func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
 	size := src.Size()
-	remote := o.Remote()
 
-	// Create the directory for the object if it doesn't exist
-	leaf, dirID, err := o.fs.dirCache.FindPath(ctx, remote, true)
-	if err != nil {
-		return err
-	}
-
-	// check upload info
-	if o.fs.ui == nil {
-		err = o.fs.setUploadInfo(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get/set upload info: %w", err)
+	// check upload available
+	if f.ui == nil {
+		if err := f.setUploadInfo(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get/set upload info: %w", err)
 		}
 	}
-	if size > o.fs.ui.SizeLimit {
-		return fmt.Errorf("file size exceeds the upload limit: %d > %d", size, o.fs.ui.SizeLimit)
+	if size > f.ui.SizeLimit {
+		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, f.ui.SizeLimit)
+	}
+
+	// Create a new object with its parent directory if it doesn't exist
+	o, leaf, dirID, err := f.createObject(ctx, remote, src.ModTime(ctx), size)
+	if err != nil {
+		return nil, err
 	}
 
 	var wrap accounting.WrapFn
@@ -1033,27 +1027,27 @@ func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		// unwrap the accounting from the input, we use wrap to put it
 		// back on after the buffering
 		in, wrap = accounting.UnWrap(in)
-		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(o.fs.opt.HashMemoryThreshold))
+		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(f.opt.HashMemoryThreshold))
 		defer cleanup()
 		if err != nil {
-			return fmt.Errorf("failed to calculate SHA1: %w", err)
+			return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
 		}
 	}
 
+	// set calculated sha1 hash
 	o.sha1sum = strings.ToLower(hashStr)
-	o.parent = dirID
 
 	var uii *api.UploadInitInfo
 	signKey, signVal := "", ""
-	err = o.fs.pacer.Call(func() (bool, error) {
-		uii, err = o.fs.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
+	err = f.pacer.Call(func() (bool, error) {
+		uii, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
 		if err != nil {
 			return false, err
 		}
 		if uii.Status == 7 {
 			if wrap == nil {
 				in, wrap = accounting.UnWrap(in)
-				in, cleanup, err = bufferIO(in, size, int64(o.fs.opt.HashMemoryThreshold))
+				in, cleanup, err = bufferIO(in, size, int64(f.opt.HashMemoryThreshold))
 				defer cleanup()
 				if err != nil {
 					return false, fmt.Errorf("failed to buffer io: %w", err)
@@ -1069,25 +1063,27 @@ func (o *Object) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return false, nil
 	})
 	if err != nil {
-		return
+		return nil, err
 	}
 	switch uii.Status {
 	case 1:
+		o.pickCode = uii.PickCode
 		fs.Debugf(o, "Starting upload...")
 	case 2:
+		o.pickCode = uii.PickCode
 		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
-		return
+		return o, nil
 	default:
-		return fmt.Errorf("unexpected status: %#v", uii)
+		return nil, fmt.Errorf("unexpected status: %#v", uii)
 	}
 
 	// Wrap the accounting back onto the stream
-	// if wrap != nil {
-	// 	in = wrap(in)
-	// }
+	if wrap != nil {
+		in = wrap(in)
+	}
 
 	_ = options // TODO: pass options to uploader
-	return o.fs.uploadSinglepart(ctx, uii, in)
+	return o, f.uploadSinglepart(ctx, uii, in)
 	// if size <= int64(fs.Kibi) { // 文件大小小于1KB，改用普通模式上传
 	// 	return o.fs.uploadSinglepart(ctx, uii, in)
 	// }
