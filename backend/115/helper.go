@@ -248,8 +248,8 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 		Parameters:      url.Values{"t": {t}},
 		MultipartParams: url.Values{"data": {data}},
 	}
-	if UA != "" { // TODO: handling of UA
-		opts.ExtraHeaders = map[string]string{"User-Agent": UA}
+	if UA != "" {
+		opts.ExtraHeaders = map[string]string{"User-Agent": f.opt.UserAgent}
 	}
 	var info *api.Base
 	var resp *http.Response

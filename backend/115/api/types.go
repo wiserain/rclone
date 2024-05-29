@@ -265,7 +265,7 @@ type UploadInitInfo struct {
 	ErrorMsg  string `json:"statusmsg"`
 
 	Status   Int    `json:"status"`
-	PickCode string `json:"pickcode"`
+	PickCode string `json:"pickcode"` // this pickcode is not the same as for downloading!
 	Target   string `json:"target"`
 	Version  string `json:"version"`
 

@@ -30,9 +30,9 @@ import (
 
 // Constants
 const (
-	domain    = "www.115.com"
-	userAgent = "Mozilla/5.0 115Desktop/2.0.3.6" // TODO: make it configurable
-	rootURL   = "https://webapi.115.com"
+	domain           = "www.115.com"
+	rootURL          = "https://webapi.115.com"
+	defaultUserAgent = "Mozilla/5.0 115Desktop/2.0.3.6"
 
 	minSleep      = 150 * time.Millisecond
 	maxSleep      = 2 * time.Second
@@ -60,6 +60,16 @@ func init() {
 			Help:      "SEID from cookie",
 			Required:  true,
 			Sensitive: true,
+		}, {
+			// this is useless at the moment because there's no way to upload
+			// without defaultUserAgent and appVer 2.0.3.6
+			Name:     "user_agent",
+			Default:  defaultUserAgent,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help: `HTTP user agent used internally by client.
+
+Defaults to "Mozilla/5.0 115Desktop/2.0.3.6" or "--user-agent" provided on command line.`,
 		}, {
 			Name: "root_folder_id",
 			Help: `ID of the root folder.
@@ -97,6 +107,7 @@ type Options struct {
 	UID                 string               `config:"uid"`
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
+	UserAgent           string               `config:"user_agent"`
 	RootFolderID        string               `config:"root_folder_id"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
@@ -201,8 +212,10 @@ func errorHandler(resp *http.Response) error {
 
 // newClientWithPacer sets a new http/rest client with a pacer to Fs
 func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
-	f.srv = rest.NewClient(fshttp.NewClient(ctx)).SetRoot(rootURL).SetErrorHandler(errorHandler)
-	f.srv.SetHeader("User-Agent", userAgent).SetCookie(&http.Cookie{
+	newCtx, ci := fs.AddConfig(ctx)
+	ci.UserAgent = f.opt.UserAgent
+	f.srv = rest.NewClient(fshttp.NewClient(newCtx)).SetRoot(rootURL).SetErrorHandler(errorHandler)
+	f.srv.SetCookie(&http.Cookie{
 		Name:     "UID",
 		Value:    f.opt.UID,
 		Domain:   domain,
@@ -483,7 +496,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 
 	var info *api.File
 	found, err := f.listAll(ctx, o.parent, func(item *api.File) bool {
-		if strings.ToLower(item.Sha) == o.sha1sum && item.PickCode == o.pickCode && item.FID != "" {
+		if strings.ToLower(item.Sha) == o.sha1sum && item.FID != "" {
 			info = item
 			return true
 		}
@@ -1067,10 +1080,8 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	}
 	switch uii.Status {
 	case 1:
-		o.pickCode = uii.PickCode
 		fs.Debugf(o, "Starting upload...")
 	case 2:
-		o.pickCode = uii.PickCode
 		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
 		return o, nil
 	default:
@@ -1126,7 +1137,7 @@ func (o *Object) setDownloadURL(ctx context.Context) error {
 		return nil
 	}
 
-	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "") // TODO: UA matter?
+	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "")
 	if err != nil {
 		return err
 	}
