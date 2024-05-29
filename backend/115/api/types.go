@@ -128,6 +128,10 @@ type File struct {
 	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
 }
 
+func (f *File) IsDir() bool {
+	return f.FID == ""
+}
+
 type FilePath struct {
 	Name string      `json:"name,omitempty"`
 	AID  json.Number `json:"aid,omitempty"` // area

@@ -397,7 +397,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
-		if item.Name == leaf && item.FID == "" {
+		if item.Name == leaf && item.IsDir() {
 			pathIDOut = item.CID
 			return true
 		}
@@ -497,7 +497,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 
 	var info *api.File
 	found, err := f.listAll(ctx, o.parent, func(item *api.File) bool {
-		if strings.ToLower(item.Sha) == o.sha1sum && item.FID != "" {
+		if strings.ToLower(item.Sha) == o.sha1sum && !item.IsDir() {
 			info = item
 			return true
 		}
@@ -810,7 +810,7 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Fi
 
 	// checking whether fileObj with name of leaf exists in dirID
 	found, err := f.listAll(ctx, dirID, func(item *api.File) bool {
-		if item.Name == leaf && item.FID != "" {
+		if item.Name == leaf && !item.IsDir() {
 			info = item
 			return true
 		}
