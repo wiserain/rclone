@@ -250,7 +250,7 @@ type DownloadData map[string]*DownloadInfo
 
 // ------------------------------------------------------------
 
-type UploadInfo struct {
+type UploadBasicInfo struct {
 	Uploadinfo       string      `json:"uploadinfo,omitempty"`
 	UserID           json.Number `json:"user_id,omitempty"`
 	AppVersion       int         `json:"app_version,omitempty"`

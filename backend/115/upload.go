@@ -29,22 +29,21 @@ import (
 
 // Globals
 const (
-	appVer      = "2.0.3.6"
-	cachePrefix = "rclone-115-sha1sum-"
-	md5Salt     = "Qclm8MGWUv59TnrR0XPg"
-	OSSEndpoint = "cn-shenzhen.oss.aliyuncs.com"
-	OSSRegionID = "oss-cn-shenzhen"
-
-	OSSUserAgent               = "aliyun-sdk-android/2.9.1"
-	OssSecurityTokenHeaderName = "X-OSS-Security-Token"
+	cachePrefix  = "rclone-115-sha1sum-"
+	md5Salt      = "Qclm8MGWUv59TnrR0XPg"
+	OSSEndpoint  = "cn-shenzhen.oss.aliyuncs.com" // TODO which endpoint is correct?
+	OSSRegionID  = "oss-cn-shenzhen"
+	OSSUserAgent = "aliyun-sdk-android/2.9.1"
+	// "http://oss-cn-shenzhen.aliyuncs.com"
+	_endpoint = "" // from https://uplb.115.com/3.0/getuploadinfo.php
 )
 
-func (f *Fs) setUploadInfo(ctx context.Context) (err error) {
+func (f *Fs) getUploadBasicInfo(ctx context.Context) (err error) {
 	opts := rest.Opts{
-		Method:  "POST",
+		Method:  "GET",
 		RootURL: "https://proapi.115.com/app/uploadinfo",
 	}
-	var info *api.UploadInfo
+	var info *api.UploadBasicInfo
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
@@ -55,7 +54,12 @@ func (f *Fs) setUploadInfo(ctx context.Context) (err error) {
 	} else if !info.State {
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
-	f.ui = info
+	userID := info.UserID.String()
+	if userID == "0" {
+		return errors.New("invalid user id")
+	}
+	f.userID = userID
+	f.userkey = info.Userkey
 	return
 }
 
@@ -64,7 +68,6 @@ func bufferIO(in io.Reader, size, threshold int64) (out io.Reader, cleanup func(
 	cleanup = func() {}
 
 	// don't cache small files on disk to reduce wear of the disk
-	// if true {
 	if size > threshold {
 		var tempFile *os.File
 
@@ -132,8 +135,8 @@ func generateToken(userID, fileID, fileSize, signKey, signVal, timeStamp string)
 
 func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, signKey, signVal string) (info *api.UploadInitInfo, err error) {
 	var (
-		userID       = f.ui.UserID.String()
-		userKey      = f.ui.Userkey
+		userID       = f.userID
+		userKey      = f.userkey
 		filename     = f.opt.Enc.FromStandardName(name)
 		filesize     = strconv.FormatInt(size, 10)
 		fileID       = strings.ToUpper(sha1sum)
@@ -200,10 +203,11 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	if err = json.Unmarshal(decrypted, &info); err != nil {
 		return
 	}
+	fs.Debugf(f, "info: %#v\n", info)
 	switch info.ErrorCode {
 	case 0:
 		return
-	case 701:
+	case 701: // when status == 7
 		return
 	default:
 		return nil, fmt.Errorf("%s (%d)", info.ErrorMsg, info.ErrorCode)
@@ -212,8 +216,8 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 
 func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 	opts := rest.Opts{
-		Method:  "POST",
-		RootURL: "https://uplb.115.com/3.0/gettoken.php",
+		Method:  "GET",
+		RootURL: "https://uplb.115.com/3.0/gettoken.php", // from https://uplb.115.com/3.0/getuploadinfo.php
 	}
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
@@ -226,29 +230,34 @@ func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 	return
 }
 
-func (f *Fs) uploadSinglepart(ctx context.Context, params *api.UploadInitInfo, r io.Reader) error {
-	ossToken, err := f.getOSSToken(ctx)
+func (f *Fs) getOSSBucket(ctx context.Context, bucketName string) (token *api.OSSToken, bucket *oss.Bucket, err error) {
+	token, err = f.getOSSToken(ctx)
 	if err != nil {
-		return err
+		return
 	}
-	ossClient, err := oss.New(OSSEndpoint, ossToken.AccessKeyID, ossToken.AccessKeySecret)
+	client, err := oss.New(OSSEndpoint, token.AccessKeyID, token.AccessKeySecret)
 	if err != nil {
-		return err
+		return
 	}
-	bucket, err := ossClient.Bucket(params.Bucket)
+	bucket, err = client.Bucket(bucketName)
 	if err != nil {
-		return err
+		return
 	}
-	options := []oss.Option{
-		oss.SetHeader(OssSecurityTokenHeaderName, ossToken.SecurityToken),
-		oss.Callback(base64.StdEncoding.EncodeToString([]byte(params.Callback.Callback))),
-		oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(params.Callback.CallbackVar))),
+	return
+}
+
+func (f *Fs) getOSSOpts(token *api.OSSToken, ui *api.UploadInitInfo) []oss.Option {
+	opts := []oss.Option{
+		oss.SetHeader(oss.HTTPHeaderOssSecurityToken, token.SecurityToken),
 		oss.UserAgentHeader(OSSUserAgent),
 	}
-	if err = bucket.PutObject(params.Object, r, options...); err != nil {
-		return err
+	if ui != nil {
+		opts = append(opts, []oss.Option{
+			oss.Callback(base64.StdEncoding.EncodeToString([]byte(ui.Callback.Callback))),
+			oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))),
+		}...)
 	}
-	return nil
+	return opts
 }
 
 func calcBlockSHA1(in io.Reader, rangeSpec string) (sha1sum string, err error) {
@@ -272,256 +281,18 @@ func calcBlockSHA1(in io.Reader, rangeSpec string) (sha1sum string, err error) {
 	return
 }
 
-// // SplitFileByPartNum splits big file into parts by the num of parts.
-// // Split the file with specified parts count, returns the split result when error is nil.
-// func SplitFileByPartNum(fileSize int64, chunkNum int) ([]oss.FileChunk, error) {
-// 	if chunkNum <= 0 || chunkNum > 10000 {
-// 		return nil, errors.New("chunkNum invalid")
-// 	}
-
-// 	if int64(chunkNum) > fileSize {
-// 		return nil, errors.New("oss: chunkNum invalid")
-// 	}
-
-// 	var chunks []oss.FileChunk
-// 	var chunk = oss.FileChunk{}
-// 	var chunkN = (int64)(chunkNum)
-// 	for i := int64(0); i < chunkN; i++ {
-// 		chunk.Number = int(i + 1)
-// 		chunk.Offset = i * (fileSize / chunkN)
-// 		if i == chunkN-1 {
-// 			chunk.Size = fileSize/chunkN + fileSize%chunkN
-// 		} else {
-// 			chunk.Size = fileSize / chunkN
-// 		}
-// 		chunks = append(chunks, chunk)
-// 	}
-
-// 	return chunks, nil
-// }
-
-// // SplitFileByPartSize splits big file into parts by the size of parts.
-// // Splits the file by the part size. Returns the FileChunk when error is nil.
-// func SplitFileByPartSize(fileSize int64, chunkSize int64) ([]oss.FileChunk, error) {
-// 	if chunkSize <= 0 {
-// 		return nil, errors.New("chunkSize invalid")
-// 	}
-
-// 	var chunkN = fileSize / chunkSize
-// 	if chunkN >= 10000 {
-// 		return nil, errors.New("too many parts, please increase part size")
-// 	}
-
-// 	var chunks []oss.FileChunk
-// 	var chunk = oss.FileChunk{}
-// 	for i := int64(0); i < chunkN; i++ {
-// 		chunk.Number = int(i + 1)
-// 		chunk.Offset = i * chunkSize
-// 		chunk.Size = chunkSize
-// 		chunks = append(chunks, chunk)
-// 	}
-
-// 	if fileSize%chunkSize > 0 {
-// 		chunk.Number = len(chunks) + 1
-// 		chunk.Offset = int64(len(chunks)) * chunkSize
-// 		chunk.Size = fileSize % chunkSize
-// 		chunks = append(chunks, chunk)
-// 	}
-
-// 	return chunks, nil
-// }
-
-// func SplitFile(fileSize int64) (chunks []oss.FileChunk, err error) {
-// 	for i := int64(1); i < 10; i++ {
-// 		if fileSize < i*int64(fs.Gibi) { // 文件大小小于iGB时分为i*1000片
-// 			if chunks, err = SplitFileByPartNum(fileSize, int(i*1000)); err != nil {
-// 				return
-// 			}
-// 			break
-// 		}
-// 	}
-// 	if fileSize > 9*int64(fs.Gibi) { // 文件大小大于9GB时分为10000片
-// 		if chunks, err = SplitFileByPartNum(fileSize, 10000); err != nil {
-// 			return
-// 		}
-// 	}
-// 	// 单个分片大小不能小于100KB
-// 	if chunks[0].Size < 100*int64(fs.Kibi) {
-// 		if chunks, err = SplitFileByPartSize(fileSize, 100*int64(fs.Kibi)); err != nil {
-// 			return
-// 		}
-// 	}
-// 	return
-// }
-
-// func chunksProducer(ch chan oss.FileChunk, chunks []oss.FileChunk) {
-// 	for _, chunk := range chunks {
-// 		ch <- chunk
-// 	}
-// }
-
-// // OssOption get options
-// func OssOption(params *api.UploadInitInfo, ossToken *api.OSSToken) []oss.Option {
-// 	options := []oss.Option{
-// 		oss.SetHeader(OssSecurityTokenHeaderName, ossToken.SecurityToken),
-// 		oss.Callback(base64.StdEncoding.EncodeToString([]byte(params.Callback.Callback))),
-// 		oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(params.Callback.CallbackVar))),
-// 		oss.UserAgentHeader(OSSUserAgent),
-// 	}
-// 	return options
-// }
-
-// // UploadByMultipart upload by mutipart blocks
-// func (f *Fs) uploadMultipart(ctx context.Context, params *api.UploadInitInfo, fileSize int64, in io.Reader, opts ...driver115.UploadMultipartOption) error {
-// 	var (
-// 		chunks    []oss.FileChunk
-// 		parts     []oss.UploadPart
-// 		imur      oss.InitiateMultipartUploadResult
-// 		ossClient *oss.Client
-// 		bucket    *oss.Bucket
-// 		ossToken  *api.OSSToken
-// 		err       error
-// 	)
-
-// 	// in, _ = accounting.UnWrapAccounting(in)
-// 	tmpF, ok := in.(io.ReaderAt)
-// 	if !ok {
-// 		return errors.New("not support ReaderAt")
-// 	}
-
-// 	options := driver115.DefalutUploadMultipartOptions()
-// 	if len(opts) > 0 {
-// 		for _, f := range opts {
-// 			f(options)
-// 		}
-// 	}
-
-// 	if ossToken, err = f.getOSSToken(ctx); err != nil {
-// 		return err
-// 	}
-
-// 	if ossClient, err = oss.New(driver115.OSSEndpoint, ossToken.AccessKeyID, ossToken.AccessKeySecret); err != nil {
-// 		return err
-// 	}
-
-// 	if bucket, err = ossClient.Bucket(params.Bucket); err != nil {
-// 		return err
-// 	}
-
-// 	// ossToken一小时后就会失效，所以每50分钟重新获取一次
-// 	ticker := time.NewTicker(options.TokenRefreshTime)
-// 	defer ticker.Stop()
-// 	// 设置超时
-// 	timeout := time.NewTimer(options.Timeout)
-
-// 	if chunks, err = SplitFile(fileSize); err != nil {
-// 		return err
-// 	}
-
-// 	if imur, err = bucket.InitiateMultipartUpload(params.Object,
-// 		oss.SetHeader(driver115.OssSecurityTokenHeaderName, ossToken.SecurityToken),
-// 		oss.UserAgentHeader(driver115.OSSUserAgent),
-// 	); err != nil {
-// 		return err
-// 	}
-
-// 	wg := sync.WaitGroup{}
-// 	wg.Add(len(chunks))
-
-// 	chunksCh := make(chan oss.FileChunk)
-// 	errCh := make(chan error)
-// 	UploadedPartsCh := make(chan oss.UploadPart)
-// 	quit := make(chan struct{})
-
-// 	// producer
-// 	go chunksProducer(chunksCh, chunks)
-// 	go func() {
-// 		wg.Wait()
-// 		quit <- struct{}{}
-// 	}()
-
-// 	// consumers
-// 	for i := 0; i < options.ThreadsNum; i++ {
-// 		go func(threadId int) {
-// 			defer func() {
-// 				if r := recover(); r != nil {
-// 					errCh <- fmt.Errorf("recovered in %v", r)
-// 				}
-// 			}()
-// 			for chunk := range chunksCh {
-// 				var part oss.UploadPart // 出现错误就继续尝试，共尝试3次
-// 				for retry := 0; retry < 3; retry++ {
-// 					select {
-// 					case <-ticker.C:
-// 						if ossToken, err = f.getOSSToken(ctx); err != nil { // 到时重新获取ossToken
-// 							errCh <- fmt.Errorf("刷新token时出现错误: %w", err)
-// 						}
-// 					default:
-// 					}
-
-// 					buf := make([]byte, chunk.Size)
-// 					if _, err = tmpF.ReadAt(buf, chunk.Offset); err != nil && !errors.Is(err, io.EOF) {
-// 						continue
-// 					}
-
-// 					b := bytes.NewBuffer(buf)
-// 					if part, err = bucket.UploadPart(imur, b, chunk.Size, chunk.Number, OssOption(params, ossToken)...); err == nil {
-// 						break
-// 					}
-// 				}
-// 				if err != nil {
-// 					errCh <- fmt.Errorf("上传 %s 的第%d个分片时出现错误：%w", "filename", chunk.Number, err)
-// 				}
-// 				UploadedPartsCh <- part
-// 			}
-// 		}(i)
-// 	}
-
-// 	go func() {
-// 		for part := range UploadedPartsCh {
-// 			parts = append(parts, part)
-// 			wg.Done()
-// 		}
-// 	}()
-// LOOP:
-// 	for {
-// 		select {
-// 		case <-ticker.C:
-// 			// 到时重新获取ossToken
-// 			if ossToken, err = f.getOSSToken(ctx); err != nil {
-// 				return err
-// 			}
-// 		case <-quit:
-// 			break LOOP
-// 		case <-errCh:
-// 			return err
-// 		case <-timeout.C:
-// 			return fmt.Errorf("time out")
-// 		}
-// 	}
-
-// 	// EOF错误是xml的Unmarshal导致的，响应其实是json格式，所以实际上上传是成功的
-// 	if _, err = bucket.CompleteMultipartUpload(imur, parts, OssOption(params, ossToken)...); err != nil && !errors.Is(err, io.EOF) {
-// 		// 当文件名含有 &< 这两个字符之一时响应的xml解析会出现错误，实际上上传是成功的
-// 		if filename := filepath.Base("filename"); !strings.ContainsAny(filename, "&<") {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
 // upload uploads the object with or without using a temporary file name
 func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
 	size := src.Size()
 
 	// check upload available
-	if f.ui == nil {
-		if err := f.setUploadInfo(ctx); err != nil {
-			return nil, fmt.Errorf("failed to get/set upload info: %w", err)
+	if f.userID == "" {
+		if err := f.getUploadBasicInfo(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get upload basic info: %w", err)
 		}
 	}
-	if size > f.ui.SizeLimit {
-		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, f.ui.SizeLimit)
+	if size > maxUploadSize {
+		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, maxUploadSize)
 	}
 
 	// Create a new object with its parent directory if it doesn't exist
@@ -536,6 +307,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	// Calculate sha1sum; grabbed from package jottacloud
 	hashStr, err := src.Hash(ctx, hash.SHA1)
 	if err != nil || hashStr == "" {
+		fs.Debugf(o, "Buffering to calculate SHA1...")
 		// unwrap the accounting from the input, we use wrap to put it
 		// back on after the buffering
 		in, wrap = accounting.UnWrap(in)
@@ -544,20 +316,24 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		if err != nil {
 			return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
 		}
+	} else {
+		fs.Debugf(o, "SHA1 from src: %s", hashStr)
 	}
 
 	// set calculated sha1 hash
 	o.sha1sum = strings.ToLower(hashStr)
 
-	var uii *api.UploadInitInfo
+	var ui *api.UploadInitInfo
 	signKey, signVal := "", ""
 	err = f.pacer.Call(func() (bool, error) {
-		uii, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
+		fs.Debugf(o, "signKey: %s, signVal: %s", signKey, signVal)
+		ui, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
 		if err != nil {
 			return false, err
 		}
-		if uii.Status == 7 {
+		if ui.Status == 7 {
 			if wrap == nil {
+				fs.Debugf(o, "Buffering to calculate partial SHA1...")
 				in, wrap = accounting.UnWrap(in)
 				in, cleanup, err = bufferIO(in, size, int64(f.opt.HashMemoryThreshold))
 				defer cleanup()
@@ -565,8 +341,8 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 					return false, fmt.Errorf("failed to buffer io: %w", err)
 				}
 			}
-			signKey = uii.SignKey
-			signVal, err = calcBlockSHA1(in, uii.SignCheck)
+			signKey = ui.SignKey
+			signVal, err = calcBlockSHA1(in, ui.SignCheck)
 			if err != nil {
 				return false, fmt.Errorf("failed to calculate block hash: %w", err)
 			}
@@ -577,14 +353,14 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	if err != nil {
 		return nil, err
 	}
-	switch uii.Status {
+	switch ui.Status {
 	case 1:
 		fs.Debugf(o, "Starting upload...")
 	case 2:
 		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
 		return o, nil
 	default:
-		return nil, fmt.Errorf("unexpected status: %#v", uii)
+		return nil, fmt.Errorf("unexpected status: %#v", ui)
 	}
 
 	// Wrap the accounting back onto the stream
@@ -592,25 +368,17 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		in = wrap(in)
 	}
 
-	// Apply upload options
-	for _, option := range options {
-		key, value := option.Header()
-		// lowerKey := strings.ToLower(key)
-		fs.Debugf(nil, "fsOpenOption: %s=%s", key, value)
+	if size < 0 || size >= int64(o.fs.opt.UploadCutoff) {
+		mu, err := f.newChunkWriter(ctx, remote, src, ui, in, options...)
+		if err != nil {
+			return nil, fmt.Errorf("multipart upload failed to initialise: %w", err)
+		}
+		return o, mu.Upload(ctx)
 	}
-	_ = options // TODO: pass options to uploader
-	return o, f.uploadSinglepart(ctx, uii, in)
-	// if size <= int64(fs.Kibi) { // 文件大小小于1KB，改用普通模式上传
-	// 	return o.fs.uploadSinglepart(ctx, uii, in)
-	// }
-	// if wrap == nil {
-	// 	in, wrap = accounting.UnWrap(in)
-	// 	in, cleanup, err = bufferIO(in, size, int64(o.fs.opt.HashMemoryThreshold))
-	// 	defer cleanup()
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to buffer io: %w", err)
-	// 	}
-	// 	in = wrap(in)
-	// }
-	// return o.fs.uploadMultipart(ctx, uii, size, in)
+
+	token, bucket, err := f.getOSSBucket(ctx, ui.Bucket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OSS bucket: %w", err)
+	}
+	return o, bucket.PutObject(ui.Object, in, f.getOSSOpts(token, ui)...)
 }
