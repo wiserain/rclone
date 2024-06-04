@@ -240,16 +240,13 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	return
 }
 
-func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, cookies []*http.Cookie, err error) {
+func (f *Fs) getDownData(ctx context.Context, data string) (encData string, cookies []*http.Cookie, err error) {
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
 		RootURL:         "https://proapi.115.com/app/chrome/downurl",
 		Parameters:      url.Values{"t": {t}},
 		MultipartParams: url.Values{"data": {data}},
-	}
-	if UA != "" {
-		opts.ExtraHeaders = map[string]string{"User-Agent": f.opt.UserAgent}
 	}
 	var info *api.Base
 	var resp *http.Response
@@ -270,13 +267,13 @@ func (f *Fs) getDownData(ctx context.Context, data, UA string) (encData string, 
 	return
 }
 
-func (f *Fs) getDownURL(ctx context.Context, pickCode, UA string) (durl *api.DownloadURL, err error) {
+func (f *Fs) getDownURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
 	// pickCode -> data -> reqData
 	key := crypto.GenerateKey()
 	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
 	reqData := crypto.Encode(data, key)
 
-	encData, cookies, err := f.getDownData(ctx, reqData, UA)
+	encData, cookies, err := f.getDownData(ctx, reqData)
 	if err != nil {
 		return
 	}

@@ -3,6 +3,7 @@ package _115
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -30,11 +31,18 @@ import (
 const (
 	domain           = "www.115.com"
 	rootURL          = "https://webapi.115.com"
-	defaultUserAgent = "Mozilla/5.0 115Desktop/2.0.3.6"
+	appVer           = "2.0.3.6"
+	defaultUserAgent = "Mozilla/5.0 115Desktop/" + appVer
 
 	minSleep      = 150 * time.Millisecond
 	maxSleep      = 2 * time.Second
 	decayConstant = 2 // bigger for slower decay, exponential
+
+	maxUploadSize       = 123480309760                   // https://proapi.115.com/app/uploadinfo
+	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
+	minChunkSize        = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
+	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
+	maxUploadCutoff     = fs.SizeSuffix(5 * 1024 * 1024 * 1024)
 )
 
 // Register with Fs
@@ -65,9 +73,15 @@ func init() {
 			Default:  defaultUserAgent,
 			Advanced: true,
 			Hide:     fs.OptionHideBoth,
-			Help: `HTTP user agent used internally by client.
+			Help: fmt.Sprintf(`HTTP user agent used for 115.
 
-Defaults to "Mozilla/5.0 115Desktop/2.0.3.6" or "--user-agent" provided on command line.`,
+Defaults to "%s" or "--115-user-agent" provided on command line.`, defaultUserAgent),
+		}, {
+			Name:     "no_check_certificate",
+			Default:  true,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help:     `Do not verify the server SSL certificate for 115 (insecure)`,
 		}, {
 			Name: "root_folder_id",
 			Help: `ID of the root folder.
@@ -81,6 +95,70 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     "hash_memory_limit",
 			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
+			Advanced: true,
+		}, {
+			Name: "upload_cutoff",
+			Help: `Cutoff for switching to chunked upload.
+
+Any files larger than this will be uploaded in chunks of chunk_size.
+The minimum is 0 and the maximum is 5 GiB.`,
+			Default:  defaultUploadCutoff,
+			Advanced: true,
+		}, {
+			Name: "chunk_size",
+			Help: `Chunk size to use for uploading.
+
+When uploading files larger than upload_cutoff or files with unknown
+size (e.g. from "rclone rcat" or uploaded with "rclone mount" or google
+photos or google docs) they will be uploaded as multipart uploads
+using this chunk size.
+
+Note that "--115-upload-concurrency" chunks of this size are buffered
+in memory per transfer.
+
+If you are transferring large files over high-speed links and you have
+enough memory, then increasing this will speed up the transfers.
+
+Rclone will automatically increase the chunk size when uploading a
+large file of known size to stay below the 10,000 chunks limit.
+
+Files of unknown size are uploaded with the configured
+chunk_size. Since the default chunk size is 5 MiB and there can be at
+most 10,000 chunks, this means that by default the maximum size of
+a file you can stream upload is 48 GiB.  If you wish to stream upload
+larger files then you will need to increase chunk_size.
+
+Increasing the chunk size decreases the accuracy of the progress
+statistics displayed with "-P" flag. Rclone treats chunk as sent when
+it's buffered by the OSS SDK, when in fact it may still be uploading.
+A bigger chunk size means a bigger OSS SDK buffer and progress
+reporting more deviating from the truth.
+`,
+			Default:  minChunkSize,
+			Advanced: true,
+		}, {
+			Name: "max_upload_parts",
+			Help: `Maximum number of parts in a multipart upload.
+
+This option defines the maximum number of multipart chunks to use
+when doing a multipart upload.
+
+Rclone will automatically increase the chunk size when uploading a
+large file of a known size to stay below this number of chunks limit.
+`,
+			Default:  maxUploadParts,
+			Advanced: true,
+		}, {
+			Name: "upload_concurrency",
+			Help: `Concurrency for multipart uploads and copies.
+
+This is the number of chunks of the same file that are uploaded
+concurrently for multipart uploads and copies.
+
+If you are uploading small numbers of large files over high-speed links
+and these uploads do not fully utilize your bandwidth, then increasing
+this may help to speed up the transfers.`,
+			Default:  4,
 			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
@@ -106,8 +184,13 @@ type Options struct {
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
 	UserAgent           string               `config:"user_agent"`
+	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
+	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
+	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
+	MaxUploadParts      int                  `config:"max_upload_parts"`
+	UploadConcurrency   int                  `config:"upload_concurrency"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -121,9 +204,9 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
-	ui           *api.UploadInfo
+	userID       string     // for uploads
+	userkey      string     // for uploads
 	fileObj      *fs.Object // mod
-	// drv          *driver115.Pan115Client
 }
 
 // Object describes a 115 object
@@ -212,26 +295,41 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
+// getClient makes an http client according to the options
+func getClient(ctx context.Context, opt *Options) *http.Client {
+	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
+		t.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: opt.NoCheckCertificate,
+		}
+	})
+	return &http.Client{
+		Transport: t,
+	}
+}
+
 // newClientWithPacer sets a new http/rest client with a pacer to Fs
-func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
+func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
+	// Override few config settings and create a client
 	newCtx, ci := fs.AddConfig(ctx)
-	ci.UserAgent = f.opt.UserAgent
-	f.srv = rest.NewClient(fshttp.NewClient(newCtx)).SetRoot(rootURL).SetErrorHandler(errorHandler)
+	ci.UserAgent = opt.UserAgent
+	cli := getClient(newCtx, opt)
+
+	f.srv = rest.NewClient(cli).SetRoot(rootURL).SetErrorHandler(errorHandler)
 	f.srv.SetCookie(&http.Cookie{
 		Name:     "UID",
-		Value:    f.opt.UID,
+		Value:    opt.UID,
 		Domain:   domain,
 		Path:     "/",
 		HttpOnly: true,
 	}, &http.Cookie{
 		Name:     "CID",
-		Value:    f.opt.CID,
+		Value:    opt.CID,
 		Domain:   domain,
 		Path:     "/",
 		HttpOnly: true,
 	}, &http.Cookie{
 		Name:     "SEID",
-		Value:    f.opt.SEID,
+		Value:    opt.SEID,
 		Domain:   domain,
 		Path:     "/",
 		HttpOnly: true,
@@ -240,24 +338,6 @@ func (f *Fs) newClientWithPacer(ctx context.Context) (err error) {
 	f.pacer.SetMaxConnections(2) // TODO: tune rate limit
 	return nil
 }
-
-// func (f *Fs) newDriver115() (err error) {
-// 	TlsInsecureSkipVerify := true
-// 	opts := []driver115.Option{
-// 		driver115.UA(userAgent),
-// 		func(c *driver115.Pan115Client) {
-// 			c.Client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: TlsInsecureSkipVerify})
-// 		},
-// 	}
-// 	f.drv = driver115.New(opts...)
-// 	cr := &driver115.Credential{}
-// 	cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s", f.opt.UID, f.opt.CID, f.opt.SEID)
-// 	if err = cr.FromCookie(cookie); err != nil {
-// 		return fmt.Errorf("failed to login by cookies: %w", err)
-// 	}
-// 	f.drv.ImportCredential(cr)
-// 	return f.drv.LoginCheck()
-// }
 
 // newFs partially constructs Fs from the path
 //
@@ -291,12 +371,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		// TODO: check other features available/possible
 	}).Fill(ctx, f)
 
-	if err := f.newClientWithPacer(ctx); err != nil {
+	if err := f.newClientWithPacer(ctx, opt); err != nil {
 		return nil, err
 	}
-	// if err := f.newDriver115(); err != nil {
-	// 	return nil, err
-	// }
 
 	return f, nil
 }
@@ -524,8 +601,7 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 // TODO
 // // PutStream uploads to the remote path with the modTime given of indeterminate size
 // func (f *Fs) PutStream(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-// 	// return f.Put(ctx, in, src, options...)
-// 	return nil, fs.ErrorNotImplemented
+// 	return f.Put(ctx, in, src, options...)
 // }
 
 // putUnchecked uploads the object with the given name and size
@@ -1057,7 +1133,7 @@ func (o *Object) setDownloadURL(ctx context.Context) error {
 		return nil
 	}
 
-	downURL, err := o.fs.getDownURL(ctx, o.pickCode, "")
+	downURL, err := o.fs.getDownURL(ctx, o.pickCode)
 	if err != nil {
 		return err
 	}
