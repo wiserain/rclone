@@ -31,11 +31,9 @@ import (
 const (
 	cachePrefix  = "rclone-115-sha1sum-"
 	md5Salt      = "Qclm8MGWUv59TnrR0XPg"
-	OSSEndpoint  = "cn-shenzhen.oss.aliyuncs.com" // TODO which endpoint is correct?
+	OSSEndpoint  = "http://oss-cn-shenzhen.aliyuncs.com" // https://uplb.115.com/3.0/getuploadinfo.php
 	OSSRegionID  = "oss-cn-shenzhen"
 	OSSUserAgent = "aliyun-sdk-android/2.9.1"
-	// "http://oss-cn-shenzhen.aliyuncs.com"
-	_endpoint = "" // from https://uplb.115.com/3.0/getuploadinfo.php
 )
 
 func (f *Fs) getUploadBasicInfo(ctx context.Context) (err error) {
@@ -203,7 +201,6 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	if err = json.Unmarshal(decrypted, &info); err != nil {
 		return
 	}
-	fs.Debugf(f, "info: %#v\n", info)
 	switch info.ErrorCode {
 	case 0:
 		return
@@ -217,7 +214,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 	opts := rest.Opts{
 		Method:  "GET",
-		RootURL: "https://uplb.115.com/3.0/gettoken.php", // from https://uplb.115.com/3.0/getuploadinfo.php
+		RootURL: "https://uplb.115.com/3.0/gettoken.php", // https://uplb.115.com/3.0/getuploadinfo.php
 	}
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
@@ -317,7 +314,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 			return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
 		}
 	} else {
-		fs.Debugf(o, "SHA1 from src: %s", hashStr)
+		fs.Debugf(o, "Using SHA1 from src: %s", hashStr)
 	}
 
 	// set calculated sha1 hash
@@ -326,7 +323,6 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	var ui *api.UploadInitInfo
 	signKey, signVal := "", ""
 	err = f.pacer.Call(func() (bool, error) {
-		fs.Debugf(o, "signKey: %s, signVal: %s", signKey, signVal)
 		ui, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
 		if err != nil {
 			return false, err
@@ -355,9 +351,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	}
 	switch ui.Status {
 	case 1:
-		fs.Debugf(o, "Starting upload...")
+		fs.Debugf(o, "Upload started: Outgoing traffic will occur!")
 	case 2:
-		fs.Debugf(o, "Uploaded by hash") // match by hash; no outbound traffic
+		fs.Debugf(o, "Upload finished early: No outgoing traffic will occur!")
 		return o, nil
 	default:
 		return nil, fmt.Errorf("unexpected status: %#v", ui)

@@ -214,7 +214,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		bucket:    bucket,
 		imur:      imur,
 	}
-	fs.Debugf(o, "open chunk writer: started multipart upload: %v", imur.UploadID)
+	fs.Debugf(o, "multipart upload: %q initiated", imur.UploadID)
 	return w, nil
 }
 
@@ -246,7 +246,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 		if err != nil {
 			return false, err
 		}
-		uout, err = w.bucket.UploadPart(w.imur, reader, w.chunkSize, ossPartNumber, ossOpts...)
+		uout, err = w.bucket.UploadPart(w.imur, reader, currentChunkSize, ossPartNumber, ossOpts...)
 		if err != nil {
 			if chunkNumber <= 8 {
 				return shouldRetry(ctx, nil, nil, err)
@@ -262,7 +262,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 
 	w.addCompletedPart(uout)
 
-	fs.Debugf(w.o, "multipart upload wrote chunk %d with %v bytes", ossPartNumber, currentChunkSize)
+	fs.Debugf(w.o, "multipart upload: wrote chunk %d with %v bytes", ossPartNumber, currentChunkSize)
 	return currentChunkSize, err
 }
 
@@ -292,6 +292,6 @@ func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
-	fs.Debugf(w.o, "multipart upload %q finished", w.imur.UploadID)
+	fs.Debugf(w.o, "multipart upload: %q finished", w.imur.UploadID)
 	return err
 }
