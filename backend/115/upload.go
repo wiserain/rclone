@@ -32,7 +32,6 @@ const (
 	cachePrefix  = "rclone-115-sha1sum-"
 	md5Salt      = "Qclm8MGWUv59TnrR0XPg"
 	OSSEndpoint  = "http://oss-cn-shenzhen.aliyuncs.com" // https://uplb.115.com/3.0/getuploadinfo.php
-	OSSRegionID  = "oss-cn-shenzhen"
 	OSSUserAgent = "aliyun-sdk-android/2.9.1"
 )
 
@@ -289,7 +288,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		}
 	}
 	if size > maxUploadSize {
-		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, maxUploadSize)
+		return nil, fmt.Errorf("file size exceeds the upload limit: %d > %d", size, int64(maxUploadSize))
 	}
 
 	// Create a new object with its parent directory if it doesn't exist
