@@ -339,6 +339,20 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	return nil
 }
 
+func checkUploadChunkSize(cs fs.SizeSuffix) error {
+	if cs < minChunkSize {
+		return fmt.Errorf("%s is less than %s", cs, minChunkSize)
+	}
+	return nil
+}
+
+func checkUploadCutoff(cs fs.SizeSuffix) error {
+	if cs > maxUploadCutoff {
+		return fmt.Errorf("%s is greater than %s", cs, maxUploadCutoff)
+	}
+	return nil
+}
+
 // newFs partially constructs Fs from the path
 //
 // It constructs a valid Fs but doesn't attempt to figure out whether
@@ -346,8 +360,17 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, error) {
 	// Parse config into Options struct
 	opt := new(Options)
-	if err := configstruct.Set(m, opt); err != nil {
+	err := configstruct.Set(m, opt)
+	if err != nil {
 		return nil, err
+	}
+	err = checkUploadChunkSize(opt.ChunkSize)
+	if err != nil {
+		return nil, fmt.Errorf("115: chunk size: %w", err)
+	}
+	err = checkUploadCutoff(opt.UploadCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("115: upload cutoff: %w", err)
 	}
 
 	// mod - override rootID from path remote:{ID}
