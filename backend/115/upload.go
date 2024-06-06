@@ -23,7 +23,6 @@ import (
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
-	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -327,31 +326,27 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 
 	var ui *api.UploadInitInfo
 	signKey, signVal := "", ""
-	err = f.pacer.Call(func() (bool, error) {
+	for retry := true; retry; {
 		ui, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
 		if err != nil {
-			return false, err
+			return nil, fmt.Errorf("failed to init upload: %w", err)
 		}
-		if ui.Status == 7 {
+		retry = ui.Status == 7
+		switch ui.Status {
+		case 1:
+			fs.Debugf(o, "Upload will begin shortly. Outgoing traffic will occur")
+		case 2:
+			fs.Debugf(o, "Upload finished early. No outgoing traffic will occur")
+			return o, nil
+		case 7:
 			signKey = ui.SignKey
 			if signVal, err = calcBlockSHA1(ctx, in, src, ui.SignCheck); err != nil {
-				return false, fmt.Errorf("failed to calculate block hash: %w", err)
+				return nil, fmt.Errorf("failed to calculate block hash: %w", err)
 			}
-			return true, fserrors.RetryErrorf("Status: %d", ui.Status)
+			fs.Debugf(o, "Retrying init upload: Status 7")
+		default:
+			return nil, fmt.Errorf("unexpected status: %#v", ui)
 		}
-		return false, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	switch ui.Status {
-	case 1:
-		fs.Debugf(o, "Upload started: Outgoing traffic will occur!")
-	case 2:
-		fs.Debugf(o, "Upload finished early: No outgoing traffic will occur!")
-		return o, nil
-	default:
-		return nil, fmt.Errorf("unexpected status: %#v", ui)
 	}
 
 	// Wrap the accounting back onto the stream
