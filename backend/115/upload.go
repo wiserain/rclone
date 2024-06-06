@@ -23,6 +23,7 @@ import (
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -184,7 +185,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	}
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, nil)
+		resp, err = f.srv.Call(ctx, &opts)
 		return shouldRetry(ctx, resp, nil, err)
 	})
 	if err != nil {
@@ -256,23 +257,28 @@ func (f *Fs) getOSSOpts(token *api.OSSToken, ui *api.UploadInitInfo) []oss.Optio
 	return opts
 }
 
-func calcBlockSHA1(in io.Reader, rangeSpec string) (sha1sum string, err error) {
+func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSpec string) (sha1sum string, err error) {
 	var start, end int64
 	if _, err = fmt.Sscanf(rangeSpec, "%d-%d", &start, &end); err != nil {
 		return
 	}
-	length := end - start + 1
-
-	var reader io.Reader
-	if r, ok := in.(io.ReaderAt); ok {
-		reader = io.NewSectionReader(r, start, length)
-	} else {
-		return "", errors.New("input stream doesn't support io.ReaderAt")
-	}
 
 	hash := sha1.New()
-	if _, err = io.Copy(hash, reader); err == nil {
-		sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
+	if ra, ok := in.(io.ReaderAt); ok {
+		reader := io.NewSectionReader(ra, start, end-start+1)
+		if _, err = io.Copy(hash, reader); err == nil {
+			sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
+		}
+	} else {
+		srcObj := fs.UnWrapObjectInfo(src)
+		rc, err := srcObj.Open(ctx, &fs.RangeOption{Start: start, End: end})
+		if err != nil {
+			return "", fmt.Errorf("failed to open source: %w", err)
+		}
+		defer fs.CheckClose(rc, &err)
+		if _, err = io.Copy(hash, rc); err == nil {
+			sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
+		}
 	}
 	return
 }
@@ -327,21 +333,11 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 			return false, err
 		}
 		if ui.Status == 7 {
-			if wrap == nil {
-				fs.Debugf(o, "Buffering to calculate partial SHA1...")
-				in, wrap = accounting.UnWrap(in)
-				in, cleanup, err = bufferIO(in, size, int64(f.opt.HashMemoryThreshold))
-				defer cleanup()
-				if err != nil {
-					return false, fmt.Errorf("failed to buffer io: %w", err)
-				}
-			}
 			signKey = ui.SignKey
-			signVal, err = calcBlockSHA1(in, ui.SignCheck)
-			if err != nil {
+			if signVal, err = calcBlockSHA1(ctx, in, src, ui.SignCheck); err != nil {
 				return false, fmt.Errorf("failed to calculate block hash: %w", err)
 			}
-			return true, nil
+			return true, fserrors.RetryErrorf("Status: %d", ui.Status)
 		}
 		return false, nil
 	})
