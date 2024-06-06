@@ -36,9 +36,9 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	params := url.Values{}
 	params.Set("aid", "1")
 	params.Set("cid", dirID)
-	params.Set("o", "user_ptime") // order by time
-	params.Set("asc", "0")        // ascending order?
-	params.Set("show_dir", "1")
+	params.Set("o", "user_ptime") // order by time or "file_type", "file_size", "file_name"
+	params.Set("asc", "0")        // ascending order? "0" or "1"
+	params.Set("show_dir", "1")   // "0" or "1"
 	params.Set("limit", strconv.Itoa(ListLimit))
 	params.Set("snap", "0")
 	params.Set("record_open_time", "1")

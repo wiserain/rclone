@@ -335,7 +335,6 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 		HttpOnly: true,
 	})
 	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
-	f.pacer.SetMaxConnections(2) // TODO: tune rate limit
 	return nil
 }
 
