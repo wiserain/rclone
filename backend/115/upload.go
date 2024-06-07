@@ -226,7 +226,28 @@ func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 	return
 }
 
-func (f *Fs) getOSSBucket(ctx context.Context, ui *api.UploadInitInfo) (bucket *oss.Bucket, callback []oss.Option, expire []oss.Option, err error) {
+func ossOpts(ossOptions []oss.Option, options ...fs.OpenOption) []oss.Option {
+	opts := ossOptions
+
+	// Apply upload options
+	for _, option := range options {
+		key, value := option.Header()
+		lowerKey := strings.ToLower(key)
+		switch lowerKey {
+		case "":
+			// ignore
+		case "cache-control":
+			opts = append(opts, oss.CacheControl(value))
+		case "content-disposition":
+			opts = append(opts, oss.ContentDisposition(value))
+		case "content-encoding":
+			opts = append(opts, oss.ContentEncoding(value))
+		}
+	}
+	return opts
+}
+
+func (f *Fs) newOSSBucket(ctx context.Context, ui *api.UploadInitInfo) (bucket *oss.Bucket, callback []oss.Option, expire []oss.Option, err error) {
 	token, err := f.getOSSToken(ctx)
 	if err != nil {
 		err = fmt.Errorf("failed to get OSS token: %w", err)
@@ -362,9 +383,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	}
 
 	// upload singlepart
-	bucket, callback, _, err := f.getOSSBucket(ctx, ui)
+	bucket, callback, _, err := f.newOSSBucket(ctx, ui)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get OSS bucket: %w", err)
 	}
-	return o, bucket.PutObject(ui.Object, in, callback...)
+	return o, bucket.PutObject(ui.Object, in, ossOpts(callback, options...)...)
 }

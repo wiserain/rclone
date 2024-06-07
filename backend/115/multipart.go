@@ -162,7 +162,6 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		fs:     f,
 		remote: remote,
 	}
-	_ = options // TODO
 
 	uploadParts := f.opt.MaxUploadParts
 	if uploadParts < 1 {
@@ -187,14 +186,14 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		chunkSize = chunksize.Calculator(src, size, uploadParts, chunkSize)
 	}
 
-	bucket, callback, expire, err := f.getOSSBucket(ctx, ui)
+	bucket, callback, expire, err := f.newOSSBucket(ctx, ui)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new OSS bucket instance: %w", err)
 	}
 
 	var imur oss.InitiateMultipartUploadResult
 	err = f.pacer.Call(func() (bool, error) {
-		imur, err = bucket.InitiateMultipartUpload(ui.Object, expire...)
+		imur, err = bucket.InitiateMultipartUpload(ui.Object, ossOpts(expire, options...)...)
 		return shouldRetry(ctx, nil, nil, err)
 	})
 	if err != nil {
