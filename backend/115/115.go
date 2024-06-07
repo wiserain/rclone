@@ -390,8 +390,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		DuplicateFiles:          true, // allows duplicate files
 		CanHaveEmptyDirectories: true, // can have empty directories
 		NoMultiThreading:        true, // set if can't have multiplethreads on one download open
-		// ChunkWriterDoesntSeek    bool // set if the chunk writer doesn't need to read the data more than once
-		// TODO: check other features available/possible
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx, opt); err != nil {
@@ -1158,14 +1156,18 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return err
 	}
 
-	// Delete duplicate after successful upload
-	err = o.Remove(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to remove old version: %w", err)
+	// updating object with the same contents(sha1) simply updates some attributes
+	// rather than creating a new one. So we shouldn't delete old object
+	newO := newObj.(*Object)
+	if !(newO.id == o.id && newO.pickCode == o.pickCode && newO.sha1sum == o.sha1sum) {
+		// Delete duplicate after successful upload
+		if err = o.Remove(ctx); err != nil {
+			return fmt.Errorf("failed to remove old version: %w", err)
+		}
 	}
 
 	// Replace guts of old object with new one
-	*o = *newObj.(*Object)
+	*o = *newO
 
 	return nil
 }

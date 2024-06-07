@@ -51,9 +51,9 @@ func NewRW() *pool.RW {
 // in is read seqentially and chunks from it are uploaded in parallel.
 //
 // It returns the chunkWriter used in case the caller needs to extract any private info from it.
-func (mu *ossChunkWriter) Upload(ctx context.Context) (err error) {
+func (w *ossChunkWriter) Upload(ctx context.Context) (err error) {
 	// make concurrency machinery
-	concurrency := mu.f.opt.UploadConcurrency
+	concurrency := w.f.opt.UploadConcurrency
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -63,10 +63,10 @@ func (mu *ossChunkWriter) Upload(ctx context.Context) (err error) {
 	defer cancel()
 	defer atexit.OnError(&err, func() {
 		cancel()
-		fs.Debugf(mu.o, "multipart upload: Cancelling...")
-		errCancel := mu.Abort(ctx)
+		fs.Debugf(w.o, "multipart upload: Cancelling...")
+		errCancel := w.Abort(ctx)
 		if errCancel != nil {
-			fs.Debugf(mu.o, "multipart upload: failed to cancel: %v", errCancel)
+			fs.Debugf(w.o, "multipart upload: failed to cancel: %v", errCancel)
 		}
 	})()
 
@@ -74,12 +74,12 @@ func (mu *ossChunkWriter) Upload(ctx context.Context) (err error) {
 		g, gCtx   = errgroup.WithContext(uploadCtx)
 		finished  = false
 		off       int64
-		size      = mu.size
-		chunkSize = mu.chunkSize
+		size      = w.size
+		chunkSize = w.chunkSize
 	)
 
 	// Do the accounting manually
-	in, acc := accounting.UnWrapAccounting(mu.in)
+	in, acc := accounting.UnWrapAccounting(w.in)
 
 	for partNum := int64(0); !finished; partNum++ {
 		// Get a block of memory from the pool and token which limits concurrency.
@@ -121,8 +121,8 @@ func (mu *ossChunkWriter) Upload(ctx context.Context) (err error) {
 		off += n
 		g.Go(func() (err error) {
 			defer free()
-			fs.Debugf(mu.o, "multipart upload: starting chunk %d size %v offset %v/%v", partNum, fs.SizeSuffix(n), fs.SizeSuffix(partOff), fs.SizeSuffix(size))
-			_, err = mu.WriteChunk(gCtx, int(partNum), rw)
+			fs.Debugf(w.o, "multipart upload: starting chunk %d size %v offset %v/%v", partNum, fs.SizeSuffix(n), fs.SizeSuffix(partOff), fs.SizeSuffix(size))
+			_, err = w.WriteChunk(gCtx, int(partNum), rw)
 			return err
 		})
 	}
@@ -132,7 +132,7 @@ func (mu *ossChunkWriter) Upload(ctx context.Context) (err error) {
 		return err
 	}
 
-	err = mu.Close(ctx)
+	err = w.Close(ctx)
 	if err != nil {
 		return fmt.Errorf("multipart upload: failed to finalise: %w", err)
 	}
