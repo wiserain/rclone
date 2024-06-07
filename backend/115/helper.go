@@ -349,6 +349,8 @@ func (f *Fs) getFile(ctx context.Context, fid string) (file *api.File, err error
 		return nil, fmt.Errorf("API State false: %s (%d)", info.Message, info.Code)
 	}
 	if len(info.Data) > 0 {
+		file = info.Data[0]
+		file.Name = f.opt.Enc.ToStandardName(file.Name)
 		return info.Data[0], nil
 	}
 	return nil, fmt.Errorf("no data")
