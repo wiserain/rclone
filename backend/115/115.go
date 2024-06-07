@@ -200,6 +200,7 @@ type Fs struct {
 	root         string
 	opt          Options
 	features     *fs.Features
+	client       *http.Client // authorized client
 	srv          *rest.Client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
@@ -312,9 +313,9 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	// Override few config settings and create a client
 	newCtx, ci := fs.AddConfig(ctx)
 	ci.UserAgent = opt.UserAgent
-	cli := getClient(newCtx, opt)
+	f.client = getClient(newCtx, opt)
 
-	f.srv = rest.NewClient(cli).SetRoot(rootURL).SetErrorHandler(errorHandler)
+	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
 	f.srv.SetCookie(&http.Cookie{
 		Name:     "UID",
 		Value:    opt.UID,

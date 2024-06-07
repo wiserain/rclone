@@ -1,4 +1,4 @@
-// Implements multipart uploading for 115.
+// Implements multipart uploading for 115. Mostly from lib/multipart
 package _115
 
 import (
@@ -151,9 +151,8 @@ type ossChunkWriter struct {
 	in               io.Reader
 	completedPartsMu sync.Mutex
 	completedParts   []oss.UploadPart
-	ui               *api.UploadInitInfo
-	token            *api.OSSToken
 	bucket           *oss.Bucket
+	callback         []oss.Option
 	imur             oss.InitiateMultipartUploadResult
 }
 
@@ -188,15 +187,14 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		chunkSize = chunksize.Calculator(src, size, uploadParts, chunkSize)
 	}
 
-	token, bucket, err := f.getOSSBucket(ctx, ui.Bucket)
+	bucket, callback, expire, err := f.getOSSBucket(ctx, ui)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new OSS bucket instance: %w", err)
 	}
 
-	ossOpts := f.getOSSOpts(token, nil)
 	var imur oss.InitiateMultipartUploadResult
 	err = f.pacer.Call(func() (bool, error) {
-		imur, err = bucket.InitiateMultipartUpload(ui.Object, ossOpts...)
+		imur, err = bucket.InitiateMultipartUpload(ui.Object, expire...)
 		return shouldRetry(ctx, nil, nil, err)
 	})
 	if err != nil {
@@ -209,9 +207,8 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		f:         f,
 		o:         o,
 		in:        in,
-		ui:        ui,
-		token:     token,
 		bucket:    bucket,
+		callback:  callback,
 		imur:      imur,
 	}
 	fs.Debugf(o, "multipart upload: %q initiated", imur.UploadID)
@@ -233,7 +230,6 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 	}
 
 	ossPartNumber := chunkNumber + 1
-	ossOpts := w.f.getOSSOpts(w.token, w.ui)
 	var uout oss.UploadPart
 	err = w.f.pacer.Call(func() (bool, error) {
 		// Discover the size by seeking to the end
@@ -246,7 +242,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 		if err != nil {
 			return false, err
 		}
-		uout, err = w.bucket.UploadPart(w.imur, reader, currentChunkSize, ossPartNumber, ossOpts...)
+		uout, err = w.bucket.UploadPart(w.imur, reader, currentChunkSize, ossPartNumber, w.callback...)
 		if err != nil {
 			if chunkNumber <= 8 {
 				return shouldRetry(ctx, nil, nil, err)
@@ -269,24 +265,22 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 // Abort the multipart upload
 func (w *ossChunkWriter) Abort(ctx context.Context) (err error) {
 	// Abort the upload session
-	ossOpts := w.f.getOSSOpts(w.token, w.ui)
 	err = w.f.pacer.Call(func() (bool, error) {
-		err = w.bucket.AbortMultipartUpload(w.imur, ossOpts...)
+		err = w.bucket.AbortMultipartUpload(w.imur, w.callback...)
 		return shouldRetry(ctx, nil, nil, err)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to abort multipart upload %q: %w", w.imur.UploadID, err)
 	}
-	fs.Debugf(w.o, "multipart upload %q aborted", w.imur.UploadID)
+	fs.Debugf(w.o, "multipart upload: %q aborted", w.imur.UploadID)
 	return
 }
 
 // Close and finalise the multipart upload
 func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 	// Finalise the upload session
-	ossOpts := w.f.getOSSOpts(w.token, w.ui)
 	err = w.f.pacer.Call(func() (bool, error) {
-		_, err := w.bucket.CompleteMultipartUpload(w.imur, w.completedParts, ossOpts...)
+		_, err := w.bucket.CompleteMultipartUpload(w.imur, w.completedParts, w.callback...)
 		return shouldRetry(ctx, nil, nil, err)
 	})
 	if err != nil {
