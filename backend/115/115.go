@@ -658,12 +658,59 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	return f.putUnchecked(ctx, in, src, src.Remote(), options...)
 }
 
-// TODO
-// // MergeDirs merges the contents of all the directories passed
-// // in into the first one and rmdirs the other directories.
-// func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) error {
-// 	return fs.ErrorNotImplemented
-// }
+// MergeDirs merges the contents of all the directories passed
+// in into the first one and rmdirs the other directories.
+func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
+	if len(dirs) < 2 {
+		return nil
+	}
+	dstDir := dirs[0]
+	for _, srcDir := range dirs[1:] {
+		// list the objects
+		var IDs []string
+		_, err = f.listAll(ctx, srcDir.ID(), func(item *api.File) bool {
+			fs.Infof(srcDir, "listing for merging %q", item.Name)
+			id := item.FID
+			if id == "" {
+				id = item.CID
+			}
+			IDs = append(IDs, id)
+			// API doesn't allow to move a large number of objects at once, so doing it in chunked
+			if len(IDs) >= ListLimit {
+				if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
+					return true
+				}
+				IDs = nil
+			}
+			return false
+		})
+		if err != nil {
+			return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
+		}
+		// move them into place
+		if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
+			return fmt.Errorf("MergeDirs move failed in %v: %w", srcDir, err)
+		}
+	}
+
+	// rmdir (into trash) the now empty source directory
+	var IDs []string
+	for _, srcDir := range dirs[1:] {
+		fs.Infof(srcDir, "removing empty directory")
+		IDs = append(IDs, srcDir.ID())
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= ListLimit {
+			if err = f.deleteFiles(ctx, IDs); err != nil {
+				return err
+			}
+			IDs = nil
+		}
+	}
+	if err := f.deleteFiles(ctx, IDs); err != nil {
+		return fmt.Errorf("MergeDirs failed to rmdir: %w", err)
+	}
+	return nil
+}
 
 // Mkdir makes the directory (container, bucket)
 //
@@ -1185,6 +1232,7 @@ var (
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
+	_ fs.MergeDirser     = (*Fs)(nil)
 	_ fs.PutUncheckeder  = (*Fs)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
