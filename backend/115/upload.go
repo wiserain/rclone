@@ -195,7 +195,9 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		return
 	}
 	if decrypted, err = ecdhCipher.Decrypt(body); err != nil {
-		// runtime error: slice bounds out of range [:59409] with capacity 144
+		// FIXME failed to decrypt intermittenly
+		// seems to be caused by corrupted body
+		// low level retry deosn't help
 		return
 	}
 	if err = json.Unmarshal(decrypted, &info); err != nil {

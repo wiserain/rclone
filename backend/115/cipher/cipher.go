@@ -299,6 +299,9 @@ func (c *EcdhCipher) Decrypt(cipherText []byte) (text []byte, e error) {
 	mode.CryptBlocks(lz4Block, cipherText)
 
 	length := int(lz4Block[0]) + int(lz4Block[1])<<8
+	if l := length + 2; l > cap(lz4Block) {
+		return nil, lz4.ErrInvalidSourceShortBuffer
+	}
 	text = make([]byte, 0x2000)
 	l, err := lz4.UncompressBlock(lz4Block[2:length+2], text)
 	if err != nil {
