@@ -1,8 +1,12 @@
 package _115
 
 import (
+	"context"
 	"fmt"
 	"regexp"
+	"strings"
+
+	"github.com/rclone/rclone/fs"
 )
 
 // ------------------------------------------------------------
@@ -16,4 +20,29 @@ func parseRootID(s string) (rootID string, err error) {
 	}
 	rootID = m[1]
 	return
+}
+
+// get an id of file or directory
+func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
+	if id, _ := parseRootID(path); len(id) > 6 {
+		info, err := f.getFile(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("no such object with id %q: %w", id, err)
+		}
+		id = info.FID
+		if id == "" {
+			id = info.CID
+		}
+		return id, nil
+	}
+	path = strings.Trim(path, "/")
+	id, err = f.dirCache.FindDir(ctx, path, false)
+	if err != nil {
+		o, err := f.NewObject(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		id = o.(fs.IDer).ID()
+	}
+	return id, nil
 }

@@ -51,6 +51,7 @@ func init() {
 		Name:        "115",
 		Description: "115 drive",
 		NewFs:       NewFs,
+		CommandHelp: commandHelp,
 		Options: []fs.Option{{
 			Name:      "uid",
 			Help:      "UID from cookie",
@@ -1051,6 +1052,46 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 
 // ------------------------------------------------------------
 
+var commandHelp = []fs.CommandHelp{{
+	// mod
+	Name:  "getid",
+	Short: "Get an ID of a file or directory",
+	Long: `This command is to obtain an ID of a file or directory.
+
+Usage:
+
+    rclone backend getid pikpak:path {subpath}
+
+The 'path' should point to a directory not a file. Use an extra argument
+'subpath' to get an ID of a file located in 'pikpak:path'.
+`,
+}}
+
+// Command the backend to run a named command
+//
+// The command run is name
+// args may be used to read arguments from
+// opts may be used to read optional arguments from
+//
+// The result should be capable of being JSON encoded
+// If it is a string or a []string it will be shown to the user
+// otherwise it will be JSON encoded and shown to the user like that
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+	switch name {
+	case "getid":
+		// mod
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		return f.getID(ctx, path)
+	default:
+		return nil, fs.ErrorCommandNotFound
+	}
+}
+
+// ------------------------------------------------------------
+
 // Fs returns read only access to the Fs that this object is part of
 func (o *Object) Fs() fs.Info {
 	return o.fs
@@ -1240,7 +1281,6 @@ func (o *Object) readMetaData(ctx context.Context) error {
 
 // Check the interfaces are satisfied
 var (
-	// _ fs.Commander       = (*Fs)(nil)
 	// _ fs.PublicLinker    = (*Fs)(nil)
 	// _ fs.CleanUpper      = (*Fs)(nil)
 	// _ fs.UserInfoer      = (*Fs)(nil)
@@ -1254,6 +1294,7 @@ var (
 	_ fs.MergeDirser     = (*Fs)(nil)
 	_ fs.PutUncheckeder  = (*Fs)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
+	_ fs.Commander       = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
 	_ fs.ObjectInfo      = (*Object)(nil)
 	_ fs.IDer            = (*Object)(nil)
