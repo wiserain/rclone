@@ -359,6 +359,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		case 1:
 			fs.Debugf(o, "Upload will begin shortly. Outgoing traffic will occur")
 		case 2:
+			// ui gives valid pickcode in this case but not available when listing
 			fs.Debugf(o, "Upload finished early. No outgoing traffic will occur")
 			return o, nil
 		case 7:
