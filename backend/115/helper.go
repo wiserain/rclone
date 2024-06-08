@@ -351,7 +351,32 @@ func (f *Fs) getFile(ctx context.Context, fid string) (file *api.File, err error
 	if len(info.Data) > 0 {
 		file = info.Data[0]
 		file.Name = f.opt.Enc.ToStandardName(file.Name)
-		return info.Data[0], nil
+		return
 	}
 	return nil, fmt.Errorf("no data")
+}
+
+// getStats gets information of a file or directory by its ID
+func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err error) {
+	params := url.Values{}
+	params.Set("cid", cid)
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/category/get",
+		Parameters: params,
+	}
+
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	}
+	info.FileName = f.opt.Enc.ToStandardName(info.FileName)
+	for n, parent := range info.Paths {
+		info.Paths[n].FileName = f.opt.Enc.ToStandardName(parent.FileName)
+	}
+	return
 }

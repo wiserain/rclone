@@ -205,6 +205,30 @@ type DirID struct {
 	IsPrivate json.Number `json:"is_private,omitempty"`
 }
 
+type FileStats struct {
+	Count        string `json:"count,omitempty"`
+	Size         string `json:"size,omitempty"`
+	FolderCount  string `json:"folder_count,omitempty"`
+	ShowPlayLong int    `json:"show_play_long,omitempty"`
+	PlayLong     int    `json:"play_long,omitempty"`
+	Ptime        string `json:"ptime,omitempty"` // ctime
+	Utime        string `json:"utime,omitempty"` // mtime
+	IsShare      string `json:"is_share,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
+	PickCode     string `json:"pick_code,omitempty"`
+	Sha1         string `json:"sha1,omitempty"`
+	IsMark       string `json:"is_mark,omitempty"`
+	Fvs          int    `json:"fvs,omitempty"`
+	OpenTime     int    `json:"open_time,omitempty"` // atime
+	Score        int    `json:"score,omitempty"`
+	Desc         string `json:"desc,omitempty"`
+	FileCategory string `json:"file_category,omitempty"` // "0" if dir
+	Paths        []struct {
+		FileID   json.Number `json:"file_id,omitempty"`
+		FileName string      `json:"file_name,omitempty"`
+	} `json:"paths,omitempty"`
+}
+
 type IndexInfo struct {
 	SpaceInfo map[string]SizeInfo `json:"space_info"`
 }

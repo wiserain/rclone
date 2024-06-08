@@ -400,15 +400,15 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 }
 
 // NewFs constructs an Fs from the path, container:path
-func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, error) {
-	f, err := newFs(ctx, name, path, m)
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
+	f, err := newFs(ctx, name, root, m)
 	if err != nil {
 		return nil, err
 	}
 
 	// mod - parse object id from path remote:{ID}
 	var srcFile *api.File
-	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+	if rootID, _ := parseRootID(root); len(rootID) > 6 {
 		f.opt.RootFolderID = rootID
 
 		srcFile, err = f.getFile(ctx, rootID)
@@ -448,6 +448,23 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		f.root = "isFile:" + srcFile.Name
 		f.fileObj = &obj
 		return f, fs.ErrorIsFile
+	}
+
+	// warm up dircache
+	if f.rootFolderID == "0" {
+		if rootid, err := f.getDirID(ctx, f.root); err == nil {
+			stats, err := f.getStats(ctx, rootid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get file stats: %w", err)
+			}
+			dirPath := ""
+			for _, parent := range stats.Paths[1:] {
+				dirPath = path.Join(dirPath, parent.FileName)
+				f.dirCache.Put(dirPath, parent.FileID.String())
+			}
+			dirPath = path.Join(dirPath, stats.FileName)
+			f.dirCache.Put(dirPath, rootid)
+		}
 	}
 
 	// Find the current root
