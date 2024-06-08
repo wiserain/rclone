@@ -559,7 +559,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
 		if item.Name == leaf && item.IsDir() {
-			pathIDOut = item.CID
+			pathIDOut = item.ID()
 			return true
 		}
 		return false
@@ -686,11 +686,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 		var IDs []string
 		_, err = f.listAll(ctx, srcDir.ID(), func(item *api.File) bool {
 			fs.Infof(srcDir, "listing for merging %q", item.Name)
-			id := item.FID
-			if id == "" {
-				id = item.CID
-			}
-			IDs = append(IDs, id)
+			IDs = append(IDs, item.ID())
 			// API doesn't allow to move a large number of objects at once, so doing it in chunked
 			if len(IDs) >= ListLimit {
 				if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
@@ -967,10 +963,10 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 // (nil, nil) is returned.
 func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) (entry fs.DirEntry, err error) {
 	switch {
-	case item.FID == "": // in case of dir
+	case item.IsDir(): // in case of dir
 		// cache the directory ID for later lookups
-		f.dirCache.Put(remote, item.CID)
-		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.CID).SetParentID(item.PID)
+		f.dirCache.Put(remote, item.ID())
+		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.ID()).SetParentID(item.PID)
 		return d, nil
 	default:
 		entry, err = f.newObjectWithInfo(ctx, remote, item)
@@ -1232,11 +1228,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 
 // setMetaData sets the metadata from info
 func (o *Object) setMetaData(info *api.File) error {
-	if info.FID == "" {
+	if info.IsDir() {
 		return fs.ErrorIsDir
 	}
 	o.hasMetaData = true
-	o.id = info.FID
+	o.id = info.ID()
 	o.parent = info.CID
 	o.size = info.Size
 	o.sha1sum = strings.ToLower(info.Sha)

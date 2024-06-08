@@ -132,6 +132,13 @@ func (f *File) IsDir() bool {
 	return f.FID == ""
 }
 
+func (f *File) ID() string {
+	if f.FID == "" {
+		return f.CID
+	}
+	return f.FID
+}
+
 type FilePath struct {
 	Name string      `json:"name,omitempty"`
 	AID  json.Number `json:"aid,omitempty"` // area

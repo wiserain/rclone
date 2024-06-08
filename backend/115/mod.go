@@ -29,11 +29,7 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 		if err != nil {
 			return "", fmt.Errorf("no such object with id %q: %w", id, err)
 		}
-		id = info.FID
-		if id == "" {
-			id = info.CID
-		}
-		return id, nil
+		return info.ID(), nil
 	}
 	path = strings.Trim(path, "/")
 	id, err = f.dirCache.FindDir(ctx, path, false)
