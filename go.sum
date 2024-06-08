@@ -429,8 +429,6 @@ github.com/onsi/ginkgo/v2 v2.9.5 h1:+6Hr4uxzP4XIUyAkg61dWBw8lb/gc4/X5luuxN/EC+Q=
 github.com/onsi/gomega v1.27.10 h1:naR28SdDFlqrG6kScpT8VWpu1xWY5nJRCF3XaYyBjhI=
 github.com/oracle/oci-go-sdk/v65 v65.55.1 h1:82j4YHtqeJJiOPyLKxP4/x3Oi8tv2o1etKMziY7yM7o=
 github.com/oracle/oci-go-sdk/v65 v65.55.1/go.mod h1:IBEV9l1qBzUpo7zgGaRUhbB05BVfcDGYRFBCPlTcPp0=
-github.com/orzogc/fake115uploader v0.3.3-0.20221009101310-08b764073b77 h1:dg/EaaJLPIg4xn2kaZil7Ax3wfoxcFXaBwyOTlcz5AI=
-github.com/orzogc/fake115uploader v0.3.3-0.20221009101310-08b764073b77/go.mod h1:FD9a09Vw07CSMTdT0Y7ttStOa1WZsnPBslliMw2DkeM=
 github.com/patrickmn/go-cache v2.1.0+incompatible h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=
 github.com/patrickmn/go-cache v2.1.0+incompatible/go.mod h1:3Qf8kWWT7OJRJbdiICTKqZju1ZixQ/KpMGzzAfe6+WQ=
 github.com/pelletier/go-toml/v2 v2.0.8 h1:0ctb6s9mE31h0/lhu+J6OPmVeDxJn+kYnJc2jZR9tGQ=
@@ -543,7 +541,6 @@ github.com/tklauser/numcpus v0.7.0/go.mod h1:bb6dMVcj8A42tSE7i32fsIUCbQNllK5iDgu
 github.com/tv42/httpunix v0.0.0-20191220191345-2ba4b9c3382c h1:u6SKchux2yDvFQnDHS3lPnIRmfVJ5Sxy3ao2SIdysLQ=
 github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
-github.com/valyala/fastjson v1.6.3 h1:tAKFnnwmeMGPbwJ7IwxcTPCNr3uIzoIj3/Fh90ra4xc=
 github.com/willf/bitset v1.1.9/go.mod h1:RjeCKbqT1RxIR/KWY6phxZiaY1IyutSBfGjNPySAYV4=
 github.com/willscott/go-nfs v0.0.2 h1:BaBp1CpGDMooCT6bCgX6h6ZwgPcTMST4yToYZ9byee0=
 github.com/willscott/go-nfs v0.0.2/go.mod h1:SvullWeHxr/924WQNbUaZqtluBt2vuZ61g6yAV+xj7w=

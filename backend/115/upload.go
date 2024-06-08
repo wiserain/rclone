@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/orzogc/fake115uploader/cipher"
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/backend/115/cipher"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/hash"
@@ -195,6 +195,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		return
 	}
 	if decrypted, err = ecdhCipher.Decrypt(body); err != nil {
+		// runtime error: slice bounds out of range [:59409] with capacity 144
 		return
 	}
 	if err = json.Unmarshal(decrypted, &info); err != nil {
