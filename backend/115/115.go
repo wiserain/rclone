@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,11 @@ func init() {
 		}, {
 			Name:      "seid",
 			Help:      "SEID from cookie",
+			Required:  true,
+			Sensitive: true,
+		}, {
+			Name:      "cookie",
+			Help:      "cookie including UID, CID, SEID",
 			Required:  true,
 			Sensitive: true,
 		}, {
@@ -184,6 +190,7 @@ type Options struct {
 	UID                 string               `config:"uid"`
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
+	Cookie              string               `config:"cookie"`
 	UserAgent           string               `config:"user_agent"`
 	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
@@ -317,6 +324,24 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	f.client = getClient(newCtx, opt)
 
 	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
+
+	// UID, CID, SEID from cookie
+	if opt.Cookie != "" {
+		if items := strings.Split(opt.Cookie, ";"); len(items) > 2 {
+			for _, item := range items {
+				kv := strings.Split(strings.TrimSpace(item), "=")
+				if len(kv) != 2 {
+					continue
+				}
+				key := strings.TrimSpace(strings.ToUpper(kv[0]))
+				val := strings.TrimSpace(kv[1])
+				switch key {
+				case "UID", "CID", "SEID":
+					reflect.ValueOf(opt).Elem().FieldByName(key).SetString(val)
+				}
+			}
+		}
+	}
 	f.srv.SetCookie(&http.Cookie{
 		Name:     "UID",
 		Value:    opt.UID,
