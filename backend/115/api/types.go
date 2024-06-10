@@ -334,3 +334,26 @@ type OSSToken struct {
 	SecurityToken   string    `json:"SecurityToken"`
 	StatusCode      string    `json:"StatusCode"`
 }
+
+// ------------------------------------------------------------
+
+type NewURL struct {
+	State    bool   `json:"state,omitempty"`
+	ErrorMsg string `json:"error_msg,omitempty"`
+	Errno    int    `json:"errno,omitempty"`
+	Result   []struct {
+		State    bool   `json:"state,omitempty"`
+		ErrorMsg string `json:"error_msg,omitempty"`
+		Errno    int    `json:"errno,omitempty"`
+		Errtype  string `json:"errtype,omitempty"`
+		Errcode  int    `json:"errcode,omitempty"`
+		InfoHash string `json:"info_hash,omitempty"`
+		URL      string `json:"url,omitempty"`
+		Files    []struct {
+			ID   string `json:"id,omitempty"`
+			Name string `json:"name,omitempty"`
+			Size int64  `json:"size,omitempty"`
+		} `json:"files,omitempty"`
+	} `json:"result,omitempty"`
+	Errcode int `json:"errcode,omitempty"`
+}

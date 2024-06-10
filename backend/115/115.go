@@ -1074,17 +1074,33 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 // ------------------------------------------------------------
 
 var commandHelp = []fs.CommandHelp{{
-	// mod
+	Name:  "addurls",
+	Short: "Add offline download task for urls",
+	Long: `This command adds offline download task for urls.
+
+Usage:
+
+    rclone backend addurls 115:dirpath url1 url2
+
+By default, downloads are saved to the folder "dirpath". 
+If this folder doesn't exist or you don't have permission 
+to access it, the download will be saved to the default folder 
+named "云下载".
+
+This command always exits with code 0, regardless of success.
+Instead, check the output (stdout) for any error messages.
+`,
+}, { // mod
 	Name:  "getid",
 	Short: "Get an ID of a file or directory",
 	Long: `This command is to obtain an ID of a file or directory.
 
 Usage:
 
-    rclone backend getid pikpak:path {subpath}
+    rclone backend getid 115:path {subpath}
 
 The 'path' should point to a directory not a file. Use an extra argument
-'subpath' to get an ID of a file located in 'pikpak:path'.
+'subpath' to get an ID of a file located in '115:path'.
 `,
 }}
 
@@ -1099,6 +1115,8 @@ The 'path' should point to a directory not a file. Use an extra argument
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
 	switch name {
+	case "addurls":
+		return f.addURLs(ctx, "", arg)
 	case "getid":
 		// mod
 		path := ""

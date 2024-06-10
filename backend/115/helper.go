@@ -380,3 +380,61 @@ func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err
 	}
 	return
 }
+
+// ------------------------------------------------------------
+
+// add offline download task for multiple urls
+func (f *Fs) _addURLs(ctx context.Context, input []byte) (output []byte, err error) {
+	key := crypto.GenerateKey()
+	opts := rest.Opts{
+		Method:          "POST",
+		RootURL:         "https://lixian.115.com/lixianssp/",
+		Parameters:      url.Values{"ac": {"add_task_urls"}},
+		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
+	}
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	}
+	if info.Data.EncodedData == "" {
+		return nil, errors.New("no data")
+	}
+	output, err = crypto.Decode(info.Data.EncodedData, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode data: %w", err)
+	}
+	return
+}
+
+// add offline download task for multiple urls
+func (f *Fs) addURLs(ctx context.Context, path string, urls []string) (info *api.NewURL, err error) {
+	if f.userID == "" {
+		if err := f.getUploadBasicInfo(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get user id: %w", err)
+		}
+	}
+	parentID, _ := f.dirCache.FindDir(ctx, path, false)
+	payload := map[string]string{
+		"ac":         "add_task_urls",
+		"app_ver":    appVer,
+		"uid":        f.userID,
+		"wp_path_id": parentID,
+	}
+	for ind, url := range urls {
+		payload[fmt.Sprintf("url[%d]", ind)] = url
+	}
+	input, _ := json.Marshal(payload)
+	output, err := f._addURLs(ctx, input)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(output, &info); err != nil {
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
+	}
+	return
+}
