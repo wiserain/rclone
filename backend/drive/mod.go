@@ -69,7 +69,7 @@ type ServiceAccountPool struct {
 	numLoad int
 }
 
-func newServiceAccountPool(ctx context.Context, opt *Options) (*ServiceAccountPool, error) {
+func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 	var saFiles, ipUsers []string
 	if opt.ServiceAccountFilePath != "" {
 		dirList, err := os.ReadDir(opt.ServiceAccountFilePath)
@@ -263,27 +263,25 @@ type GdsRemote struct {
 }
 
 func (gds *GdsClient) getGdsRemote(ctx context.Context) (remote *GdsRemote, err error) {
-	params := url.Values{
-		"userid": {gds.userid},
-		"apikey": {gds.apikey},
-		"mode":   {gds.mode},
-	}
+	form := url.Values{}
+	form.Set("userid", gds.userid)
+	form.Set("apikey", gds.apikey)
+	form.Set("mode", gds.mode)
 	opts := rest.Opts{
-		Method:      "POST",
-		ContentType: "application/x-www-form-urlencoded",
-		Parameters:  params,
+		Method:          "POST",
+		MultipartParams: form,
 	}
-	var resp *GdsResponse
-	_, err = gds.client.CallJSON(ctx, &opts, nil, &resp)
+	var info *GdsResponse
+	_, err = gds.client.CallJSON(ctx, &opts, nil, &info)
 	if err != nil {
 		return
 	}
-	if resp.Result != "success" {
-		err = fmt.Errorf("%v", resp.Result)
+	if info.Result != "success" {
+		err = fmt.Errorf("%v", info.Result)
 		return
 	}
-	fs.Debugf(nil, "member: %+v\n", string(resp.Data.Member))
-	return resp.Data.Remote, nil
+	fs.Debugf(nil, "member: %+v\n", string(info.Data.Member))
+	return info.Data.Remote, nil
 }
 
 // ------------------------------------------------------------

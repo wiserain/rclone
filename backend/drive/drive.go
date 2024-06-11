@@ -1437,7 +1437,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	// mod
-	pool, err := newServiceAccountPool(ctx, opt)
+	pool, err := newServiceAccountPool(opt)
 	if err != nil {
 		return nil, err
 	}
