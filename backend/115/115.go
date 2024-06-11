@@ -404,9 +404,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		opt:  *opt,
 	}
 	f.features = (&fs.Features{
-		DuplicateFiles:          true, // allows duplicate files
-		CanHaveEmptyDirectories: true, // can have empty directories
-		NoMultiThreading:        true, // set if can't have multiplethreads on one download open
+		DuplicateFiles:          false, // duplicatefiles are only possible via web
+		CanHaveEmptyDirectories: true,  // can have empty directories
+		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx, opt); err != nil {

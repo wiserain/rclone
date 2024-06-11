@@ -332,6 +332,9 @@ backends:
    remote:   "Test115:"
    fastlist: false
    oneonly:  true
+   ignore:
+     # This test fails because writing a zero-byte file is not allowed
+     - TestRWFileHandleWriteNoWrite
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false
