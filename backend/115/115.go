@@ -35,7 +35,7 @@ const (
 	appVer           = "2.0.3.6"
 	defaultUserAgent = "Mozilla/5.0 115Desktop/" + appVer
 
-	minSleep      = 150 * time.Millisecond // 6.67 transcations per second
+	minSleep      = 150 * time.Millisecond // 6.67 transactions per second
 	maxSleep      = 2 * time.Second
 	decayConstant = 2 // bigger for slower decay, exponential
 

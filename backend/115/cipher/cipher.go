@@ -175,7 +175,7 @@ func genKey(randKey []byte, keyLen int) []byte {
 	index := 0
 	if len(randKey) != 0 {
 		for i := 0; i < keyLen; i++ {
-			x := byte(uint8(randKey[i]) + uint8(gKts[index]))
+			x := randKey[i] + gKts[index]
 			xorKey = append(xorKey, gKts[length]^x)
 			length -= keyLen
 			index += keyLen
