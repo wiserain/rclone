@@ -240,13 +240,14 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	return
 }
 
-func (f *Fs) getDownData(ctx context.Context, data string) (encData string, cookies []*http.Cookie, err error) {
+func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, cookies []*http.Cookie, err error) {
+	key := crypto.GenerateKey()
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
 		RootURL:         "https://proapi.115.com/app/chrome/downurl",
 		Parameters:      url.Values{"t": {t}},
-		MultipartParams: url.Values{"data": {data}},
+		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
 	}
 	var info *api.Base
 	var resp *http.Response
@@ -257,39 +258,34 @@ func (f *Fs) getDownData(ctx context.Context, data string) (encData string, cook
 	if err != nil {
 		return
 	} else if !info.State {
-		return "", nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return nil, nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
-	if encData = info.Data.EncodedData; encData == "" {
-		return "", nil, errors.New("no data")
+	if info.Data.EncodedData == "" {
+		return nil, nil, errors.New("no data")
+	}
+	output, err = crypto.Decode(info.Data.EncodedData, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decode data: %w", err)
 	}
 	cookies = append(cookies, resp.Cookies()...)         // including uid, cid, and seid
 	cookies = append(cookies, resp.Request.Cookies()...) // including access key value pari with Max-Age=900
 	return
 }
 
-func (f *Fs) getDownURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
+func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
 	// pickCode -> data -> reqData
-	key := crypto.GenerateKey()
-	data, _ := json.Marshal(map[string]string{"pickcode": pickCode})
-	reqData := crypto.Encode(data, key)
-
-	encData, cookies, err := f.getDownData(ctx, reqData)
+	input, _ := json.Marshal(map[string]string{"pickcode": pickCode})
+	output, cookies, err := f._getDownloadURL(ctx, input)
 	if err != nil {
 		return
 	}
-
-	decData, err := crypto.Decode(encData, key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode data: %w", err)
-	}
-
 	downData := api.DownloadData{}
-	if err := json.Unmarshal(decData, &downData); err != nil {
-		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(decData))
+	if err := json.Unmarshal(output, &downData); err != nil {
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
 	}
 
 	for _, downInfo := range downData {
-		if downInfo.FileSize == 0 { // TODO
+		if downInfo.FileSize == 0 {
 			return nil, fs.ErrorObjectNotFound
 		}
 		durl = &downInfo.URL

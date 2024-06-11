@@ -1285,7 +1285,7 @@ func (o *Object) setDownloadURL(ctx context.Context) error {
 		return nil
 	}
 
-	downURL, err := o.fs.getDownURL(ctx, o.pickCode)
+	downURL, err := o.fs.getDownloadURL(ctx, o.pickCode)
 	if err != nil {
 		return err
 	}
