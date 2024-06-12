@@ -3,41 +3,47 @@ package _115
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path"
-	"strconv"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/patrickmn/go-cache"
 	"github.com/rclone/rclone/backend/115/api"
-	"github.com/rclone/rclone/backend/115/crypto"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
+	"github.com/rclone/rclone/fs/fserrors"
+	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/rest"
 )
 
+// Constants
 const (
-	domain      = "www.115.com"
-	userAgent   = "Mozilla/5.0 115Browser/23.9.3.2"
-	ossEndpoint = "https://oss-cn-shenzhen.aliyuncs.com"
+	domain           = "www.115.com"
+	rootURL          = "https://webapi.115.com"
+	appVer           = "2.0.3.6"
+	defaultUserAgent = "Mozilla/5.0 115Desktop/" + appVer
 
-	uploadSizeLimit = 5 * 1024 * 1024 * 1024
-	minSleep        = 150 * time.Millisecond
-	maxSleep        = 2 * time.Second
-	decayConstant   = 2
+	minSleep      = 150 * time.Millisecond // 6.67 transactions per second
+	maxSleep      = 2 * time.Second
+	decayConstant = 2 // bigger for slower decay, exponential
+
+	maxUploadSize       = 123480309760                   // 115 GiB from https://proapi.115.com/app/uploadinfo
+	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
+	minChunkSize        = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
+	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
+	maxUploadCutoff     = fs.SizeSuffix(5 * 1024 * 1024 * 1024)
 )
 
 // Register with Fs
@@ -46,6 +52,7 @@ func init() {
 		Name:        "115",
 		Description: "115 drive",
 		NewFs:       NewFs,
+		CommandHelp: commandHelp,
 		Options: []fs.Option{{
 			Name:      "uid",
 			Help:      "UID from cookie",
@@ -62,43 +69,145 @@ func init() {
 			Required:  true,
 			Sensitive: true,
 		}, {
+			Name:      "cookie",
+			Help:      "cookie including UID, CID, SEID",
+			Required:  true,
+			Sensitive: true,
+		}, {
+			// this is useless at the moment because there's no way to upload
+			// without defaultUserAgent and appVer 2.0.3.6
+			Name:     "user_agent",
+			Default:  defaultUserAgent,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help: fmt.Sprintf(`HTTP user agent used for 115.
+
+Defaults to "%s" or "--115-user-agent" provided on command line.`, defaultUserAgent),
+		}, {
+			Name:     "no_check_certificate",
+			Default:  true,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help:     `Do not verify the server SSL certificate for 115 (insecure)`,
+		}, {
+			Name: "root_folder_id",
+			Help: `ID of the root folder.
+Leave blank normally.
+
+Fill in for rclone to use a non root folder as its starting point.
+`,
+			Advanced:  true,
+			Sensitive: true,
+		}, {
+			Name:     "hash_memory_limit",
+			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
+			Default:  fs.SizeSuffix(10 * 1024 * 1024),
+			Advanced: true,
+		}, {
+			Name: "upload_cutoff",
+			Help: `Cutoff for switching to chunked upload.
+
+Any files larger than this will be uploaded in chunks of chunk_size.
+The minimum is 0 and the maximum is 5 GiB.`,
+			Default:  defaultUploadCutoff,
+			Advanced: true,
+		}, {
+			Name: "chunk_size",
+			Help: `Chunk size to use for uploading.
+
+When uploading files larger than upload_cutoff they will be uploaded 
+as multipart uploads using this chunk size.
+
+Note that "--115-upload-concurrency" chunks of this size are buffered
+in memory per transfer.
+
+If you are transferring large files over high-speed links and you have
+enough memory, then increasing this will speed up the transfers.
+
+Rclone will automatically increase the chunk size when uploading a
+large file of known size to stay below the 10,000 chunks limit.
+
+Increasing the chunk size decreases the accuracy of the progress
+statistics displayed with "-P" flag. Rclone treats chunk as sent when
+it's buffered by the OSS SDK, when in fact it may still be uploading.
+A bigger chunk size means a bigger OSS SDK buffer and progress
+reporting more deviating from the truth.
+`,
+			Default:  minChunkSize,
+			Advanced: true,
+		}, {
+			Name: "max_upload_parts",
+			Help: `Maximum number of parts in a multipart upload.
+
+This option defines the maximum number of multipart chunks to use
+when doing a multipart upload.
+
+Rclone will automatically increase the chunk size when uploading a
+large file of a known size to stay below this number of chunks limit.
+`,
+			Default:  maxUploadParts,
+			Advanced: true,
+		}, {
+			Name: "upload_concurrency",
+			Help: `Concurrency for multipart uploads and copies.
+
+This is the number of chunks of the same file that are uploaded
+concurrently for multipart uploads and copies.
+
+If you are uploading small numbers of large files over high-speed links
+and these uploads do not fully utilize your bandwidth, then increasing
+this may help to speed up the transfers.`,
+			Default:  4,
+			Advanced: true,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
-			Default: (encoder.Display |
-				encoder.EncodeLeftSpace |
-				encoder.EncodeRightSpace |
-				encoder.EncodeBackSlash |
-				encoder.EncodeColon |
-				encoder.EncodeAsterisk |
-				encoder.EncodeQuestion |
+			Default: (encoder.EncodeLtGt |
 				encoder.EncodeDoubleQuote |
-				encoder.EncodeLtGt |
-				encoder.EncodePipe |
-				encoder.EncodePercent |
-				encoder.EncodeInvalidUtf8),
+				encoder.EncodeLeftSpace |
+				encoder.EncodeLeftSpace |
+				encoder.EncodeLeftTilde |
+				encoder.EncodeCtl |
+				encoder.EncodeLeftPeriod |
+				encoder.EncodeRightSpace |
+				encoder.EncodeRightPeriod |
+				encoder.EncodeInvalidUtf8), // 文件名不能包含以下任意字符之一""<>" (20003)
 		}},
 	})
 }
 
 // Options defines the configguration of this backend
 type Options struct {
-	UID  string               `config:"uid"`
-	CID  string               `config:"cid"`
-	SEID string               `config:"seid"`
-	Enc  encoder.MultiEncoder `config:"encoding"`
+	UID                 string               `config:"uid"`
+	CID                 string               `config:"cid"`
+	SEID                string               `config:"seid"`
+	Cookie              string               `config:"cookie"`
+	UserAgent           string               `config:"user_agent"`
+	NoCheckCertificate  bool                 `config:"no_check_certificate"`
+	RootFolderID        string               `config:"root_folder_id"`
+	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
+	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
+	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
+	MaxUploadParts      int                  `config:"max_upload_parts"`
+	UploadConcurrency   int                  `config:"upload_concurrency"`
+	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
 // Fs represents a remote 115 drive
 type Fs struct {
-	name     string
-	root     string
-	opt      Options
-	ci       *fs.ConfigInfo
-	features *fs.Features
-	srv      *rest.Client
-	pacer    *fs.Pacer
-	cache    *cache.Cache
+	name         string
+	root         string
+	opt          Options
+	features     *fs.Features
+	client       *http.Client // authorized client
+	srv          *rest.Client
+	dirCache     *dircache.DirCache // Map of directory path to directory id
+	pacer        *fs.Pacer
+	rootFolderID string
+	userID       string     // for uploads
+	userkey      string     // for uploads
+	fileObj      *fs.Object // mod
 }
 
 // Object describes a 115 object
@@ -106,58 +215,124 @@ type Object struct {
 	fs          *Fs
 	remote      string
 	hasMetaData bool
-	name        string
+	id          string
+	parent      string
 	size        int64
 	sha1sum     string
 	pickCode    string
-	fileID      int64
-	modTime     time.Time
+	mTime       time.Time        // modified/updated at
+	cTime       time.Time        // created at
+	aTime       time.Time        // last accessed at
+	durl        *api.DownloadURL // link to download the object
+	durlMu      *sync.Mutex
+}
+
+// retryErrorCodes is a slice of error codes that we will retry
+var retryErrorCodes = []int{
+	429, // Too Many Requests.
+	500, // Internal Server Error
+	502, // Bad Gateway
+	503, // Service Unavailable
+	504, // Gateway Timeout
+	509, // Bandwidth Limit Exceeded
 }
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, error) {
-	// TODO: impl
-	return false, err
+func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err error) (bool, error) {
+	if fserrors.ContextError(ctx, &err) {
+		return false, err
+	}
+	if err == nil {
+		switch apiInfo := info.(type) {
+		case *api.Base:
+			if !apiInfo.State && apiInfo.Errno == 990009 {
+				time.Sleep(time.Second)
+				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
+				return true, fserrors.RetryErrorf("API State false: %s (%d)", apiInfo.Error, apiInfo.Errno)
+			} else if !apiInfo.State && apiInfo.Errno == 50038 {
+				// can't download: API State false:  (50038)
+				return true, fserrors.RetryErrorf("API State false: %s (%d)", apiInfo.Error, apiInfo.Errno)
+			}
+		}
+		return false, nil
+	}
+	if fserrors.ShouldRetry(err) {
+		return true, err
+	}
+	authRetry := false
+
+	switch apiErr := err.(type) {
+	case *api.Error:
+		if apiErr.Status == 403 {
+			if apiErr.Message == "no cookie" {
+				return false, fserrors.FatalError(err)
+			}
+			time.Sleep(time.Second)
+			return true, err
+		}
+	}
+
+	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
 
 // ------------------------------------------------------------
 
-// NewFs constructs an Fs from the path, container:path
-func NewFs(ctx context.Context, name string, root string, m configmap.Mapper) (fs.Fs, error) {
-	// Parse config into Options struct
-	opt := new(Options)
-	err := configstruct.Set(m, opt)
+// errorHandler parses a non 2xx error response into an error
+func errorHandler(resp *http.Response) error {
+	// Decode error response
+	errResponse := new(api.Error)
+	err := rest.DecodeJSON(resp, &errResponse)
 	if err != nil {
-		return nil, err
+		fs.Debugf(nil, "Couldn't decode error response: %v", err)
 	}
+	if errResponse.Message == "" {
+		errResponse.Message = resp.Status
+	}
+	if errResponse.Status == 0 {
+		errResponse.Status = resp.StatusCode
+	}
+	return errResponse
+}
 
-	if root == "" {
-		root = "/"
-	}
-	ci := fs.GetConfig(ctx)
-	f := &Fs{
-		name:  name,
-		root:  root,
-		opt:   *opt,
-		ci:    ci,
-		srv:   rest.NewClient(&http.Client{}),
-		pacer: fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
-		cache: cache.New(time.Minute, time.Minute*2),
-	}
-	f.srv.SetErrorHandler(func(resp *http.Response) error {
-		body, err := rest.ReadBody(resp)
-		if err != nil {
-			return fmt.Errorf("error reading error out of body: %w", err)
+// getClient makes an http client according to the options
+func getClient(ctx context.Context, opt *Options) *http.Client {
+	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
+		t.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: opt.NoCheckCertificate,
 		}
-		if resp.StatusCode == http.StatusForbidden {
-			time.Sleep(time.Second)
-		}
-		return fmt.Errorf("HTTP error %v (%v) returned body: %q", resp.StatusCode, resp.Status, body)
 	})
-	f.pacer.SetMaxConnections(2)
-	f.srv.SetRoot("https://webapi.115.com")
-	f.srv.SetHeader("User-Agent", userAgent)
+	return &http.Client{
+		Transport: t,
+	}
+}
+
+// newClientWithPacer sets a new http/rest client with a pacer to Fs
+func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
+	// Override few config settings and create a client
+	newCtx, ci := fs.AddConfig(ctx)
+	ci.UserAgent = opt.UserAgent
+	f.client = getClient(newCtx, opt)
+
+	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
+
+	// UID, CID, SEID from cookie
+	if opt.Cookie != "" {
+		if items := strings.Split(opt.Cookie, ";"); len(items) > 2 {
+			for _, item := range items {
+				kv := strings.Split(strings.TrimSpace(item), "=")
+				if len(kv) != 2 {
+					continue
+				}
+				key := strings.TrimSpace(strings.ToUpper(kv[0]))
+				val := strings.TrimSpace(kv[1])
+				switch key {
+				case "UID", "CID", "SEID":
+					reflect.ValueOf(opt).Elem().FieldByName(key).SetString(val)
+				}
+			}
+		}
+	}
 	f.srv.SetCookie(&http.Cookie{
 		Name:     "UID",
 		Value:    opt.UID,
@@ -177,16 +352,169 @@ func NewFs(ctx context.Context, name string, root string, m configmap.Mapper) (f
 		Path:     "/",
 		HttpOnly: true,
 	})
+	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
+	return nil
+}
+
+func checkUploadChunkSize(cs fs.SizeSuffix) error {
+	if cs < minChunkSize {
+		return fmt.Errorf("%s is less than %s", cs, minChunkSize)
+	}
+	return nil
+}
+
+func checkUploadCutoff(cs fs.SizeSuffix) error {
+	if cs > maxUploadCutoff {
+		return fmt.Errorf("%s is greater than %s", cs, maxUploadCutoff)
+	}
+	return nil
+}
+
+// newFs partially constructs Fs from the path
+//
+// It constructs a valid Fs but doesn't attempt to figure out whether
+// it is a file or a directory.
+func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, error) {
+	// Parse config into Options struct
+	opt := new(Options)
+	err := configstruct.Set(m, opt)
+	if err != nil {
+		return nil, err
+	}
+	err = checkUploadChunkSize(opt.ChunkSize)
+	if err != nil {
+		return nil, fmt.Errorf("115: chunk size: %w", err)
+	}
+	err = checkUploadCutoff(opt.UploadCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("115: upload cutoff: %w", err)
+	}
+
+	// mod - override rootID from path remote:{ID}
+	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+		name += rootID
+		path = path[strings.Index(path, "}")+1:]
+	}
+
+	root := strings.Trim(path, "/")
+
+	f := &Fs{
+		name: name,
+		root: root,
+		opt:  *opt,
+	}
 	f.features = (&fs.Features{
-		CanHaveEmptyDirectories: true,
+		DuplicateFiles:          false, // duplicatefiles are only possible via web
+		CanHaveEmptyDirectories: true,  // can have empty directories
+		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
 	}).Fill(ctx, f)
 
-	info, err := f.readMetaDataForPath(ctx, f.remotePath("/"))
-	if err == nil && !info.IsDir() {
-		f.root = path.Dir(f.root)
+	if err := f.newClientWithPacer(ctx, opt); err != nil {
+		return nil, err
+	}
+
+	return f, nil
+}
+
+// NewFs constructs an Fs from the path, container:path
+func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
+	f, err := newFs(ctx, name, root, m)
+	if err != nil {
+		return nil, err
+	}
+
+	// mod - parse object id from path remote:{ID}
+	var srcFile *api.File
+	if rootID, _ := parseRootID(root); len(rootID) > 6 {
+		f.opt.RootFolderID = rootID
+
+		srcFile, err = f.getFile(ctx, rootID)
+		if err != nil {
+			return nil, fmt.Errorf("115: failed checking filetype: %w", err)
+		}
+		if !srcFile.IsDir() {
+			fs.Debugf(nil, "Root ID (File): %s", rootID)
+		} else {
+			// assume it is a file
+			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+			f.opt.RootFolderID = rootID
+			srcFile = nil
+		}
+	}
+
+	// Set the root folder ID
+	if f.opt.RootFolderID != "" {
+		// use root_folder ID if set
+		f.rootFolderID = f.opt.RootFolderID
+	} else {
+		f.rootFolderID = "0" //根目录 = root directory
+	}
+
+	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
+
+	// mod - in case parsed rootID is pointing to a file
+	if srcFile != nil {
+		tempF := *f
+		newRoot := ""
+		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
+		tempF.root = newRoot
+		f.dirCache = tempF.dirCache
+		f.root = tempF.root
+
+		obj, _ := f.newObjectWithInfo(ctx, srcFile.Name, srcFile)
+		f.root = "isFile:" + srcFile.Name
+		f.fileObj = &obj
 		return f, fs.ErrorIsFile
 	}
 
+	// warm up dircache
+	if f.rootFolderID == "0" {
+		if rootid, err := f.getDirID(ctx, f.root); err == nil {
+			stats, err := f.getStats(ctx, rootid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get file stats: %w", err)
+			}
+			dirPath := ""
+			for _, parent := range stats.Paths[1:] {
+				dirPath = path.Join(dirPath, parent.FileName)
+				f.dirCache.Put(dirPath, parent.FileID.String())
+			}
+			dirPath = path.Join(dirPath, stats.FileName)
+			f.dirCache.Put(dirPath, rootid)
+		}
+	}
+
+	// Find the current root
+	err = f.dirCache.FindRoot(ctx, false)
+	if err != nil {
+		// Assume it is a file
+		newRoot, remote := dircache.SplitPath(f.root)
+		tempF := *f
+		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
+		tempF.root = newRoot
+		// Make new Fs which is the parent
+		err = tempF.dirCache.FindRoot(ctx, false)
+		if err != nil {
+			// No root so return old f
+			return f, nil
+		}
+		_, err := tempF.NewObject(ctx, remote)
+		if err != nil {
+			if err == fs.ErrorObjectNotFound {
+				// File doesn't exist so return old f
+				return f, nil
+			}
+			return nil, err
+		}
+		f.features.Fill(ctx, &tempF)
+		// XXX: update the old f here instead of returning tempF, since
+		// `features` were already filled with functions having *f as a receiver.
+		// See https://github.com/rclone/rclone/issues/2182
+		f.dirCache = tempF.dirCache
+		f.root = tempF.root
+		// return an error with an fs which points to the parent
+		return f, fs.ErrorIsFile
+	}
 	return f, nil
 }
 
@@ -213,6 +541,14 @@ func (f *Fs) Features() *fs.Features {
 // Precision of the ModTimes in this Fs
 func (f *Fs) Precision() time.Duration {
 	return fs.ModTimeNotSupported
+	// meaning that the modification times from the backend shouldn't be used for syncing
+	// as they can't be set.
+}
+
+// DirCacheFlush resets the directory cache - used in testing as an
+// optional interface
+func (f *Fs) DirCacheFlush() {
+	f.dirCache.ResetRoot()
 }
 
 // Hashes returns the supported hash types of the filesystem
@@ -227,7 +563,24 @@ func (f *Fs) Hashes() hash.Set {
 // ErrorIsDir if possible without doing any extra work,
 // otherwise ErrorObjectNotFound.
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	// mod - in case parsed rootID is pointing to a file
+	if f.fileObj != nil {
+		return *f.fileObj, nil
+	}
 	return f.newObjectWithInfo(ctx, remote, nil)
+}
+
+// FindLeaf finds a directory of name leaf in the folder with ID pathID
+func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
+	// Find the leaf in pathID
+	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
+		if item.Name == leaf && item.IsDir() {
+			pathIDOut = item.ID()
+			return true
+		}
+		return false
+	})
+	return pathIDOut, found, err
 }
 
 // List the objects and directories in dir into entries.  The
@@ -240,22 +593,39 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
-	infos, err := f.readDir(ctx, f.remotePath(dir))
+	// fs.Debugf(f, "List(%q)\n", dir)
+	dirID, err := f.dirCache.FindDir(ctx, dir, false)
 	if err != nil {
 		return nil, err
 	}
-
-	files := make([]fs.DirEntry, 0, len(infos))
-	for _, info := range infos {
-		remote := path.Join(dir, f.opt.Enc.ToStandardName(info.GetName()))
-		file, err := f.itemToDirEntry(ctx, remote, info)
+	var iErr error
+	_, err = f.listAll(ctx, dirID, func(item *api.File) bool {
+		entry, err := f.itemToDirEntry(ctx, path.Join(dir, item.Name), item)
 		if err != nil {
-			return nil, err
+			iErr = err
+			return true
 		}
-		files = append(files, file)
+		if entry != nil {
+			entries = append(entries, entry)
+		}
+		return false
+	})
+	if err != nil {
+		return nil, err
 	}
+	if iErr != nil {
+		return nil, iErr
+	}
+	return entries, nil
+}
 
-	return files, nil
+// CreateDir makes a directory with pathID as parent and name leaf
+func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
+	info, err := f.makeDir(ctx, pathID, leaf)
+	if err != nil {
+		return
+	}
+	return info.CID, nil
 }
 
 // Put in to the remote path with the modTime given of the given size
@@ -271,47 +641,111 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	if src.Size() == 0 {
 		return nil, fs.ErrorCantUploadEmptyFiles
 	}
-	// TODO: enable file upload
-	if true {
-		return nil, fs.ErrorNotImplemented
+	existingObj, err := f.NewObject(ctx, src.Remote())
+	switch err {
+	case nil:
+		return existingObj, existingObj.Update(ctx, in, src, options...)
+	case fs.ErrorObjectNotFound:
+		// Not found so create it
+		return f.PutUnchecked(ctx, in, src, options...)
+	default:
+		return nil, err
+	}
+}
+
+// putUnchecked uploads the object with the given name and size
+//
+// This will create a duplicate if we upload a new file without
+// checking to see if there is one already - use Put() for that.
+func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
+	// upload src with the name of remote
+	newObj, err := f.upload(ctx, in, src, remote, options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload: %w", err)
+	}
+	o := newObj.(*Object)
+
+	var info *api.File
+	found, err := f.listAll(ctx, o.parent, func(item *api.File) bool {
+		if strings.ToLower(item.Sha) == o.sha1sum && !item.IsDir() {
+			info = item
+			return true
+		}
+		return false
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to located updated file: %w", err)
+	}
+	if !found {
+		return nil, fs.ErrorObjectNotFound
+	}
+	return o, o.setMetaData(info)
+}
+
+// PutUnchecked uploads the object
+//
+// This will create a duplicate if we upload a new file without
+// checking to see if there is one already - use Put() for that.
+func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	return f.putUnchecked(ctx, in, src, src.Remote(), options...)
+}
+
+// MergeDirs merges the contents of all the directories passed
+// in into the first one and rmdirs the other directories.
+func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
+	if len(dirs) < 2 {
+		return nil
+	}
+	dstDir := dirs[0]
+	for _, srcDir := range dirs[1:] {
+		// list the objects
+		var IDs []string
+		_, err = f.listAll(ctx, srcDir.ID(), func(item *api.File) bool {
+			fs.Infof(srcDir, "listing for merging %q", item.Name)
+			IDs = append(IDs, item.ID())
+			// API doesn't allow to move a large number of objects at once, so doing it in chunked
+			if len(IDs) >= ListLimit {
+				if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
+					return true
+				}
+				IDs = nil
+			}
+			return false
+		})
+		if err != nil {
+			return fmt.Errorf("MergeDirs list failed on %v: %w", srcDir, err)
+		}
+		// move them into place
+		if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
+			return fmt.Errorf("MergeDirs move failed in %v: %w", srcDir, err)
+		}
 	}
 
-	o := f.createObject(src.Remote(), src.ModTime(ctx), src.Size())
-	return o, o.Update(ctx, in, src, options...)
+	// rmdir (into trash) the now empty source directory
+	var IDs []string
+	for _, srcDir := range dirs[1:] {
+		fs.Infof(srcDir, "removing empty directory")
+		IDs = append(IDs, srcDir.ID())
+		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
+		if len(IDs) >= ListLimit {
+			if err = f.deleteFiles(ctx, IDs); err != nil {
+				return err
+			}
+			IDs = nil
+		}
+	}
+	if err := f.deleteFiles(ctx, IDs); err != nil {
+		return fmt.Errorf("MergeDirs failed to rmdir: %w", err)
+	}
+	return nil
 }
 
 // Mkdir makes the directory (container, bucket)
 //
 // Shouldn't return an error if it already exists
 func (f *Fs) Mkdir(ctx context.Context, dir string) error {
-	paths := strings.Split(f.remotePath(dir), "/")
-	prefix := ""
-	if len(paths) == 0 {
-		return nil
-	}
-
-	for idx := 0; idx+1 < len(paths); idx++ {
-		prefix += "/" + paths[idx]
-		cid, err := f.getDirID(ctx, prefix)
-		if err != nil {
-			return err
-		}
-		if cid == -1 {
-			fs.Logf(f, "make dir fail, cid is -1")
-			return nil
-		}
-
-		err = f.makeDir(ctx, cid, paths[idx+1])
-		if errors.Is(err, fs.ErrorDirExists) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-
-		f.flushDir(prefix)
-	}
-	return nil
+	_, err := f.dirCache.FindDir(ctx, dir, true)
+	return err
 }
 
 // Move src to this remote using server-side move operations.
@@ -330,39 +764,41 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	srcObj, ok := src.(*Object)
 	if !ok {
-		fs.Errorf(f, "can not move, not same remote type")
+		fs.Debugf(src, "Can't move - not same remote type")
 		return nil, fs.ErrorCantMove
 	}
+	err := srcObj.readMetaData(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	srcParent, srcName := path.Split(f.remotePath(srcObj.remote))
-	dstParent, dstName := path.Split(f.remotePath(remote))
-	if srcParent == dstParent {
-		if srcName == dstName {
-			return srcObj, nil
-		}
+	srcLeaf, srcParentID, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	if err != nil {
+		return nil, err
+	}
 
-		err := f.renameFile(ctx, srcObj.fileID, dstName)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if srcObj.name != dstName {
-			return nil, fs.ErrorCantMove
-		}
+	// Create temporary object
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	if err != nil {
+		return nil, err
+	}
 
-		cid, err := f.getDirID(ctx, dstParent)
-		if err != nil {
-			return nil, err
-		}
-		err = f.moveFile(ctx, srcObj.fileID, cid)
-		if err != nil {
+	if srcParentID != dstParentID {
+		// Do the move
+		if err = f.moveFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
 			return nil, err
 		}
 	}
+	dstObj.id = srcObj.id
 
-	f.flushDir(srcParent)
-	f.flushDir(dstParent)
-	return f.NewObject(ctx, remote)
+	if srcLeaf != dstLeaf {
+		// Rename
+		err = f.renameFile(ctx, srcObj.id, dstLeaf)
+		if err != nil {
+			return nil, fmt.Errorf("move: couldn't rename moved file: %w", err)
+		}
+	}
+	return dstObj, dstObj.readMetaData(ctx)
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
@@ -378,52 +814,124 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 		return fs.ErrorCantDirMove
 	}
 
-	srcFs := src.(*Fs)
-	cid, err := f.getDirID(ctx, srcFs.remotePath(srcRemote))
+	srcFs, ok := src.(*Fs)
+	if !ok {
+		fs.Debugf(srcFs, "Can't move directory - not same remote type")
+		return fs.ErrorCantDirMove
+	}
+
+	srcID, srcParentID, srcLeaf, dstParentID, dstLeaf, err := f.dirCache.DirMove(ctx, srcFs.dirCache, srcFs.root, srcRemote, f.root, dstRemote)
 	if err != nil {
 		return err
 	}
 
-	srcParent, srcName := path.Split(srcFs.remotePath(srcRemote))
-	dstParent, dstName := path.Split(f.remotePath(dstRemote))
-	if srcParent == dstParent {
-		if srcName == dstName {
-			return fs.ErrorDirExists
-		}
-
-		err = f.renameFile(ctx, cid, dstName)
+	if srcParentID != dstParentID {
+		// Do the move
+		err = f.moveFiles(ctx, []string{srcID}, dstParentID)
 		if err != nil {
-			return err
-		}
-	} else {
-		pid, err := f.getDirID(ctx, dstParent)
-		if errors.Is(err, fs.ErrorDirNotFound) {
-			newDir, _ := path.Split(path.Clean(dstRemote))
-			err = f.Mkdir(ctx, newDir)
-			if err != nil {
-				return err
-			}
-			pid, err = f.getDirID(ctx, dstParent)
-		}
-		if err != nil {
-			return err
-		}
-
-		err = f.moveFile(ctx, cid, pid)
-		if err != nil {
-			return err
-		}
-		if srcName != dstName {
-			err = f.renameFile(ctx, cid, dstName)
-			if err != nil {
-				return err
-			}
+			return fmt.Errorf("couldn't dir move: %w", err)
 		}
 	}
 
-	for _, dir := range []string{srcParent, dstParent, srcFs.remotePath(srcRemote), f.remotePath(dstRemote)} {
-		f.flushDir(dir)
-		srcFs.flushDir(dir)
+	// Can't copy and change name in one step so we have to check if we have
+	// the correct name after copy
+	if srcLeaf != dstLeaf {
+		err = f.renameFile(ctx, srcID, dstLeaf)
+		if err != nil {
+			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
+		}
+	}
+	srcFs.dirCache.FlushDir(srcRemote)
+	return nil
+}
+
+// Copy src to this remote using server side copy operations.
+//
+// This is stored with the remote path given.
+//
+// It returns the destination Object and a possible error.
+//
+// Will only be called if src.Fs().Name() == f.Name()
+//
+// If it isn't possible then return fs.ErrorCantCopy
+func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	srcObj, ok := src.(*Object)
+	if !ok {
+		fs.Debugf(src, "Can't copy - not same remote type")
+		return nil, fs.ErrorCantCopy
+	}
+	err := srcObj.readMetaData(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create temporary object
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	if err != nil {
+		return nil, err
+	}
+	if srcObj.parent == dstParentID {
+		// api restriction
+		fs.Debugf(src, "Can't copy - same parent")
+		return nil, fs.ErrorCantCopy
+	}
+	// Copy the object
+	if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
+		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	}
+
+	// Can't copy and change name in one step so we have to check if we have
+	// the correct name after copy
+	srcLeaf, _, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if srcLeaf != dstLeaf {
+		// Rename
+		err = f.renameFile(ctx, dstObj.id, dstLeaf)
+		if err != nil {
+			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
+		}
+	}
+	return dstObj, dstObj.readMetaData(ctx)
+}
+
+// purgeCheck removes the root directory, if check is set then it
+// refuses to do so if it has anything in
+func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
+	root := path.Join(f.root, dir)
+	if root == "" {
+		return errors.New("can't purge root directory")
+	}
+	rootID, err := f.dirCache.FindDir(ctx, dir, false)
+	if err != nil {
+		return err
+	}
+
+	if check {
+		found, err := f.listAll(ctx, rootID, func(item *api.File) bool {
+			fs.Debugf(dir, "Rmdir: contains file: %q", item.Name)
+			return true
+		})
+		if err != nil {
+			return err
+		}
+		if found {
+			return fs.ErrorDirectoryNotEmpty
+		}
+	}
+	if root != "" {
+		err = f.deleteFiles(ctx, []string{rootID})
+		if err != nil {
+			return err
+		}
+	} else if check {
+		return errors.New("can't purge root directory")
+	}
+	f.dirCache.FlushDir(dir)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -432,17 +940,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	files, err := f.readDir(ctx, f.remotePath(dir))
-	if err != nil {
-		return err
-	}
-
-	if len(files) > 0 {
-		fs.Logf(f, "rmdir, is not empty, dir: %v", dir)
-		return fs.ErrorDirectoryNotEmpty
-	}
-
-	return f.Purge(ctx, dir)
+	return f.purgeCheck(ctx, dir, true)
 }
 
 // Purge all files in the directory specified
@@ -452,75 +950,54 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
-	info, err := f.readMetaDataForPath(ctx, f.remotePath(dir))
-	if err != nil {
-		fs.Errorf(f, "purge fail, err: %v, dir: %v", err, f.remotePath(dir))
-		if errors.Is(err, fs.ErrorObjectNotFound) {
-			return fs.ErrorDirNotFound
-		}
-		return err
-	}
-	if !info.IsDir() {
-		return fs.ErrorIsFile
-	}
-	if info.GetCategoryID() == 0 {
-		fs.Logf(f, "is root dir, can not purge")
-		return nil
-	}
-
-	err = f.deleteFile(ctx, info.GetCategoryID(), info.GetParentID())
-	if err != nil {
-		return err
-	}
-
-	parent, _ := path.Split(f.remotePath(dir))
-	f.flushDir(parent)
-
-	return nil
+	return f.purgeCheck(ctx, dir, false)
 }
 
 // About gets quota information from the Fs
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	info, err := f.indexInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get usage info: %w", err)
 	}
 
 	usage := &fs.Usage{}
-	if totalInfo, ok := info.Data.SpaceInfo["all_total"]; ok {
+	if totalInfo, ok := info.SpaceInfo["all_total"]; ok {
 		usage.Total = fs.NewUsageValue(int64(totalInfo.Size))
 	}
-	if useInfo, ok := info.Data.SpaceInfo["all_use"]; ok {
+	if useInfo, ok := info.SpaceInfo["all_use"]; ok {
 		usage.Used = fs.NewUsageValue(int64(useInfo.Size))
 	}
-	if remainInfo, ok := info.Data.SpaceInfo["all_remain"]; ok {
+	if remainInfo, ok := info.SpaceInfo["all_remain"]; ok {
 		usage.Free = fs.NewUsageValue(int64(remainInfo.Size))
 	}
 
 	return usage, nil
 }
 
-func (f *Fs) itemToDirEntry(ctx context.Context, remote string, object *api.FileInfo) (fs.DirEntry, error) {
-	if len(remote) > 0 && remote[0] == '/' {
-		remote = remote[1:]
-	}
-	if object.IsDir() {
-		d := fs.NewDir(f.opt.Enc.ToStandardPath(remote), object.GetUpdateTime())
+// itemToDirEntry converts a api.File to an fs.DirEntry.
+// When the api.File cannot be represented as an fs.DirEntry
+// (nil, nil) is returned.
+func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) (entry fs.DirEntry, err error) {
+	switch {
+	case item.IsDir(): // in case of dir
+		// cache the directory ID for later lookups
+		f.dirCache.Put(remote, item.ID())
+		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.ID()).SetParentID(item.PID)
 		return d, nil
+	default:
+		entry, err = f.newObjectWithInfo(ctx, remote, item)
+		if err == fs.ErrorObjectNotFound {
+			return nil, nil
+		}
+		return entry, err
 	}
-
-	o, err := f.newObjectWithInfo(ctx, remote, object)
-	if err != nil {
-		return nil, err
-	}
-
-	return o, nil
 }
 
-func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.FileInfo) (fs.Object, error) {
+func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.File) (fs.Object, error) {
 	o := &Object{
 		fs:     f,
 		remote: remote,
+		durlMu: new(sync.Mutex),
 	}
 	var err error
 	if info != nil {
@@ -534,447 +1011,113 @@ func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *api.Fil
 	return o, nil
 }
 
-func (f *Fs) readMetaDataForPath(ctx context.Context, remotePath string) (*api.FileInfo, error) {
-	if remotePath == "/" {
-		return &api.FileInfo{CategoryID: "0"}, nil
-	}
-
-	remoteDir, filename := path.Split(remotePath)
-	infos, err := f.readDir(ctx, remoteDir)
+// If there is a quicker way of finding a given file than listing the parent, then this readMetaDataForPath should implement it. It makes quite a difference to performance if such a call is available.
+func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.File, err error) {
+	leaf, dirID, err := f.dirCache.FindPath(ctx, path, false)
 	if err != nil {
-		if errors.Is(err, fs.ErrorDirNotFound) {
+		if err == fs.ErrorDirNotFound {
 			return nil, fs.ErrorObjectNotFound
 		}
 		return nil, err
 	}
 
-	for _, info := range infos {
-		if f.opt.Enc.ToStandardName(info.GetName()) == filename {
-			return info, nil
+	// checking whether fileObj with name of leaf exists in dirID
+	found, err := f.listAll(ctx, dirID, func(item *api.File) bool {
+		if item.Name == leaf && !item.IsDir() {
+			info = item
+			return true
 		}
-	}
-
-	return nil, fs.ErrorObjectNotFound
-}
-
-func (f *Fs) readDir(ctx context.Context, remoteDir string) ([]*api.FileInfo, error) {
-	cacheKey := fmt.Sprintf("files:%s", path.Clean(remoteDir))
-	if value, ok := f.cache.Get(cacheKey); ok {
-		return value.([]*api.FileInfo), nil
-	}
-
-	cid, err := f.getDirID(ctx, remoteDir)
-	if err != nil {
-		return nil, err
-	}
-
-	pageSize := int64(1000)
-	offset := int64(0)
-	files := make([]*api.FileInfo, 0)
-	for {
-		resp, err := f.getFiles(ctx, remoteDir, cid, pageSize, offset)
-		if err != nil {
-			return nil, err
-		}
-
-		for idx := range resp.Data {
-			files = append(files, &resp.Data[idx])
-		}
-
-		offset = resp.Offset + pageSize
-		if offset >= resp.Count {
-			break
-		}
-	}
-	f.cache.SetDefault(cacheKey, files)
-
-	return files, nil
-}
-
-func (f *Fs) makeDir(ctx context.Context, pid int64, name string) error {
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/add",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-	opts.MultipartParams.Set("cname", f.opt.Enc.FromStandardName(name))
-
-	var err error
-	var info api.MkdirResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		if info.GetErrno() == 20004 {
-			return fs.ErrorDirExists
-		}
-		fs.Logf(f, "make dir fail, pid: %v, name: %v, err: %v, errno: %v", pid, name, info.Error, info.Errno)
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) getDirID(ctx context.Context, remoteDir string) (int64, error) {
-	opts := rest.Opts{
-		Method:     http.MethodGet,
-		Path:       "/files/getid",
-		Parameters: url.Values{},
-	}
-	opts.Parameters.Set("path", f.opt.Enc.FromStandardPath(remoteDir))
-
-	var err error
-	var info api.GetDirIDResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return -1, err
-	}
-	if !info.State || (remoteDir != "/" && info.CategoryID.String() == "0") {
-		fs.Logf(f, "get dir id fail, not state, error: %v, errno: %v, resp: %+v", info.Error, info.Errno, info)
-		return -1, fs.ErrorDirNotFound
-	}
-
-	cid, _ := info.CategoryID.Int64()
-	return cid, nil
-}
-
-func (f *Fs) getFiles(ctx context.Context, dir string, cid int64, pageSize int64, offset int64) (*api.GetFilesResponse, error) {
-	opts := rest.Opts{
-		Method:     http.MethodGet,
-		Path:       "/files",
-		Parameters: url.Values{},
-	}
-	opts.Parameters.Set("aid", "1")
-	opts.Parameters.Set("cid", strconv.FormatInt(cid, 10))
-	opts.Parameters.Set("o", "user_ptime")
-	opts.Parameters.Set("asc", "0")
-	opts.Parameters.Set("offset", strconv.FormatInt(offset, 10))
-	opts.Parameters.Set("show_dir", "1")
-	opts.Parameters.Set("limit", strconv.FormatInt(pageSize, 10))
-	opts.Parameters.Set("snap", "0")
-	opts.Parameters.Set("record_open_time", "1")
-	opts.Parameters.Set("format", "json")
-	opts.Parameters.Set("fc_mix", "0")
-
-	var err error
-	var info api.GetFilesResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &info, nil
-}
-
-func (f *Fs) deleteFile(ctx context.Context, fid int64, pid int64) error {
-	fs.Logf(f, "delete file, fid: %v, pid: %v", fid, pid)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/rb/delete",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("fid[0]", strconv.FormatInt(fid, 10))
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-	opts.MultipartParams.Set("ignore_warn", "1")
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		if errno, ok := info.Errno.(int64); ok && errno == 990009 {
-			time.Sleep(time.Second)
-		}
-		fs.Logf(f, "delete file fail, not state, err: %v, errno: %v", info.Error, info.Errno)
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) moveFile(ctx context.Context, fid int64, pid int64) error {
-	fs.Logf(f, "move file, fid: %v, pid: %v", fid, pid)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/move",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set("fid[0]", strconv.FormatInt(fid, 10))
-	opts.MultipartParams.Set("pid", strconv.FormatInt(pid, 10))
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		fs.Logf(f, "move file fail, not state")
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) renameFile(ctx context.Context, fid int64, name string) error {
-	fs.Logf(f, "rename file, fid: %v, name: %v", fid, name)
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		Path:            "/files/batch_rename",
-		MultipartParams: url.Values{},
-	}
-	opts.MultipartParams.Set(fmt.Sprintf("files_new_name[%d]", fid), name)
-
-	var err error
-	var info api.BaseResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return err
-	}
-	if !info.State {
-		fs.Logf(f, "rename file fail, not state, err: %v", info.Error)
-		return nil
-	}
-
-	return nil
-}
-
-func (f *Fs) getURL(ctx context.Context, remote string, pickCode string) (string, error) {
-	cacheKey := fmt.Sprintf("url:%s", pickCode)
-	if value, ok := f.cache.Get(cacheKey); ok {
-		return value.(string), nil
-	}
-
-	key := crypto.GenerateKey()
-	data, _ := json.Marshal(map[string]string{
-		"pickcode": pickCode,
-	})
-
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		RootURL:         "https://proapi.115.com",
-		Path:            "/app/chrome/downurl",
-		Parameters:      url.Values{},
-		MultipartParams: url.Values{},
-	}
-	opts.Parameters.Add("t", strconv.FormatInt(time.Now().Unix(), 10))
-	opts.MultipartParams.Set("data", crypto.Encode(data, key))
-	var err error
-	var info api.GetURLResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	var encodedData string
-	if err := json.Unmarshal(info.Data, &encodedData); err != nil {
-		return "", fmt.Errorf("api get download url, call json.Unmarshal fail, body: %s", string(info.Data))
-	}
-	decodedData, err := crypto.Decode(encodedData, key)
-	if err != nil {
-		return "", fmt.Errorf("api get download url, call Decode fail, err: %w", err)
-	}
-
-	result := api.DownloadData{}
-	if err := json.Unmarshal(decodedData, &result); err != nil {
-		return "", fmt.Errorf("api get download url, call json.Unmarshal fail, body: %s", string(decodedData))
-	}
-
-	for _, info := range result {
-		fileSize, _ := info.FileSize.Int64()
-		if fileSize == 0 {
-			return "", fs.ErrorObjectNotFound
-		}
-		f.cache.SetDefault(cacheKey, info.URL.URL)
-		return info.URL.URL, nil
-	}
-
-	return "", fs.ErrorObjectNotFound
-}
-
-func (f *Fs) createUploadTicket(ctx context.Context, cid int64, name string, in io.Reader) (*api.UploadInitResponse, *crypto.DigestResult, error) {
-	fs.Logf(f, "create upload ticket, cid: %v, name: %v", cid, name)
-	dr := &crypto.DigestResult{}
-	err := crypto.Digest(in, dr)
-	if err != nil {
-		return nil, nil, err
-	}
-	if dr.Size > uploadSizeLimit {
-		return nil, nil, fmt.Errorf("upload reach the limit")
-	}
-
-	uploadInfo, err := f.getUploadInfo(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	opts := rest.Opts{
-		Method:          http.MethodPost,
-		RootURL:         "https://uplb.115.com",
-		Path:            "/3.0/initupload.php",
-		Parameters:      url.Values{},
-		MultipartParams: url.Values{},
-	}
-	targetID := fmt.Sprintf("U_1_%d", cid)
-	opts.Parameters.Set("appid", uploadInfo.AppID.String())
-	opts.Parameters.Set("appversion", uploadInfo.AppVersion.String())
-	opts.Parameters.Set("isp", strconv.FormatInt(uploadInfo.IspType, 10))
-	opts.Parameters.Set("sig", crypto.UploadSignature(uploadInfo.UserID, uploadInfo.UserKey, targetID, dr.QuickId))
-	opts.Parameters.Set("format", "json")
-	opts.Parameters.Set("t", strconv.FormatInt(time.Now().Unix(), 10))
-
-	opts.MultipartParams.Set("app_ver", uploadInfo.AppVersion.String())
-	opts.MultipartParams.Set("preID", dr.PreId)
-	opts.MultipartParams.Set("quickid", dr.QuickId)
-	opts.MultipartParams.Set("target", targetID)
-	opts.MultipartParams.Set("fileid", dr.QuickId)
-	opts.MultipartParams.Set("filename", f.opt.Enc.FromStandardName(name))
-	opts.MultipartParams.Set("filesize", strconv.FormatInt(dr.Size, 10))
-	opts.MultipartParams.Set("userid", strconv.FormatInt(uploadInfo.UserID, 10))
-
-	var info api.UploadInitResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return &info, dr, nil
-}
-
-func (f *Fs) getUploadInfo(ctx context.Context) (*api.UploadInfoResponse, error) {
-	opts := rest.Opts{
-		Method:  http.MethodGet,
-		RootURL: "https://proapi.115.com",
-		Path:    "/app/uploadinfo",
-	}
-
-	var err error
-	var info api.UploadInfoResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
+		return false
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	return &info, nil
+	if !found {
+		return nil, fs.ErrorObjectNotFound
+	}
+	return info, nil
 }
 
-func (f *Fs) getUploadToken(ctx context.Context) (*api.UploadOssTokenResponse, error) {
-	opts := rest.Opts{
-		Method:  http.MethodGet,
-		RootURL: "https://uplb.115.com",
-		Path:    "/3.0/gettoken.php",
-	}
-
-	var err error
-	var info api.UploadOssTokenResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
+// Creates from the parameters passed in a half finished Object which
+// must have setMetaData called on it
+//
+// Returns the object, leaf, dirID and error.
+//
+// Used to create new objects
+func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time, size int64) (o *Object, leaf string, dirID string, err error) {
+	// Create the directory for the object if it doesn't exist
+	leaf, dirID, err = f.dirCache.FindPath(ctx, remote, true)
 	if err != nil {
-		return nil, err
+		return
 	}
-
-	return &info, nil
+	// Temporary Object under construction
+	o = &Object{
+		fs:     f,
+		remote: remote,
+		parent: dirID,
+		size:   size,
+		mTime:  modTime,
+		durlMu: new(sync.Mutex),
+	}
+	return o, leaf, dirID, nil
 }
 
-func (f *Fs) indexInfo(ctx context.Context) (*api.IndexInfoResponse, error) {
-	opts := rest.Opts{
-		Method: http.MethodGet,
-		Path:   "/files/index_info",
+// ------------------------------------------------------------
+
+var commandHelp = []fs.CommandHelp{{
+	Name:  "addurls",
+	Short: "Add offline download task for urls",
+	Long: `This command adds offline download task for urls.
+
+Usage:
+
+    rclone backend addurls 115:dirpath url1 url2
+
+By default, downloads are saved to the folder "dirpath". 
+If this folder doesn't exist or you don't have permission 
+to access it, the download will be saved to the default folder 
+named "云下载".
+
+This command always exits with code 0, regardless of success.
+Instead, check the output (stdout) for any error messages.
+`,
+}, { // mod
+	Name:  "getid",
+	Short: "Get an ID of a file or directory",
+	Long: `This command is to obtain an ID of a file or directory.
+
+Usage:
+
+    rclone backend getid 115:path {subpath}
+
+The 'path' should point to a directory not a file. Use an extra argument
+'subpath' to get an ID of a file located in '115:path'.
+`,
+}}
+
+// Command the backend to run a named command
+//
+// The command run is name
+// args may be used to read arguments from
+// opts may be used to read optional arguments from
+//
+// The result should be capable of being JSON encoded
+// If it is a string or a []string it will be shown to the user
+// otherwise it will be JSON encoded and shown to the user like that
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+	switch name {
+	case "addurls":
+		return f.addURLs(ctx, "", arg)
+	case "getid":
+		// mod
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		return f.getID(ctx, path)
+	default:
+		return nil, fs.ErrorCommandNotFound
 	}
-
-	var err error
-	var info api.IndexInfoResponse
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, err)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &info, nil
-}
-
-func (f *Fs) getOssClient(ctx context.Context) (*oss.Client, error) {
-	uploadToken, err := f.getUploadToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return oss.New(ossEndpoint,
-		uploadToken.AccessKeyID,
-		uploadToken.AccessKeySecret,
-		oss.SecurityToken(uploadToken.SecurityToken),
-		oss.EnableMD5(true),
-		oss.EnableCRC(false))
-}
-
-func (f *Fs) createObject(remote string, modTime time.Time, size int64) *Object {
-	return &Object{
-		fs:      f,
-		remote:  remote,
-		size:    size,
-		modTime: modTime,
-	}
-}
-
-func (f *Fs) remotePath(name string) string {
-	name = path.Join(f.root, name)
-	if name == "" || name[0] != '/' {
-		name = "/" + name
-	}
-	return path.Clean(name)
-}
-
-func (f *Fs) flushDir(dir string) {
-	cacheKey := fmt.Sprintf("files:%v", path.Clean(dir))
-	f.cache.Delete(cacheKey)
 }
 
 // ------------------------------------------------------------
@@ -982,7 +1125,6 @@ func (f *Fs) flushDir(dir string) {
 // Fs returns read only access to the Fs that this object is part of
 func (o *Object) Fs() fs.Info {
 	return o.fs
-
 }
 
 // String returns a description of the Object
@@ -1001,11 +1143,21 @@ func (o *Object) Remote() string {
 // ModTime returns the modification date of the file
 // It should return a best guess if one isn't available
 func (o *Object) ModTime(ctx context.Context) time.Time {
-	return o.modTime
+	err := o.readMetaData(ctx)
+	if err != nil {
+		fs.Logf(o, "failed to read metadata: %v", err)
+		return time.Now()
+	}
+	return o.mTime
 }
 
 // Size returns the size of the file
 func (o *Object) Size() int64 {
+	err := o.readMetaData(context.TODO())
+	if err != nil {
+		fs.Logf(o, "failed to read metadata: %v", err)
+		return 0
+	}
 	return o.size
 }
 
@@ -1015,27 +1167,52 @@ func (o *Object) Hash(ctx context.Context, t hash.Type) (string, error) {
 	if t != hash.SHA1 {
 		return "", hash.ErrUnsupported
 	}
-	return o.sha1sum, nil
+	return strings.ToLower(o.sha1sum), nil
+}
+
+// ID returns the ID of the Object if known, or "" if not
+func (o *Object) ID() string {
+	return o.id
+}
+
+// ParentID returns the ID of the Object parent if known, or "" if not
+func (o *Object) ParentID() string {
+	return o.parent
+}
+
+// SetModTime sets the metadata on the object to set the modification date
+func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
+	return fs.ErrorCantSetModTime
+}
+
+// Storable says whether this object can be stored
+func (o *Object) Storable() bool {
+	return true
 }
 
 // Open opens the file for read.  Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
-	fs.Logf(o.fs, "open %v, options: %v", o.remote, options)
-	targetURL, err := o.fs.getURL(ctx, o.remote, o.pickCode)
-	if err != nil {
-		return nil, err
+	if o.id == "" {
+		return nil, errors.New("can't download: no id")
+	}
+	if o.size == 0 {
+		// this shouldn't happen as no zero-byte files allowed by api but just in case
+		return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
+	}
+	if err = o.setDownloadURL(ctx); err != nil {
+		return nil, fmt.Errorf("can't download: %w", err)
 	}
 	fs.FixRangeOption(options, o.size)
 	opts := rest.Opts{
-		Method:  http.MethodGet,
-		RootURL: targetURL,
-		Options: options,
+		Method:       "GET",
+		RootURL:      o.durl.URL,
+		Options:      options,
+		ExtraHeaders: map[string]string{"Cookie": o.durl.Cookie()},
 	}
-
 	var resp *http.Response
 	err = o.fs.pacer.Call(func() (bool, error) {
 		resp, err = o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(ctx, resp, err)
+		return shouldRetry(ctx, resp, nil, err)
 	})
 	if err != nil {
 		return nil, err
@@ -1046,41 +1223,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // Remove this object
 func (o *Object) Remove(ctx context.Context) error {
-	info, err := o.fs.readMetaDataForPath(ctx, o.fs.remotePath(o.Remote()))
-	if err != nil {
-		fs.Errorf(o.fs, "remove object fail, err: %v, remote: %v", err, o.remote)
-		return err
-	}
-
-	if info.IsDir() {
-		return fs.ErrorIsDir
-	}
-
-	err = o.fs.deleteFile(ctx, info.GetFileID(), info.GetCategoryID())
-	if err != nil {
-		return err
-	}
-
-	parent, _ := path.Split(o.fs.remotePath(o.remote))
-	o.fs.flushDir(parent)
-
-	return nil
-}
-
-// SetModTime sets the metadata on the object to set the modification date
-func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
-	o.modTime = modTime
-	return nil
-}
-
-// Storable says whether this object can be stored
-func (o *Object) Storable() bool {
-	return true
-}
-
-// ID returns the ID of the Object if known, or "" if not
-func (o *Object) ID() string {
-	return strconv.FormatInt(o.fileID, 10)
+	return o.fs.deleteFiles(ctx, []string{o.id})
 }
 
 // Update in to the object with the modTime given of the given size
@@ -1089,81 +1232,64 @@ func (o *Object) ID() string {
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	// TODO: enable file upload
-	if true {
-		return fs.ErrorNotImplemented
+	if src.Size() < 0 {
+		return errors.New("refusing to update with unknown size")
 	}
 
-	f := o.fs
-	obj, err := f.NewObject(ctx, src.Remote())
-	if err == nil {
-		fs.Logf(f, "file exist, remote it, %+v", obj)
-		err := obj.Remove(ctx)
-		if err != nil {
-			fs.Logf(f, "remove file fail, %+v", obj)
-			return err
+	// upload with new size but old name
+	newObj, err := o.fs.putUnchecked(ctx, in, src, o.Remote(), options...)
+	if err != nil {
+		return err
+	}
+
+	// updating object with the same contents(sha1) simply updates some attributes
+	// rather than creating a new one. So we shouldn't delete old object
+	newO := newObj.(*Object)
+	if !(newO.id == o.id && newO.pickCode == o.pickCode && newO.sha1sum == o.sha1sum) {
+		// Delete duplicate after successful upload
+		if err = o.Remove(ctx); err != nil {
+			return fmt.Errorf("failed to remove old version: %w", err)
 		}
 	}
 
-	if true {
-		parent, _ := path.Split(src.Remote())
-		err := f.Mkdir(ctx, parent)
-		if err != nil {
-			return err
-		}
-	}
+	// Replace guts of old object with new one
+	*o = *newO
 
-	ossClient, err := f.getOssClient(ctx)
-	if err != nil {
-		fs.Logf(f, "get oss client fail, err: %v", err)
-		return err
-	}
-
-	dir, name := path.Split(f.remotePath(src.Remote()))
-	cid, err := f.getDirID(ctx, dir)
-	if err != nil {
-		return err
-	}
-
-	var buf bytes.Buffer
-	tee := io.TeeReader(in, &buf)
-	info, digest, err := f.createUploadTicket(ctx, cid, name, tee)
-	if err != nil {
-		fs.Logf(f, "create upload ticket fail, err: %v", err)
-		return err
-	}
-
-	bucket, err := ossClient.Bucket(info.Bucket)
-	if err != nil {
-		fs.Logf(f, "f.oss.Bucket fail, err: %v", err)
-		return err
-	}
-
-	err = bucket.PutObject(info.Object, &buf,
-		oss.ContentLength(digest.Size),
-		oss.ContentType(fs.MimeTypeFromName(name)),
-		oss.ContentMD5(digest.MD5),
-		oss.Callback(base64.StdEncoding.EncodeToString([]byte(info.Callback.Callback))),
-		oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(info.Callback.CallbackVar))),
-	)
-	if err != nil {
-		fs.Logf(f, "bucket.PutObject fail, err: %v", err)
-	}
-
-	f.flushDir(dir)
-	o.hasMetaData = false
-	return o.readMetaData(ctx)
+	return nil
 }
 
 // setMetaData sets the metadata from info
-func (o *Object) setMetaData(info *api.FileInfo) error {
+func (o *Object) setMetaData(info *api.File) error {
+	if info.IsDir() {
+		return fs.ErrorIsDir
+	}
 	o.hasMetaData = true
-	o.name = o.fs.opt.Enc.ToStandardName(info.GetName())
-	o.size = info.GetSize()
-	o.sha1sum = strings.ToLower(info.Sha1)
+	o.id = info.ID()
+	o.parent = info.CID
+	o.size = info.Size
+	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
-	o.fileID = info.GetFileID()
-	o.modTime = info.GetUpdateTime()
+	o.mTime = time.Time(info.Te)
+	o.cTime = time.Time(info.Tp)
+	o.aTime = time.Time(info.To)
+	return nil
+}
+
+// setDownloadURL ensures a link for opening an object
+func (o *Object) setDownloadURL(ctx context.Context) error {
+	o.durlMu.Lock()
+	defer o.durlMu.Unlock()
+
+	// check if the current link is valid
+	if o.durl.Valid() {
+		return nil
+	}
+
+	downURL, err := o.fs.getDownloadURL(ctx, o.pickCode)
+	if err != nil {
+		return err
+	}
+	o.durl = downURL
 	return nil
 }
 
@@ -1173,12 +1299,9 @@ func (o *Object) readMetaData(ctx context.Context) error {
 		return nil
 	}
 
-	info, err := o.fs.readMetaDataForPath(ctx, o.fs.remotePath(o.Remote()))
+	info, err := o.fs.readMetaDataForPath(ctx, o.remote)
 	if err != nil {
 		return err
-	}
-	if info.IsDir() {
-		return fs.ErrorIsDir
 	}
 
 	return o.setMetaData(info)
@@ -1186,16 +1309,22 @@ func (o *Object) readMetaData(ctx context.Context) error {
 
 // Check the interfaces are satisfied
 var (
-	_ fs.Fs     = (*Fs)(nil)
-	_ fs.Purger = (*Fs)(nil)
-	// _ fs.Copier       = (*Fs)(nil)
-	_ fs.Mover    = (*Fs)(nil)
-	_ fs.DirMover = (*Fs)(nil)
-	// _ fs.PublicLinker = (*Fs)(nil)
-	// _ fs.CleanUpper   = (*Fs)(nil)
-	_ fs.Abouter    = (*Fs)(nil)
-	_ fs.Object     = (*Object)(nil)
-	_ fs.ObjectInfo = (*Object)(nil)
-	_ fs.IDer       = (*Object)(nil)
+	// _ fs.PublicLinker    = (*Fs)(nil)
+	// _ fs.CleanUpper      = (*Fs)(nil)
+	// _ fs.UserInfoer      = (*Fs)(nil)
 	// _ fs.MimeTyper = (*Object)(nil)
+	_ fs.Fs              = (*Fs)(nil)
+	_ fs.Purger          = (*Fs)(nil)
+	_ fs.Copier          = (*Fs)(nil)
+	_ fs.Mover           = (*Fs)(nil)
+	_ fs.DirMover        = (*Fs)(nil)
+	_ fs.DirCacheFlusher = (*Fs)(nil)
+	_ fs.MergeDirser     = (*Fs)(nil)
+	_ fs.PutUncheckeder  = (*Fs)(nil)
+	_ fs.Abouter         = (*Fs)(nil)
+	_ fs.Commander       = (*Fs)(nil)
+	_ fs.Object          = (*Object)(nil)
+	_ fs.ObjectInfo      = (*Object)(nil)
+	_ fs.IDer            = (*Object)(nil)
+	_ fs.ParentIDer      = (*Object)(nil)
 )

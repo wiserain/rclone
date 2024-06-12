@@ -15,9 +15,11 @@ require (
 	github.com/a8m/tree v0.0.0-20240104212747-2c8764a5f17e
 	github.com/aalpar/deheap v0.0.0-20210914013432-0cc84d79dec3
 	github.com/abbot/go-http-auth v0.4.0
+	github.com/aead/ecdh v0.2.0
 	github.com/aliyun/aliyun-oss-go-sdk v2.2.10+incompatible
 	github.com/anacrolix/dms v1.6.0
 	github.com/anacrolix/log v0.14.5
+	github.com/andreburgaud/crypt2go v1.1.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/aws/aws-sdk-go v1.49.20
 	github.com/buengese/sgzip v0.1.1
@@ -50,6 +52,7 @@ require (
 	github.com/ncw/swift/v2 v2.0.2
 	github.com/oracle/oci-go-sdk/v65 v65.55.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
+	github.com/pierrec/lz4/v4 v4.1.17
 	github.com/pkg/sftp v1.13.6
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.18.0
