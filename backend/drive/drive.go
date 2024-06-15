@@ -154,6 +154,7 @@ func (rwChoices) Choices() []fs.BitsChoicesInfo {
 		{Bit: uint64(rwOff), Name: "off"},
 		{Bit: uint64(rwRead), Name: "read"},
 		{Bit: uint64(rwWrite), Name: "write"},
+		{Bit: uint64(rwFailOK), Name: "failok"},
 	}
 }
 
@@ -163,6 +164,7 @@ type rwChoice = fs.Bits[rwChoices]
 const (
 	rwRead rwChoice = 1 << iota
 	rwWrite
+	rwFailOK
 	rwOff rwChoice = 0
 )
 
@@ -176,6 +178,9 @@ var rwExamples = fs.OptionExamples{{
 }, {
 	Value: rwWrite.String(),
 	Help:  "Write the value only",
+}, {
+	Value: rwFailOK.String(),
+	Help:  "If writing fails log errors only, don't fail the transfer",
 }, {
 	Value: (rwRead | rwWrite).String(),
 	Help:  "Read and Write the value.",
@@ -1923,10 +1928,9 @@ func (f *Fs) createDir(ctx context.Context, pathID, leaf string, metadata fs.Met
 	leaf = f.opt.Enc.FromStandardName(leaf)
 	pathID = actualID(pathID)
 	createInfo := &drive.File{
-		Name:        leaf,
-		Description: leaf,
-		MimeType:    driveFolderType,
-		Parents:     []string{pathID},
+		Name:     leaf,
+		MimeType: driveFolderType,
+		Parents:  []string{pathID},
 	}
 	var updateMetadata updateMetadataFn
 	if len(metadata) > 0 {
@@ -2095,7 +2099,7 @@ func (f *Fs) findExportFormatByMimeType(ctx context.Context, itemMimeType string
 	return "", "", isDocument
 }
 
-// findExportFormatByMimeType works out the optimum export settings
+// findExportFormat works out the optimum export settings
 // for the given drive.File.
 //
 // Look through the exportExtensions and find the first format that can be
@@ -2606,7 +2610,6 @@ func (f *Fs) createFileInfo(ctx context.Context, remote string, modTime time.Tim
 	// Define the metadata for the file we are going to create.
 	createInfo := &drive.File{
 		Name:         leaf,
-		Description:  leaf,
 		Parents:      []string{directoryID},
 		ModifiedTime: modTime.Format(timeFormatOut),
 	}
@@ -3010,7 +3013,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	// FIXME remove this when google fixes the problem!
 	if isDoc {
 		// A short sleep is needed here in order to make the
-		// change effective, without it is is ignored. This is
+		// change effective, without it is ignored. This is
 		// probably some eventual consistency nastiness.
 		sleepTime := 2 * time.Second
 		fs.Debugf(f, "Sleeping for %v before setting the modtime to work around drive bug - see #4517", sleepTime)
@@ -3735,6 +3738,50 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 	return nil
 }
 
+func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, err error) {
+	list := f.svc.Files.List()
+	if query != "" {
+		list.Q(query)
+	}
+
+	if f.opt.ListChunk > 0 {
+		list.PageSize(f.opt.ListChunk)
+	}
+	list.SupportsAllDrives(true)
+	list.IncludeItemsFromAllDrives(true)
+	if f.isTeamDrive && !f.opt.SharedWithMe {
+		list.DriveId(f.opt.TeamDriveID)
+		list.Corpora("drive")
+	}
+	// If using appDataFolder then need to add Spaces
+	if f.rootFolderID == "appDataFolder" {
+		list.Spaces("appDataFolder")
+	}
+
+	fields := fmt.Sprintf("files(%s),nextPageToken,incompleteSearch", f.getFileFields(ctx))
+
+	var results []*drive.File
+	for {
+		var files *drive.FileList
+		err = f.pacer.Call(func() (bool, error) {
+			files, err = list.Fields(googleapi.Field(fields)).Context(ctx).Do()
+			return f.shouldRetry(ctx, err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query: %w", err)
+		}
+		if files.IncompleteSearch {
+			fs.Errorf(f, "search result INCOMPLETE")
+		}
+		results = append(results, files.Files...)
+		if files.NextPageToken == "" {
+			break
+		}
+		list.PageToken(files.NextPageToken)
+	}
+	return results, nil
+}
+
 var commandHelp = []fs.CommandHelp{{
 	Name:  "get",
 	Short: "Get command for fetching the drive config parameters",
@@ -3927,6 +3974,47 @@ Use the --interactive/-i or --dry-run flag to see what would be copied before co
 }, {
 	Name:  "importformats",
 	Short: "Dump the import formats for debug purposes",
+}, {
+	Name:  "query",
+	Short: "List files using Google Drive query language",
+	Long: `This command lists files based on a query
+
+Usage:
+
+    rclone backend query drive: query
+    
+The query syntax is documented at [Google Drive Search query terms and 
+operators](https://developers.google.com/drive/api/guides/ref-search-terms).
+
+For example:
+
+	rclone backend query drive: "'0ABc9DEFGHIJKLMNop0QRatUVW3X' in parents and name contains 'foo'"
+
+If the query contains literal ' or \ characters, these need to be escaped with
+\ characters. "'" becomes "\'" and "\" becomes "\\\", for example to match a 
+file named "foo ' \.txt":
+
+	rclone backend query drive: "name = 'foo \' \\\.txt'"
+
+The result is a JSON array of matches, for example:
+
+    [
+	{
+		"createdTime": "2017-06-29T19:58:28.537Z",
+		"id": "0AxBe_CDEF4zkGHI4d0FjYko2QkD",
+		"md5Checksum": "68518d16be0c6fbfab918be61d658032",
+		"mimeType": "text/plain",
+		"modifiedTime": "2024-02-02T10:40:02.874Z",
+		"name": "foo ' \\.txt",
+		"parents": [
+			"0BxAe_BCDE4zkFGZpcWJGek0xbzC"
+		],
+		"resourceKey": "0-ABCDEFGHIXJQpIGqBJq3MC",
+		"sha1Checksum": "8f284fa768bfb4e45d076a579ab3905ab6bfa893",
+		"size": "311",
+		"webViewLink": "https://drive.google.com/file/d/0AxBe_CDEF4zkGHI4d0FjYko2QkD/view?usp=drivesdk\u0026resourcekey=0-ABCDEFGHIXJQpIGqBJq3MC"
+	}
+    ]`,
 }}
 
 // Command the backend to run a named command
@@ -4089,6 +4177,17 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		return f.exportFormats(ctx), nil
 	case "importformats":
 		return f.importFormats(ctx), nil
+	case "query":
+		if len(arg) == 1 {
+			query := arg[0]
+			var results, err = f.query(ctx, query)
+			if err != nil {
+				return nil, fmt.Errorf("failed to execute query: %q, error: %w", query, err)
+			}
+			return results, nil
+		} else {
+			return nil, errors.New("need a query argument")
+		}
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}

@@ -42,6 +42,7 @@ import (
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/fstest/fstests"
+	"github.com/rclone/rclone/lib/pacer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/cases"
@@ -491,6 +492,23 @@ func TestMaxDeleteSize(t *testing.T) {
 	assert.Equal(t, int64(1), objects) // 10 or 100 bytes
 }
 
+func TestReadFile(t *testing.T) {
+	ctx := context.Background()
+	r := fstest.NewRun(t)
+	defer r.Finalise()
+
+	contents := "A file to read the contents."
+	file := r.WriteObject(ctx, "ReadFile", contents, t1)
+	r.CheckRemoteItems(t, file)
+
+	o, err := r.Fremote.NewObject(ctx, file.Path)
+	require.NoError(t, err)
+
+	buf, err := operations.ReadFile(ctx, o)
+	require.NoError(t, err)
+	assert.Equal(t, contents, string(buf))
+}
+
 func TestRetry(t *testing.T) {
 	ctx := context.Background()
 
@@ -504,12 +522,12 @@ func TestRetry(t *testing.T) {
 		return err
 	}
 
-	i, err = 3, io.EOF
+	i, err = 3, fmt.Errorf("Wrapped EOF is retriable: %w", io.EOF)
 	assert.Equal(t, nil, operations.Retry(ctx, nil, 5, fn))
 	assert.Equal(t, 0, i)
 
-	i, err = 10, io.EOF
-	assert.Equal(t, io.EOF, operations.Retry(ctx, nil, 5, fn))
+	i, err = 10, pacer.RetryAfterError(errors.New("BANG"), 10*time.Millisecond)
+	assert.Equal(t, err, operations.Retry(ctx, nil, 5, fn))
 	assert.Equal(t, 5, i)
 
 	i, err = 10, fs.ErrorObjectNotFound
@@ -1787,6 +1805,13 @@ func TestSetDirModTime(t *testing.T) {
 		fstest.CheckDirModTime(ctx, t, r.Fremote, newDst, t2)
 	}
 	fstest.CheckDirModTime(ctx, t, r.Fremote, fstest.NewDirectory(ctx, t, r.Fremote, name), t2)
+
+	// Now wrap the directory to make the SetModTime method return fs.ErrorNotImplemented and check that it falls back correctly
+	wrappedDir := fs.NewDirWrapper(existingDir.Remote(), fs.NewDir(existingDir.Remote(), existingDir.ModTime(ctx)))
+	newDst, err = operations.SetDirModTime(ctx, r.Fremote, wrappedDir, "SHOULD BE IGNORED", t1)
+	require.NoError(t, err)
+	require.NotNil(t, newDst)
+	fstest.CheckDirModTime(ctx, t, r.Fremote, fstest.NewDirectory(ctx, t, r.Fremote, name), t1)
 }
 
 func TestDirsEqual(t *testing.T) {

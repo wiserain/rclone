@@ -520,7 +520,7 @@ func (f *Fs) put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options [
 				if err != nil {
 					fs.Errorf(o, "Failed to remove corrupted object: %v", err)
 				}
-				return nil, fmt.Errorf("corrupted on transfer: %v encrypted hash differ src %q vs dst %q", ht, srcHash, dstHash)
+				return nil, fmt.Errorf("corrupted on transfer: %v encrypted hashes differ src(%s) %q vs dst(%s) %q", ht, f.Fs, srcHash, o.Fs(), dstHash)
 			}
 			fs.Debugf(src, "%v = %s OK", ht, srcHash)
 		}
@@ -1246,6 +1246,17 @@ func (o *Object) Metadata(ctx context.Context) (fs.Metadata, error) {
 		return nil, nil
 	}
 	return do.Metadata(ctx)
+}
+
+// SetMetadata sets metadata for an Object
+//
+// It should return fs.ErrorNotImplemented if it can't set metadata
+func (o *Object) SetMetadata(ctx context.Context, metadata fs.Metadata) error {
+	do, ok := o.Object.(fs.SetMetadataer)
+	if !ok {
+		return fs.ErrorNotImplemented
+	}
+	return do.SetMetadata(ctx, metadata)
 }
 
 // MimeType returns the content type of the Object if

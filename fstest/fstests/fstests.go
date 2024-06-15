@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/cache"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fspath"
@@ -303,6 +304,7 @@ type Opt struct {
 	SkipObjectCheckWrap             bool     // if set skip ObjectCheckWrap
 	SkipDirectoryCheckWrap          bool     // if set skip DirectoryCheckWrap
 	SkipInvalidUTF8                 bool     // if set skip invalid UTF-8 checks
+	SkipLeadingDot                  bool     // if set skip leading dot checks
 	QuickTestOK                     bool     // if set, run this test with make quicktest
 }
 
@@ -688,6 +690,9 @@ func Run(t *testing.T, opt *Opt) {
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					if opt.SkipInvalidUTF8 && test.name == "invalid UTF-8" {
+						t.Skip("Skipping " + test.name)
+					}
+					if opt.SkipLeadingDot && test.name == "leading dot" {
 						t.Skip("Skipping " + test.name)
 					}
 					// turn raw strings into Standard encoding
@@ -1205,6 +1210,28 @@ func Run(t *testing.T, opt *Opt) {
 				}, fs.GetModifyWindow(ctx, f))
 			})
 
+			// TestFsListRootedSubdir tests putting and listing with an Fs that is rooted at a subdirectory 2 levels down
+			TestFsListRootedSubdir := func(t *testing.T) {
+				skipIfNotOk(t)
+				newF, err := cache.Get(ctx, subRemoteName+"/hello? sausage/êé")
+				assert.NoError(t, err)
+				nestedFile := fstest.Item{
+					ModTime: fstest.Time("2001-02-03T04:05:06.499999999Z"),
+					Path:    "a/b/c/d/e.txt",
+				}
+				_, _ = testPut(ctx, t, newF, &nestedFile)
+
+				objs, dirs, err := walk.GetAll(ctx, newF, "", true, 10)
+				require.NoError(t, err)
+				assert.Equal(t, []string{`Hello, 世界/ " ' @ < > & ? + ≠/z.txt`, nestedFile.Path}, objsToNames(objs))
+				assert.Equal(t, []string{`Hello, 世界`, `Hello, 世界/ " ' @ < > & ? + ≠`, "a", "a/b", "a/b/c", "a/b/c/d"}, dirsToNames(dirs))
+
+				// cleanup
+				err = operations.Purge(ctx, newF, "a")
+				require.NoError(t, err)
+			}
+			t.Run("FsListRootedSubdir", TestFsListRootedSubdir)
+
 			// TestFsCopy tests Copy
 			t.Run("FsCopy", func(t *testing.T) {
 				skipIfNotOk(t)
@@ -1232,6 +1259,13 @@ func Run(t *testing.T, opt *Opt) {
 
 				// Check dst lightly - list above has checked ModTime/Hashes
 				assert.Equal(t, file2Copy.Path, dst.Remote())
+
+				// check that mutating dst does not mutate src
+				err = dst.SetModTime(ctx, fstest.Time("2004-03-03T04:05:06.499999999Z"))
+				if err != fs.ErrorCantSetModTimeWithoutDelete && err != fs.ErrorCantSetModTime {
+					assert.NoError(t, err)
+					assert.False(t, src.ModTime(ctx).Equal(dst.ModTime(ctx)), "mutating dst should not mutate src -- is it Copying by pointer?")
+				}
 
 				// Delete copy
 				err = dst.Remove(ctx)
@@ -1632,6 +1666,67 @@ func Run(t *testing.T, opt *Opt) {
 						}
 					})
 				} // else: Have some metadata here we didn't write - can't really check it!
+			})
+
+			// TestObjectSetMetadata tests the SetMetadata of the object
+			t.Run("ObjectSetMetadata", func(t *testing.T) {
+				skipIfNotOk(t)
+				ctx, ci := fs.AddConfig(ctx)
+				ci.Metadata = true
+				features := f.Features()
+
+				// Test to see if SetMetadata is supported on an existing object before creating a new one
+				obj := fstest.NewObject(ctx, t, f, file1.Path)
+				_, objectHasSetMetadata := obj.(fs.SetMetadataer)
+				if !objectHasSetMetadata {
+					t.Skip("SetMetadata method not supported")
+				}
+				if !features.Overlay {
+					require.True(t, features.WriteMetadata, "Features.WriteMetadata is false but Object.SetMetadata found")
+				}
+				if !features.ReadMetadata {
+					t.Skip("SetMetadata can't be tested without ReadMetadata")
+				}
+
+				// Create file with metadata
+				const fileName = "test set metadata.txt"
+				t1 := fstest.Time("2003-02-03T04:05:06.499999999Z")
+				t2 := fstest.Time("2004-03-03T04:05:06.499999999Z")
+				contents := random.String(100)
+				file := fstest.NewItem(fileName, contents, t1)
+				var testMetadata = fs.Metadata{
+					// System metadata supported by all backends
+					"mtime": t1.Format(time.RFC3339Nano),
+					// User metadata
+					"potato": "jersey",
+				}
+				obj = PutTestContentsMetadata(ctx, t, f, &file, contents, true, "text/plain", testMetadata)
+				fstest.CheckEntryMetadata(ctx, t, f, obj, testMetadata)
+				do, objectHasSetMetadata := obj.(fs.SetMetadataer)
+				require.True(t, objectHasSetMetadata)
+
+				// Set new metadata
+				err := do.SetMetadata(ctx, fs.Metadata{
+					// System metadata supported by all backends
+					"mtime": t2.Format(time.RFC3339Nano),
+					// User metadata
+					"potato": "royal",
+				})
+				if err == fs.ErrorNotImplemented {
+					t.Log("SetMetadata returned fs.ErrorNotImplemented")
+				} else {
+					require.NoError(t, err)
+					file.ModTime = t2
+					fstest.CheckListing(t, f, []fstest.Item{file1, file2, file})
+
+					// Check metadata is correct
+					fstest.CheckEntryMetadata(ctx, t, f, obj, ci.MetadataSet)
+					obj = fstest.NewObject(ctx, t, f, fileName)
+					fstest.CheckEntryMetadata(ctx, t, f, obj, ci.MetadataSet)
+				}
+
+				// Remove test file
+				require.NoError(t, obj.Remove(ctx))
 			})
 
 			// TestObjectSetModTime tests that SetModTime works

@@ -130,6 +130,9 @@ var providerOption = fs.Option{
 		Value: "Linode",
 		Help:  "Linode Object Storage",
 	}, {
+		Value: "Magalu",
+		Help:  "Magalu Object Storage",
+	}, {
 		Value: "Minio",
 		Help:  "Minio Object Storage",
 	}, {
@@ -289,6 +292,9 @@ func init() {
 			}, {
 				Value: "sa-east-1",
 				Help:  "South America (Sao Paulo) Region.\nNeeds location constraint sa-east-1.",
+			}, {
+				Value: "il-central-1",
+				Help:  "Israel (Tel Aviv) Region.\nNeeds location constraint il-central-1.",
 			}, {
 				Value: "me-south-1",
 				Help:  "Middle East (Bahrain) Region.\nNeeds location constraint me-south-1.",
@@ -527,7 +533,7 @@ func init() {
 		}, {
 			Name:     "region",
 			Help:     "Region to connect to.\n\nLeave blank if you are using an S3 clone and you don't have a region.",
-			Provider: "!AWS,Alibaba,ArvanCloud,ChinaMobile,Cloudflare,IONOS,Petabox,Liara,Linode,Qiniu,RackCorp,Scaleway,Storj,Synology,TencentCOS,HuaweiOBS,IDrive",
+			Provider: "!AWS,Alibaba,ArvanCloud,ChinaMobile,Cloudflare,IONOS,Petabox,Liara,Linode,Magalu,Qiniu,RackCorp,Scaleway,Storj,Synology,TencentCOS,HuaweiOBS,IDrive",
 			Examples: []fs.OptionExample{{
 				Value: "",
 				Help:  "Use this if unsure.\nWill use v4 signatures and an empty region.",
@@ -931,6 +937,19 @@ func init() {
 				Help:  "Washington, DC, (USA), us-iad-1",
 			}},
 		}, {
+			// Magalu endpoints: https://docs.magalu.cloud/docs/object-storage/how-to/copy-url
+			Name:     "endpoint",
+			Help:     "Endpoint for Magalu Object Storage API.",
+			Provider: "Magalu",
+			Examples: []fs.OptionExample{{
+				Value: "br-se1.magaluobjects.com",
+				Help:  "São Paulo, SP (BR), br-se1",
+			}, {
+				Value: "br-ne1.magaluobjects.com",
+				Help:  "Fortaleza, CE (BR), br-ne1",
+			},
+			},
+		}, {
 			// oss endpoints: https://help.aliyun.com/document_detail/31837.html
 			Name:     "endpoint",
 			Help:     "Endpoint for OSS API.",
@@ -1282,7 +1301,7 @@ func init() {
 		}, {
 			Name:     "endpoint",
 			Help:     "Endpoint for S3 API.\n\nRequired when using an S3 clone.",
-			Provider: "!AWS,ArvanCloud,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,GCS,Liara,Linode,Scaleway,StackPath,Storj,Synology,RackCorp,Qiniu,Petabox",
+			Provider: "!AWS,ArvanCloud,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,GCS,Liara,Linode,MagaluCloud,Scaleway,StackPath,Storj,Synology,RackCorp,Qiniu,Petabox",
 			Examples: []fs.OptionExample{{
 				Value:    "objects-us-east-1.dream.io",
 				Help:     "Dream Objects endpoint",
@@ -1391,6 +1410,14 @@ func init() {
 				Value:    "s3.ir-tbz-sh1.arvanstorage.ir",
 				Help:     "ArvanCloud Tabriz Iran (Shahriar) endpoint",
 				Provider: "ArvanCloud",
+			}, {
+				Value:    "br-se1.magaluobjects.com",
+				Help:     "Magalu BR Southeast 1 endpoint",
+				Provider: "Magalu",
+			}, {
+				Value:    "br-se1.magaluobjects.com",
+				Help:     "Magalu BR Northest 1 endpoint",
+				Provider: "Magalu",
 			}},
 		}, {
 			Name:     "location_constraint",
@@ -1453,6 +1480,9 @@ func init() {
 			}, {
 				Value: "sa-east-1",
 				Help:  "South America (Sao Paulo) Region",
+			}, {
+				Value: "il-central-1",
+				Help:  "Israel (Tel Aviv) Region",
 			}, {
 				Value: "me-south-1",
 				Help:  "Middle East (Bahrain) Region",
@@ -1770,7 +1800,7 @@ func init() {
 		}, {
 			Name:     "location_constraint",
 			Help:     "Location constraint - must be set to match the Region.\n\nLeave blank if not sure. Used when creating buckets only.",
-			Provider: "!AWS,Alibaba,ArvanCloud,HuaweiOBS,ChinaMobile,Cloudflare,IBMCOS,IDrive,IONOS,Leviia,Liara,Linode,Qiniu,RackCorp,Scaleway,StackPath,Storj,TencentCOS,Petabox",
+			Provider: "!AWS,Alibaba,ArvanCloud,HuaweiOBS,ChinaMobile,Cloudflare,IBMCOS,IDrive,IONOS,Leviia,Liara,Linode,Magalu,Qiniu,RackCorp,Scaleway,StackPath,Storj,TencentCOS,Petabox",
 		}, {
 			Name: "acl",
 			Help: `Canned ACL used when creating buckets and storing or copying objects.
@@ -2021,6 +2051,15 @@ If you leave it blank, this is calculated automatically from the sse_customer_ke
 			Name:     "storage_class",
 			Help:     "The storage class to use when storing new objects in ArvanCloud.",
 			Provider: "ArvanCloud",
+			Examples: []fs.OptionExample{{
+				Value: "STANDARD",
+				Help:  "Standard storage class",
+			}},
+		}, {
+			// Mapping from here: #todo
+			Name:     "storage_class",
+			Help:     "The storage class to use when storing new objects in Magalu.",
+			Provider: "Magalu",
 			Examples: []fs.OptionExample{{
 				Value: "STANDARD",
 				Help:  "Standard storage class",
@@ -3022,6 +3061,14 @@ func (f *Fs) setUploadChunkSize(cs fs.SizeSuffix) (old fs.SizeSuffix, err error)
 	return
 }
 
+func checkCopyCutoff(cs fs.SizeSuffix) error {
+	minCopySize := fs.SizeSuffixBase
+	if cs < minCopySize {
+		return fmt.Errorf("value is too small (%v is less than %v)", cs, minCopySize)
+	}
+	return nil
+}
+
 func checkUploadCutoff(cs fs.SizeSuffix) error {
 	if cs > maxUploadCutoff {
 		return fmt.Errorf("%s is greater than %s", cs, maxUploadCutoff)
@@ -3113,7 +3160,7 @@ func setQuirks(opt *Options) {
 		listObjectsV2 = false
 		virtualHostStyle = false
 		urlEncodeListings = false
-		useAlreadyExists = false // untested
+		useAlreadyExists = true
 	case "ChinaMobile":
 		listObjectsV2 = false
 		virtualHostStyle = false
@@ -3159,6 +3206,12 @@ func setQuirks(opt *Options) {
 	case "LyveCloud":
 		useMultipartEtag = false // LyveCloud seems to calculate multipart Etags differently from AWS
 		useAlreadyExists = false // untested
+	case "Magalu":
+		listObjectsV2 = false
+		virtualHostStyle = false
+		urlEncodeListings = false
+		useMultipartEtag = false
+		useAlreadyExists = false
 	case "Minio":
 		virtualHostStyle = false
 	case "Netease":
@@ -3182,8 +3235,8 @@ func setQuirks(opt *Options) {
 		if opt.MaxUploadParts > 1000 {
 			opt.MaxUploadParts = 1000
 		}
-		urlEncodeListings = false
-		useAlreadyExists = false // untested
+		urlEncodeListings = true
+		useAlreadyExists = true
 	case "SeaweedFS":
 		listObjectsV2 = false // untested
 		virtualHostStyle = false
@@ -3321,6 +3374,10 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	err = checkUploadCutoff(opt.UploadCutoff)
 	if err != nil {
 		return nil, fmt.Errorf("s3: upload cutoff: %w", err)
+	}
+	err = checkCopyCutoff(opt.CopyCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("s3: --s3-copy-cutoff: %w", err)
 	}
 	if opt.Versions && opt.VersionAt.IsSet() {
 		return nil, errors.New("s3: can't use --s3-versions and --s3-version-at at the same time")
@@ -4008,7 +4065,7 @@ func (f *Fs) list(ctx context.Context, opt listOpt, fn listFn) error {
 					isDirectory = false
 				} else {
 					// Don't insert the root directory
-					if remote == opt.directory {
+					if remote == f.opt.Enc.ToStandardPath(opt.directory) {
 						continue
 					}
 				}
@@ -5365,7 +5422,7 @@ func (f *Fs) headObject(ctx context.Context, req *s3.HeadObjectInput) (resp *s3.
 	})
 	if err != nil {
 		if awsErr, ok := err.(awserr.RequestFailure); ok {
-			if awsErr.StatusCode() == http.StatusNotFound {
+			if awsErr.StatusCode() == http.StatusNotFound || awsErr.StatusCode() == http.StatusMethodNotAllowed {
 				return nil, fs.ErrorObjectNotFound
 			}
 		}

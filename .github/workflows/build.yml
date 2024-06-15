@@ -94,7 +94,7 @@ jobs:
             quicktest: true
 
           - job_name: mac_amd64
-            os: macos-11
+            os: macos-latest
             go: '>=1.22.0-rc.1'
             gotags: 'cmount,noselfupdate'
             build_flags: '-include "^darwin/amd64" -cgo'
@@ -103,7 +103,7 @@ jobs:
             deploy: true
 
           - job_name: mac_arm64
-            os: macos-11
+            os: macos-latest
             go: '>=1.22.0-rc.1'
             gotags: 'cmount,noselfupdate'
             build_flags: '-include "^darwin/arm64" -cgo -macos-arch arm64 -cgo-cflags=-I/usr/local/include -cgo-ldflags=-L/usr/local/lib'
@@ -169,7 +169,7 @@ jobs:
           sudo modprobe fuse
           sudo chmod 666 /dev/fuse
           sudo chown root:$USER /etc/fuse.conf
-          sudo apt-get install fuse3 libfuse-dev rpm pkg-config
+          sudo apt-get install fuse3 libfuse-dev rpm pkg-config git-annex git-annex-remote-rclone
         if: matrix.os == 'ubuntu-latest'
 
       - name: Install Libraries on macOS
@@ -182,7 +182,8 @@ jobs:
           brew untap --force homebrew/cask
           brew update
           brew install --cask macfuse
-        if: matrix.os == 'macos-11'
+          brew install git-annex git-annex-remote-rclone
+        if: matrix.os == 'macos-latest'
 
       - name: Install Libraries on Windows
         shell: powershell
@@ -211,14 +212,6 @@ jobs:
           make vars
           printf "\n\nSystem environment:\n\n"
           env
-
-      - name: Go module cache
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Build rclone
         shell: bash
@@ -280,21 +273,71 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Get runner parameters
+        id: get-runner-parameters
+        shell: bash
+        run: |
+          echo "year-week=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+          echo "runner-os-version=$ImageOS" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Code quality test
-        uses: golangci/golangci-lint-action@v4
-        with:
-          # Optional: version of golangci-lint to use in form of v1.2 or v1.2.3 or `latest` to use the latest version
-          version: latest
-
-      # Run govulncheck on the latest go version, the one we build binaries with
       - name: Install Go
+        id: setup-go
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.22.0-rc.1'
           check-latest: true
+          cache: false
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: golangci-lint-${{ steps.get-runner-parameters.outputs.runner-os-version }}-go${{ steps.setup-go.outputs.go-version }}-${{ steps.get-runner-parameters.outputs.year-week }}-${{ hashFiles('go.sum') }}
+          restore-keys: golangci-lint-${{ steps.get-runner-parameters.outputs.runner-os-version }}-go${{ steps.setup-go.outputs.go-version }}-${{ steps.get-runner-parameters.outputs.year-week }}-
+
+      - name: Code quality test (Linux)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Code quality test (Windows)
+        uses: golangci/golangci-lint-action@v6
+        env:
+          GOOS: "windows"
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Code quality test (macOS)
+        uses: golangci/golangci-lint-action@v6
+        env:
+          GOOS: "darwin"
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Code quality test (FreeBSD)
+        uses: golangci/golangci-lint-action@v6
+        env:
+          GOOS: "freebsd"
+        with:
+          version: latest
+          skip-cache: true
+
+      - name: Code quality test (OpenBSD)
+        uses: golangci/golangci-lint-action@v6
+        env:
+          GOOS: "openbsd"
+        with:
+          version: latest
+          skip-cache: true
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -319,14 +362,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.22.0-rc.1'
-
-      - name: Go module cache
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Set global environment variables
         shell: bash

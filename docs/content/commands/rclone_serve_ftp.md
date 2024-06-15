@@ -13,7 +13,6 @@ Serve remote:path over FTP.
 
 ## Synopsis
 
-
 Run a basic FTP server to serve a remote over FTP protocol.
 This can be viewed with a FTP client or you can make a remote of
 type FTP to read and write it.
@@ -33,6 +32,7 @@ then using Authentication is advised - see the next section for info.
 By default this will serve files without needing a login.
 
 You can set a single username and password with the --user and --pass flags.
+
 ## VFS - Virtual File System
 
 This command uses the VFS layer. This adapts the cloud storage objects
@@ -466,6 +466,7 @@ before it takes effect.
 
 This can be used to build general purpose proxies to any kind of
 backend that rclone supports.  
+
 
 
 ```

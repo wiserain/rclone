@@ -36,6 +36,7 @@ import (
 	"github.com/rclone/rclone/fs/walk"
 	"github.com/rclone/rclone/lib/atexit"
 	"github.com/rclone/rclone/lib/errcount"
+	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/readers"
 	"golang.org/x/sync/errgroup"
@@ -223,8 +224,10 @@ func logModTimeUpload(dst fs.Object) {
 }
 
 // EqualFn allows replacing Equal() with a custom function during NeedTransfer()
-type EqualFn func(ctx context.Context, src fs.ObjectInfo, dst fs.Object) bool
-type equalFnContextKey struct{}
+type (
+	EqualFn           func(ctx context.Context, src fs.ObjectInfo, dst fs.Object) bool
+	equalFnContextKey struct{}
+)
 
 var equalFnKey = equalFnContextKey{}
 
@@ -444,6 +447,7 @@ func move(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string, src fs.
 	if doMove := fdst.Features().Move; doMove != nil && (SameConfig(src.Fs(), fdst) || (SameRemoteType(src.Fs(), fdst) && (fdst.Features().ServerSideAcrossConfigs || ci.ServerSideAcrossConfigs))) {
 		// Delete destination if it exists and is not the same file as src (could be same file while seemingly different if the remote is case insensitive)
 		if dst != nil {
+			remote = dst.Remote()
 			if !SameObject(src, dst) {
 				err = DeleteFile(ctx, dst)
 				if err != nil {
@@ -451,8 +455,12 @@ func move(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string, src fs.
 				}
 			} else if needsMoveCaseInsensitive(fdst, fdst, remote, src.Remote(), false) {
 				doMove = func(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-					return moveCaseInsensitive(ctx, fdst, fdst, remote, src.Remote(), false, src)
+					return MoveCaseInsensitive(ctx, fdst, fdst, remote, src.Remote(), false, src)
 				}
+			}
+		} else if needsMoveCaseInsensitive(fdst, fdst, remote, src.Remote(), false) {
+			doMove = func(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+				return MoveCaseInsensitive(ctx, fdst, fdst, remote, src.Remote(), false, src)
 			}
 		}
 		// Move dst <- src
@@ -620,6 +628,25 @@ func DeleteFiles(ctx context.Context, toBeDeleted fs.ObjectsChan) error {
 	return DeleteFilesWithBackupDir(ctx, toBeDeleted, nil)
 }
 
+// ReadFile reads the object into memory and accounts it
+func ReadFile(ctx context.Context, o fs.Object) (b []byte, err error) {
+	tr := accounting.Stats(ctx).NewTransfer(o, nil)
+	defer func() {
+		tr.Done(ctx, err)
+	}()
+	in0, err := Open(ctx, o)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open %v: %w", o, err)
+	}
+	in := tr.Account(ctx, in0).WithBuffer() // account and buffer the transfer
+	defer fs.CheckClose(in, &err)           // closes in0 also
+	b, err = io.ReadAll(in)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %v: %w", o, err)
+	}
+	return b, nil
+}
+
 // SameRemoteType returns true if fdst and fsrc are the same type
 func SameRemoteType(fdst, fsrc fs.Info) bool {
 	return fmt.Sprintf("%T", fdst) == fmt.Sprintf("%T", fsrc)
@@ -712,12 +739,17 @@ func Retry(ctx context.Context, o interface{}, maxTries int, fn func() error) (e
 		if err == nil {
 			break
 		}
-		// Retry if err returned a retry error
+		// End if ctx is in error
 		if fserrors.ContextError(ctx, &err) {
 			break
 		}
+		// Retry if err returned a retry error
 		if fserrors.IsRetryError(err) || fserrors.ShouldRetry(err) {
 			fs.Debugf(o, "Received error: %v - low level retry %d/%d", err, tries, maxTries)
+			continue
+		} else if t, ok := pacer.IsRetryAfter(err); ok {
+			fs.Debugf(o, "Sleeping for %v (as indicated by the server) to obey Retry-After error: %v", t, err)
+			time.Sleep(t)
 			continue
 		}
 		break
@@ -1262,15 +1294,32 @@ func Cat(ctx context.Context, f fs.Fs, w io.Writer, offset, count int64, sep []b
 }
 
 // Rcat reads data from the Reader until EOF and uploads it to a file on remote
+//
+// in is closed at the end of the transfer
 func Rcat(ctx context.Context, fdst fs.Fs, dstFileName string, in io.ReadCloser, modTime time.Time, meta fs.Metadata) (dst fs.Object, err error) {
+	return rcatSrc(ctx, fdst, dstFileName, in, modTime, meta, nil)
+}
+
+// rcatSrc reads data from the Reader until EOF and uploads it to a file on remote
+//
+// in is closed at the end of the transfer
+//
+// Pass in fsrc if known or nil if not
+func rcatSrc(ctx context.Context, fdst fs.Fs, dstFileName string, in io.ReadCloser, modTime time.Time, meta fs.Metadata, fsrc fs.Fs) (dst fs.Object, err error) {
+	if SkipDestructive(ctx, dstFileName, "upload from pipe") {
+		// prevents "broken pipe" errors
+		_, err = io.Copy(io.Discard, in)
+		return nil, err
+	}
+
 	ci := fs.GetConfig(ctx)
 	tr := accounting.Stats(ctx).NewTransferRemoteSize(dstFileName, -1, nil, fdst)
 	defer func() {
 		tr.Done(ctx, err)
 	}()
-	in = tr.Account(ctx, in).WithBuffer()
+	var streamIn io.Reader = tr.Account(ctx, in).WithBuffer()
 
-	readCounter := readers.NewCountingReader(in)
+	readCounter := readers.NewCountingReader(streamIn)
 	var trackingIn io.Reader
 	var hasher *hash.MultiHasher
 	var options []fs.OpenOption
@@ -1293,86 +1342,90 @@ func Rcat(ctx context.Context, fdst fs.Fs, dstFileName string, in io.ReadCloser,
 		options = append(options, fs.MetadataOption(ci.MetadataSet))
 	}
 
-	compare := func(dst fs.Object) error {
-		var sums map[hash.Type]string
-		opt := defaultEqualOpt(ctx)
+	// get the sums from the hasher if in use, or nil
+	getSums := func() (sums map[hash.Type]string) {
 		if hasher != nil {
-			// force --checksum on if we have hashes
-			opt.checkSum = true
 			sums = hasher.Sums()
 		}
-		src := object.NewStaticObjectInfo(dstFileName, modTime, int64(readCounter.BytesRead()), false, sums, fdst).WithMetadata(meta)
-		if !equal(ctx, src, dst, opt) {
-			err = fmt.Errorf("corrupted on transfer")
-			err = fs.CountError(err)
-			fs.Errorf(dst, "%v", err)
-			return err
-		}
-		return nil
+		return sums
 	}
 
-	// check if file small enough for direct upload
+	// Read the start of the input and check if it is small enough for direct upload
 	buf := make([]byte, ci.StreamingUploadCutoff)
+	fileIsSmall := false
 	if n, err := io.ReadFull(trackingIn, buf); err == io.EOF || err == io.ErrUnexpectedEOF {
-		fs.Debugf(fdst, "File to upload is small (%d bytes), uploading instead of streaming", n)
-		src := object.NewMemoryObject(dstFileName, modTime, buf[:n]).WithMetadata(meta)
-		return Copy(ctx, fdst, nil, dstFileName, src)
+		fileIsSmall = true
+		buf = buf[:n]
 	}
 
-	// Make a new ReadCloser with the bits we've already read
-	in = &readCloser{
-		Reader: io.MultiReader(bytes.NewReader(buf), trackingIn),
-		Closer: in,
-	}
+	// Read the data we have already read in buf and any further unread
+	streamIn = io.MultiReader(bytes.NewReader(buf), trackingIn)
 
-	fStreamTo := fdst
-	canStream := fdst.Features().PutStream != nil
-	if !canStream {
-		fs.Debugf(fdst, "Target remote doesn't support streaming uploads, creating temporary local FS to spool file")
-		tmpLocalFs, err := fs.TemporaryLocalFs(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temporary local FS to spool file: %w", err)
-		}
-		defer func() {
-			err := Purge(ctx, tmpLocalFs, "")
+	doPutStream := fdst.Features().PutStream
+
+	// Upload the input
+	if fileIsSmall || doPutStream == nil {
+		var rs io.ReadSeeker
+		if fileIsSmall {
+			fs.Debugf(fdst, "File to upload is small (%d bytes), uploading instead of streaming", len(buf))
+			rs = bytes.NewReader(buf)
+		} else {
+			fs.Debugf(fdst, "Target remote doesn't support streaming uploads, creating temporary local FS to spool file")
+			spool, err := os.CreateTemp("", "rclone-spool")
 			if err != nil {
-				fs.Infof(tmpLocalFs, "Failed to cleanup temporary FS: %v", err)
+				return nil, fmt.Errorf("failed to create temporary spool file: %v", err)
 			}
-		}()
-		fStreamTo = tmpLocalFs
-	}
-
-	if SkipDestructive(ctx, dstFileName, "upload from pipe") {
-		// prevents "broken pipe" errors
-		_, err = io.Copy(io.Discard, in)
-		return nil, err
-	}
-
-	objInfo := object.NewStaticObjectInfo(dstFileName, modTime, -1, false, nil, nil).WithMetadata(meta)
-	if dst, err = fStreamTo.Features().PutStream(ctx, in, objInfo, options...); err != nil {
-		return dst, err
-	}
-	if err = compare(dst); err != nil {
-		return dst, err
-	}
-	if !canStream {
-		// copy dst (which is the local object we have just streamed to) to the remote
-		newCtx := ctx
-		if ci.Metadata && len(meta) != 0 {
-			// If we have metadata and we are setting it then use
-			// the --metadataset mechanism to supply it to Copy
-			var newCi *fs.ConfigInfo
-			newCtx, newCi = fs.AddConfig(ctx)
-			if len(newCi.MetadataSet) == 0 {
-				newCi.MetadataSet = meta
-			} else {
-				var newMeta fs.Metadata
-				newMeta.Merge(meta)
-				newMeta.Merge(newCi.MetadataSet) // --metadata-set takes priority
-				newCi.MetadataSet = newMeta
+			fileName := spool.Name()
+			defer func() {
+				err := spool.Close()
+				if err != nil {
+					fs.Errorf(fileName, "Failed to close temporary spool file: %v", err)
+				}
+				err = os.Remove(fileName)
+				if err != nil {
+					fs.Errorf(fileName, "Failed to delete temporary spool file: %v", err)
+				}
+			}()
+			_, err = io.Copy(spool, streamIn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to copy to temporary spool file: %v", err)
 			}
+			rs = spool
 		}
-		return Copy(newCtx, fdst, nil, dstFileName, dst)
+		// Upload with Put with retries - since we have downloaded the file we know the size, and the hashes
+		sums := getSums()
+		size := int64(readCounter.BytesRead())
+		objInfo := object.NewStaticObjectInfo(dstFileName, modTime, size, false, sums, fsrc).WithMetadata(meta)
+		err = Retry(ctx, objInfo, ci.LowLevelRetries, func() error {
+			_, err = rs.Seek(0, io.SeekStart)
+			if err != nil {
+				return fmt.Errorf("failed to rewind temporary spool file: %v", err)
+			}
+			dst, err = fdst.Put(ctx, rs, objInfo, options...)
+			return err
+		})
+	} else {
+		// Upload with PutStream with no retries
+		objInfo := object.NewStaticObjectInfo(dstFileName, modTime, -1, false, nil, fsrc).WithMetadata(meta)
+		dst, err = doPutStream(ctx, streamIn, objInfo, options...)
+	}
+	if err != nil {
+		return dst, err
+	}
+
+	// Check transfer
+	sums := getSums()
+	opt := defaultEqualOpt(ctx)
+	if sums != nil {
+		// force --checksum on if we have hashes
+		opt.checkSum = true
+	}
+	src := object.NewStaticObjectInfo(dstFileName, modTime, int64(readCounter.BytesRead()), false, sums, fdst).WithMetadata(meta)
+	if !equal(ctx, src, dst, opt) {
+		err = fmt.Errorf("corrupted on transfer")
+		err = fs.CountError(err)
+		fs.Errorf(dst, "%v", err)
+		return dst, err
 	}
 	return dst, nil
 }
@@ -1453,9 +1506,7 @@ func Rmdirs(ctx context.Context, f fs.Fs, dir string, leaveRoot bool) error {
 		}
 	}
 
-	var (
-		errCount = errcount.New()
-	)
+	errCount := errcount.New()
 	// Delete all directories at the same level in parallel
 	for level := len(toDelete) - 1; level >= 0; level-- {
 		dirs := toDelete[level]
@@ -1775,7 +1826,6 @@ func copyURLFn(ctx context.Context, dstFileName string, url string, autoFilename
 
 // CopyURL copies the data from the url to (fdst, dstFileName)
 func CopyURL(ctx context.Context, fdst fs.Fs, dstFileName string, url string, autoFilename, dstFileNameFromHeader bool, noClobber bool) (dst fs.Object, err error) {
-
 	err = copyURLFn(ctx, dstFileName, url, autoFilename, dstFileNameFromHeader, func(ctx context.Context, dstFileName string, in io.ReadCloser, size int64, modTime time.Time) (err error) {
 		if noClobber {
 			_, err = fdst.NewObject(ctx, dstFileName)
@@ -1852,16 +1902,13 @@ func needsMoveCaseInsensitive(fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFil
 	return !cp && fdst.Name() == fsrc.Name() && fdst.Features().CaseInsensitive && dstFileName != srcFileName && strings.EqualFold(dstFilePath, srcFilePath)
 }
 
-// Special case for changing case of a file on a case insensitive remote
+// MoveCaseInsensitive handles changing case of a file on a case insensitive remote.
 // This will move the file to a temporary name then
 // move it back to the intended destination. This is required
 // to avoid issues with certain remotes and avoid file deletion.
 // returns nil, nil if !needsMoveCaseInsensitive.
 // this does not account a transfer -- the caller should do that if desired.
-func moveCaseInsensitive(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFileName string, cp bool, srcObj fs.Object) (newDst fs.Object, err error) {
-	if !needsMoveCaseInsensitive(fdst, fsrc, dstFileName, srcFileName, cp) {
-		return nil, nil
-	}
+func MoveCaseInsensitive(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFileName string, cp bool, srcObj fs.Object) (newDst fs.Object, err error) {
 	logger, _ := GetLogger(ctx)
 
 	// Choose operations
@@ -1947,7 +1994,7 @@ func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName str
 		defer func() {
 			tr.Done(ctx, err)
 		}()
-		_, err = moveCaseInsensitive(ctx, fdst, fsrc, dstFileName, srcFileName, cp, srcObj)
+		_, err = MoveCaseInsensitive(ctx, fdst, fsrc, dstFileName, srcFileName, cp, srcObj)
 		return err
 	}
 
@@ -2628,11 +2675,15 @@ func SetDirModTime(ctx context.Context, f fs.Fs, dst fs.Directory, dir string, m
 	if dst != nil {
 		if do, ok := dst.(fs.SetModTimer); ok {
 			err := do.SetModTime(ctx, modTime)
-			if err != nil {
+			if errors.Is(err, fs.ErrorNotImplemented) {
+				// Fall through and run the code below if not implemented
+				// This can happen for fs.DirWrapper instances
+			} else if err != nil {
 				return dst, err
+			} else {
+				fs.Infof(logName, "Set directory modification time (using SetModTime)")
+				return dst, nil
 			}
-			fs.Infof(logName, "Set directory modification time (using SetModTime)")
-			return dst, nil
 		}
 	}
 

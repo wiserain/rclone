@@ -46,7 +46,7 @@ Type of storage to configure.
 Choose a number from below, or type in your own value
 [snip]
 XX / Proton Drive
-   \ "Proton Drive"
+   \ "protondrive"
 [snip]
 Storage> protondrive
 User name
@@ -333,7 +333,7 @@ Properties:
 
 #### --protondrive-description
 
-Description of the remote
+Description of the remote.
 
 Properties:
 

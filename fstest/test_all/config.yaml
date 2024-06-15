@@ -7,6 +7,7 @@ tests:
    fastlist: true
  - path: fs/sync
    fastlist: true
+ - path: cmd/bisync
  - path: vfs
  - path: cmd/serve/restic
    localonly: true
@@ -278,6 +279,9 @@ backends:
    remote:   "TestSwiftAIO:"
    fastlist: true
  - backend:  "swift"
+   remote:   "TestSwiftAIOsegments:"
+   fastlist: true
+ - backend:  "swift"
    remote:   "TestSwift:"
    fastlist: true
  # - backend:  "swift"
@@ -309,14 +313,15 @@ backends:
    listretries: 5
    tests:
      - backend
- - backend:  "qingstor"
-   remote:   "TestQingStor:"
-   fastlist: false
-   oneonly:  true
-   cleanup:  true
-   ignore:
-     # This test fails because of a broken bucket in the account!
-     - TestIntegration/FsMkdir/FsPutFiles/FromRoot/ListR
+ # Disabled due to account cancellation - no longer available to me
+ # - backend:  "qingstor"
+ #   remote:   "TestQingStor:"
+ #   fastlist: false
+ #   oneonly:  true
+ #   cleanup:  true
+ #   ignore:
+ #     # This test fails because of a broken bucket in the account!
+ #     - TestIntegration/FsMkdir/FsPutFiles/FromRoot/ListR
  - backend:  "azureblob"
    remote:   "TestAzureBlob:"
    fastlist: true
@@ -346,6 +351,9 @@ backends:
      - TestSyncWithTrackRenames
     # integration
      - TestIntegration/FsMkdir/FsPutFiles/ObjectMimeType
+    # This test fails with message
+    # "share_status_prohibited" (9): Sorry, the sharing service is under maintenance in the current region.
+     - TestIntegration/FsMkdir/FsPutFiles/PublicLink
  - backend:  "webdav"
    remote:   "TestWebdavNextcloud:"
    ignore:
@@ -392,6 +400,7 @@ backends:
      - TestRWFileHandleWriteNoWrite
      - TestCaseInsensitiveMoveFile
      - TestFixCase
+     - TestListDirSorted        # Can't upload files starting with . - FIXME fix with encoding
  - backend:  "premiumizeme"
    remote:   "TestPremiumizeMe:"
    fastlist: false
@@ -464,4 +473,7 @@ backends:
      - TestIntegration/FsMkdir/FsPutFiles/FsPutStream/0
  - backend:  "quatrix"
    remote:   "TestQuatrix:"
+   fastlist: false
+ - backend:  "ulozto"
+   remote:   "TestUlozto:"
    fastlist: false

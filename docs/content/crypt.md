@@ -182,7 +182,7 @@ A long passphrase is recommended, or `rclone config` can generate a
 random one.
 
 The obscured password is created using AES-CTR with a static key. The
-salt is stored verbatim at the beginning of the obscured password. This
+IV (nonce) is stored verbatim at the beginning of the obscured password. This
 static key is shared between all versions of rclone.
 
 If you reconfigure rclone with the same passwords/passphrases
@@ -370,7 +370,7 @@ Obfuscation cannot be relied upon for strong protection.
 
 Cloud storage systems have limits on file name length and
 total path length which rclone is more likely to breach using
-"Standard" file name encryption.  Where file names are less than 156
+"Standard" file name encryption.  Where file names are 143 or fewer
 characters in length issues should not be encountered, irrespective of
 cloud storage provider.
 
@@ -634,7 +634,7 @@ Properties:
 
 #### --crypt-description
 
-Description of the remote
+Description of the remote.
 
 Properties:
 

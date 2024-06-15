@@ -11,7 +11,9 @@ import (
 
 	"github.com/rclone/rclone/backend/onedrive/api"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/lib/dircache"
+	"github.com/rclone/rclone/lib/errcount"
 	"golang.org/x/exp/slices" // replace with slices after go1.21 is the minimum version
 )
 
@@ -131,6 +133,7 @@ func (rwChoices) Choices() []fs.BitsChoicesInfo {
 		{Bit: uint64(rwOff), Name: "off"},
 		{Bit: uint64(rwRead), Name: "read"},
 		{Bit: uint64(rwWrite), Name: "write"},
+		{Bit: uint64(rwFailOK), Name: "failok"},
 	}
 }
 
@@ -140,6 +143,7 @@ type rwChoice = fs.Bits[rwChoices]
 const (
 	rwRead rwChoice = 1 << iota
 	rwWrite
+	rwFailOK
 	rwOff rwChoice = 0
 )
 
@@ -156,6 +160,9 @@ var rwExamples = fs.OptionExamples{{
 }, {
 	Value: (rwRead | rwWrite).String(),
 	Help:  "Read and Write the value.",
+}, {
+	Value: rwFailOK.String(),
+	Help:  "If writing fails log errors only, don't fail the transfer",
 }}
 
 // Metadata describes metadata properties shared by both Objects and Directories
@@ -361,6 +368,15 @@ func (m *Metadata) WritePermissions(ctx context.Context) (err error) {
 	if m.normalizedID == "" {
 		return errors.New("internal error: normalizedID is missing")
 	}
+	if m.fs.opt.MetadataPermissions.IsSet(rwFailOK) {
+		// If failok is set, allow the permissions setting to fail and only log an ERROR
+		defer func() {
+			if err != nil {
+				fs.Errorf(m.fs, "Ignoring error as failok is set: %v", err)
+				err = nil
+			}
+		}()
+	}
 
 	// compare current to queued and sort into add/update/remove queues
 	add, update, remove := m.sortPermissions()
@@ -394,7 +410,7 @@ func (m *Metadata) sortPermissions() (add, update, remove []*api.PermissionsType
 		if n.ID != "" {
 			// sanity check: ensure there's a matching "old" id with a non-matching role
 			if !slices.ContainsFunc(old, func(o *api.PermissionsType) bool {
-				return o.ID == n.ID && slices.Compare(o.Roles, n.Roles) != 0 && len(o.Roles) > 0 && len(n.Roles) > 0
+				return o.ID == n.ID && slices.Compare(o.Roles, n.Roles) != 0 && len(o.Roles) > 0 && len(n.Roles) > 0 && !slices.Contains(o.Roles, api.OwnerRole)
 			}) {
 				fs.Debugf(m.remote, "skipping update for invalid roles: %v (perm ID: %v)", n.Roles, n.ID)
 				continue
@@ -416,6 +432,10 @@ func (m *Metadata) sortPermissions() (add, update, remove []*api.PermissionsType
 		}
 	}
 	for _, o := range old {
+		if slices.Contains(o.Roles, api.OwnerRole) {
+			fs.Debugf(m.remote, "skipping remove permission -- can't remove 'owner' role")
+			continue
+		}
 		newHasOld := slices.ContainsFunc(new, func(n *api.PermissionsType) bool {
 			if n == nil || n.ID == "" {
 				return false // can't remove perms without an ID
@@ -432,17 +452,21 @@ func (m *Metadata) sortPermissions() (add, update, remove []*api.PermissionsType
 
 // processPermissions executes the add, update, and remove queues for writing permissions
 func (m *Metadata) processPermissions(ctx context.Context, add, update, remove []*api.PermissionsType) (newPermissions []*api.PermissionsType, err error) {
+	errs := errcount.New()
 	for _, p := range remove { // remove (need to do these first because of remove + add workaround)
 		_, err := m.removePermission(ctx, p)
 		if err != nil {
-			return newPermissions, err
+			fs.Errorf(m.remote, "Failed to remove permission: %v", err)
+			errs.Add(err)
 		}
 	}
 
 	for _, p := range add { // add
 		newPs, _, err := m.addPermission(ctx, p)
 		if err != nil {
-			return newPermissions, err
+			fs.Errorf(m.remote, "Failed to add permission: %v", err)
+			errs.Add(err)
+			continue
 		}
 		newPermissions = append(newPermissions, newPs...)
 	}
@@ -450,22 +474,28 @@ func (m *Metadata) processPermissions(ctx context.Context, add, update, remove [
 	for _, p := range update { // update
 		newP, _, err := m.updatePermission(ctx, p)
 		if err != nil {
-			return newPermissions, err
+			fs.Errorf(m.remote, "Failed to update permission: %v", err)
+			errs.Add(err)
+			continue
 		}
 		newPermissions = append(newPermissions, newP)
 	}
 
+	err = errs.Err("failed to set permissions")
+	if err != nil {
+		err = fserrors.NoRetryError(err)
+	}
 	return newPermissions, err
 }
 
 // fillRecipients looks for recipients to add from the permission passed in.
-// It looks for an email address in identity.User.ID and DisplayName, otherwise it uses the identity.User.ID as r.ObjectID.
+// It looks for an email address in identity.User.Email, ID, and DisplayName, otherwise it uses the identity.User.ID as r.ObjectID.
 // It considers both "GrantedTo" and "GrantedToIdentities".
-func fillRecipients(p *api.PermissionsType) (recipients []api.DriveRecipient) {
+func fillRecipients(p *api.PermissionsType, driveType string) (recipients []api.DriveRecipient) {
 	if p == nil {
 		return recipients
 	}
-	ids := make(map[string]struct{}, len(p.GrantedToIdentities)+1)
+	ids := make(map[string]struct{}, len(p.GetGrantedToIdentities(driveType))+1)
 	isUnique := func(s string) bool {
 		_, ok := ids[s]
 		return !ok && s != ""
@@ -475,7 +505,10 @@ func fillRecipients(p *api.PermissionsType) (recipients []api.DriveRecipient) {
 		r := api.DriveRecipient{}
 
 		id := ""
-		if strings.ContainsRune(identity.User.ID, '@') {
+		if strings.ContainsRune(identity.User.Email, '@') {
+			id = identity.User.Email
+			r.Email = id
+		} else if strings.ContainsRune(identity.User.ID, '@') {
 			id = identity.User.ID
 			r.Email = id
 		} else if strings.ContainsRune(identity.User.DisplayName, '@') {
@@ -491,12 +524,31 @@ func fillRecipients(p *api.PermissionsType) (recipients []api.DriveRecipient) {
 		ids[id] = struct{}{}
 		recipients = append(recipients, r)
 	}
-	for _, identity := range p.GrantedToIdentities {
-		addRecipient(identity)
+
+	forIdentitySet := func(iSet *api.IdentitySet) {
+		if iSet == nil {
+			return
+		}
+		iS := *iSet
+		forIdentity := func(i api.Identity) {
+			if i != (api.Identity{}) {
+				iS.User = i
+				addRecipient(&iS)
+			}
+		}
+		forIdentity(iS.User)
+		forIdentity(iS.SiteUser)
+		forIdentity(iS.Group)
+		forIdentity(iS.SiteGroup)
+		forIdentity(iS.Application)
+		forIdentity(iS.Device)
 	}
-	if p.GrantedTo != nil && p.GrantedTo.User != (api.Identity{}) {
-		addRecipient(p.GrantedTo)
+
+	for _, identitySet := range p.GetGrantedToIdentities(driveType) {
+		forIdentitySet(identitySet)
 	}
+	forIdentitySet(p.GetGrantedTo(driveType))
+
 	return recipients
 }
 
@@ -506,7 +558,7 @@ func (m *Metadata) addPermission(ctx context.Context, p *api.PermissionsType) (n
 	opts := m.fs.newOptsCall(m.normalizedID, "POST", "/invite")
 
 	req := &api.AddPermissionsRequest{
-		Recipients:    fillRecipients(p),
+		Recipients:    fillRecipients(p, m.fs.driveType),
 		RequireSignIn: m.fs.driveType != driveTypePersonal, // personal and business have conflicting requirements
 		Roles:         p.Roles,
 	}
@@ -613,7 +665,7 @@ func (o *Object) tryGetBtime(modTime time.Time) time.Time {
 }
 
 // adds metadata (except permissions) if --metadata is in use
-func (o *Object) fetchMetadataForCreate(ctx context.Context, src fs.ObjectInfo, options []fs.OpenOption, modTime time.Time) (createRequest api.CreateUploadRequest, err error) {
+func (o *Object) fetchMetadataForCreate(ctx context.Context, src fs.ObjectInfo, options []fs.OpenOption, modTime time.Time) (createRequest api.CreateUploadRequest, metadata fs.Metadata, err error) {
 	createRequest = api.CreateUploadRequest{ // we set mtime no matter what
 		Item: api.Metadata{
 			FileSystemInfo: &api.FileSystemInfoFacet{
@@ -625,10 +677,10 @@ func (o *Object) fetchMetadataForCreate(ctx context.Context, src fs.ObjectInfo, 
 
 	meta, err := fs.GetMetadataOptions(ctx, o.fs, src, options)
 	if err != nil {
-		return createRequest, fmt.Errorf("failed to read metadata from source object: %w", err)
+		return createRequest, nil, fmt.Errorf("failed to read metadata from source object: %w", err)
 	}
 	if meta == nil {
-		return createRequest, nil // no metadata or --metadata not in use, so just return mtime
+		return createRequest, nil, nil // no metadata or --metadata not in use, so just return mtime
 	}
 	if o.meta == nil {
 		o.meta = o.fs.newMetadata(o.Remote())
@@ -636,13 +688,13 @@ func (o *Object) fetchMetadataForCreate(ctx context.Context, src fs.ObjectInfo, 
 	o.meta.mtime = modTime
 	numSet, err := o.meta.Set(ctx, meta)
 	if err != nil {
-		return createRequest, err
+		return createRequest, meta, err
 	}
 	if numSet == 0 {
-		return createRequest, nil
+		return createRequest, meta, nil
 	}
 	createRequest.Item = o.meta.toAPIMetadata()
-	return createRequest, nil
+	return createRequest, meta, nil
 }
 
 // Fetch metadata and update updateInfo if --metadata is in use
@@ -654,27 +706,6 @@ func (f *Fs) fetchAndUpdateMetadata(ctx context.Context, src fs.ObjectInfo, opti
 	}
 	if meta == nil {
 		return updateInfo.setModTime(ctx, src.ModTime(ctx)) // no metadata or --metadata not in use, so just set modtime
-	}
-	if updateInfo.meta == nil {
-		updateInfo.meta = f.newMetadata(updateInfo.Remote())
-	}
-	newInfo, err := updateInfo.updateMetadata(ctx, meta)
-	if newInfo == nil {
-		return info, err
-	}
-	return newInfo, err
-}
-
-// Fetch and update permissions if --metadata is in use
-// This is similar to fetchAndUpdateMetadata, except it does NOT set modtime or other metadata if there are no permissions to set.
-// This is intended for cases where metadata may already have been set during upload and an extra step is needed only for permissions.
-func (f *Fs) fetchAndUpdatePermissions(ctx context.Context, src fs.ObjectInfo, options []fs.OpenOption, updateInfo *Object) (info *api.Item, err error) {
-	meta, err := fs.GetMetadataOptions(ctx, f, src, options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata from source object: %w", err)
-	}
-	if meta == nil || !f.needsUpdatePermissions(meta) {
-		return nil, nil // no metadata, --metadata not in use, or wrong flags
 	}
 	if updateInfo.meta == nil {
 		updateInfo.meta = f.newMetadata(updateInfo.Remote())
