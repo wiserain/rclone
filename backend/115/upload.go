@@ -287,22 +287,21 @@ func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSp
 		return
 	}
 
-	hash := sha1.New()
+	var reader io.Reader
 	if ra, ok := in.(io.ReaderAt); ok {
-		reader := io.NewSectionReader(ra, start, end-start+1)
-		if _, err = io.Copy(hash, reader); err == nil {
-			sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
-		}
-	} else {
-		srcObj := fs.UnWrapObjectInfo(src)
-		rc, err := srcObj.Open(ctx, &fs.RangeOption{Start: start, End: end})
+		reader = io.NewSectionReader(ra, start, end-start+1)
+	} else if srcObj := fs.UnWrapObjectInfo(src); srcObj != nil {
+		reader, err = srcObj.Open(ctx, &fs.RangeOption{Start: start, End: end})
 		if err != nil {
 			return "", fmt.Errorf("failed to open source: %w", err)
 		}
-		defer fs.CheckClose(rc, &err)
-		if _, err = io.Copy(hash, rc); err == nil {
-			sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
-		}
+	} else {
+		return "", fmt.Errorf("failed to get reader from source %s", src)
+	}
+
+	hash := sha1.New()
+	if _, err = io.Copy(hash, reader); err == nil {
+		sha1sum = strings.ToUpper(hex.EncodeToString(hash.Sum(nil)))
 	}
 	return
 }
