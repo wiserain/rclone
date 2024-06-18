@@ -285,9 +285,6 @@ func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.Dow
 	}
 
 	for _, downInfo := range downData {
-		if downInfo.FileSize == 0 {
-			return nil, fs.ErrorObjectNotFound
-		}
 		durl = &downInfo.URL
 		durl.Cookies = cookies
 		durl.CreateTime = time.Now()

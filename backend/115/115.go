@@ -638,9 +638,6 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	if src.Size() == 0 {
-		return nil, fs.ErrorCantUploadEmptyFiles
-	}
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
@@ -1196,7 +1193,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, errors.New("can't download: no id")
 	}
 	if o.size == 0 {
-		// this shouldn't happen as no zero-byte files allowed by api but just in case
+		// no need to make a transaction for getting download url
 		return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 	}
 	if err = o.setDownloadURL(ctx); err != nil {
