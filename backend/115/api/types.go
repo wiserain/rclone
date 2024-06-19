@@ -335,6 +335,16 @@ type OSSToken struct {
 	StatusCode      string    `json:"StatusCode"`
 }
 
+func (t *OSSToken) TimeToExpiry() time.Duration {
+	if t == nil {
+		return 0
+	}
+	if t.Expiration.IsZero() {
+		return 3e9 * time.Second // ~95 years
+	}
+	return time.Until(t.Expiration) - 10*time.Minute
+}
+
 // ------------------------------------------------------------
 
 type NewURL struct {

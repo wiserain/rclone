@@ -145,17 +145,21 @@ var warnStreamUpload sync.Once
 
 // state of ChunkWriter
 type ossChunkWriter struct {
-	chunkSize        int64
-	size             int64
-	f                *Fs
-	o                *Object
-	in               io.Reader
-	completedPartsMu sync.Mutex
-	completedParts   []oss.UploadPart
-	bucket           *oss.Bucket
-	bucketMu         sync.Mutex
-	callback         []oss.Option
-	imur             oss.InitiateMultipartUploadResult
+	chunkSize     int64
+	size          int64
+	f             *Fs
+	o             *Object
+	in            io.Reader
+	mu            sync.Mutex
+	uploadedParts []oss.UploadPart
+	bucket        *oss.Bucket
+	callback      []oss.Option
+	imur          oss.InitiateMultipartUploadResult
+	// token
+	token       *api.OSSToken
+	done        chan any
+	shutdown    sync.Once
+	expiryTimer *time.Timer // signals whenever the token expires
 }
 
 func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInfo, ui *api.UploadInitInfo, in io.Reader, options ...fs.OpenOption) (w *ossChunkWriter, err error) {
@@ -196,7 +200,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		in:        in,
 	}
 
-	w.bucket, w.callback, err = f.newOSSBucket(ctx, ui)
+	w.bucket, w.callback, w.token, err = f.newOSSBucket(ctx, ui)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new OSS bucket: %w", err)
 	}
@@ -208,6 +212,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 	if err != nil {
 		return nil, fmt.Errorf("create multipart upload failed: %w", err)
 	}
+	w.startRenew()
 	fs.Debugf(w.o, "multipart upload: %q initiated", w.imur.UploadID)
 	return
 }
@@ -230,12 +235,8 @@ func (w *ossChunkWriter) shouldRetry(ctx context.Context, err error) (bool, erro
 
 			// oss: service returned error: StatusCode=403, ErrorCode=SecurityTokenExpired,
 			// ErrorMessage="The security token you provided has expired."
-			w.bucketMu.Lock()
-			defer w.bucketMu.Unlock()
-			if client, bktErr := w.f.newOSSClient(ctx); bktErr == nil {
-				w.bucket.Client = *client
-				return true, err
-			}
+
+			// These errors cannot be handled once token is expired. Should update token proactively.
 			return false, fserrors.FatalError(err)
 		}
 	}
@@ -244,9 +245,9 @@ func (w *ossChunkWriter) shouldRetry(ctx context.Context, err error) (bool, erro
 
 // add a part number and etag to the completed parts
 func (w *ossChunkWriter) addCompletedPart(part oss.UploadPart) {
-	w.completedPartsMu.Lock()
-	defer w.completedPartsMu.Unlock()
-	w.completedParts = append(w.completedParts, part)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.uploadedParts = append(w.uploadedParts, part)
 }
 
 // WriteChunk will write chunk number with reader bytes, where chunk number >= 0
@@ -299,6 +300,7 @@ func (w *ossChunkWriter) Abort(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to abort multipart upload %q: %w", w.imur.UploadID, err)
 	}
+	w.shutdownRenew()
 	fs.Debugf(w.o, "multipart upload: %q aborted", w.imur.UploadID)
 	return
 }
@@ -307,12 +309,83 @@ func (w *ossChunkWriter) Abort(ctx context.Context) (err error) {
 func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 	// Finalise the upload session
 	err = w.f.pacer.Call(func() (bool, error) {
-		_, err := w.bucket.CompleteMultipartUpload(w.imur, w.completedParts, w.callback...)
+		_, err := w.bucket.CompleteMultipartUpload(w.imur, w.uploadedParts, w.callback...)
 		return w.shouldRetry(ctx, err)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
+	w.shutdownRenew()
 	fs.Debugf(w.o, "multipart upload: %q finished", w.imur.UploadID)
-	return err
+	return
+}
+
+// ------------------------------------------------------------
+
+// OnExpiry returns a channel which has the time written to it when
+// the token expires.  Note that there is only one channel so if
+// attaching multiple go routines it will only signal to one of them.
+func (w *ossChunkWriter) OnExpiry() <-chan time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.expiryTimer == nil {
+		w.expiryTimer = time.NewTimer(w.token.TimeToExpiry())
+	}
+	return w.expiryTimer.C
+}
+
+func (w *ossChunkWriter) renewToken(ctx context.Context) error {
+	token, err := w.f.getOSSToken(ctx)
+	if err != nil {
+		fs.Errorf(w.o, "failed to update OSS token: %v", err)
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bucket.Client.Config.SecurityToken = token.SecurityToken
+	w.bucket.Client.Config.AccessKeyID = token.AccessKeyID
+	w.bucket.Client.Config.AccessKeySecret = token.AccessKeySecret
+	w.token = token
+	// Bump on the expiry timer if it is set
+	if w.expiryTimer != nil {
+		w.expiryTimer.Reset(w.token.TimeToExpiry())
+	}
+	return nil
+}
+
+func (w *ossChunkWriter) renewOnExpiry() {
+	expiry := w.OnExpiry()
+	for {
+		select {
+		case <-expiry:
+		case <-w.done:
+			return
+		}
+		fs.Debugf(w.o, "multipart upload: refreshing token...")
+		// Do a transaction
+		err := w.renewToken(context.Background())
+		if err == nil {
+			fs.Debugf(w.o, "multipart upload: token refresh successful")
+		} else {
+			fs.Errorf(w.o, "multipart upload: token refresh failed: %v", err)
+		}
+	}
+}
+
+// startRenew starts the token renewer
+func (w *ossChunkWriter) startRenew() {
+	w.done = make(chan any)
+	go w.renewOnExpiry()
+}
+
+// shutdownRenew stops the timer and no more renewal will take place.
+func (w *ossChunkWriter) shutdownRenew() {
+	if w == nil {
+		return
+	}
+	// closing a channel can only be done once
+	w.shutdown.Do(func() {
+		w.expiryTimer.Stop()
+		close(w.done)
+	})
 }

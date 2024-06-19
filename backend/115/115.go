@@ -1193,7 +1193,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, errors.New("can't download: no id")
 	}
 	if o.size == 0 {
-		// no need to make a transaction for getting download url
+		// no need to waste a transaction for getting download url
 		return io.NopCloser(bytes.NewBuffer([]byte(nil))), nil
 	}
 	if err = o.setDownloadURL(ctx); err != nil {

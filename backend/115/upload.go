@@ -254,29 +254,26 @@ func ossOpts(ossOptions []oss.Option, options ...fs.OpenOption) []oss.Option {
 	return opts
 }
 
-func (f *Fs) newOSSClient(ctx context.Context) (client *oss.Client, err error) {
-	token, err := f.getOSSToken(ctx)
+func (f *Fs) newOSSBucket(ctx context.Context, ui *api.UploadInitInfo) (bucket *oss.Bucket, callback []oss.Option, token *api.OSSToken, err error) {
+	token, err = f.getOSSToken(ctx)
 	if err != nil {
 		err = fmt.Errorf("failed to get OSS token: %w", err)
 		return
 	}
-	cliOpts := []oss.ClientOption{
+	client, err := oss.New(OSSEndpoint, token.AccessKeyID, token.AccessKeySecret, []oss.ClientOption{
 		oss.HTTPClient(f.client),
 		oss.SecurityToken(token.SecurityToken),
 		oss.UserAgent(OSSUserAgent),
-	}
-	return oss.New(OSSEndpoint, token.AccessKeyID, token.AccessKeySecret, cliOpts...)
-}
-
-func (f *Fs) newOSSBucket(ctx context.Context, ui *api.UploadInitInfo) (bucket *oss.Bucket, callback []oss.Option, err error) {
-	client, err := f.newOSSClient(ctx)
+	}...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create a new OSS client: %w", err)
+		err = fmt.Errorf("failed to create a new OSS client: %w", err)
+		return
 	}
-	bucket, err = client.Bucket(ui.Bucket)
-	callback = []oss.Option{
-		oss.Callback(base64.StdEncoding.EncodeToString([]byte(ui.Callback.Callback))),
-		oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))),
+	if bucket, err = client.Bucket(ui.Bucket); err == nil {
+		callback = []oss.Option{
+			oss.Callback(base64.StdEncoding.EncodeToString([]byte(ui.Callback.Callback))),
+			oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))),
+		}
 	}
 	return
 }
@@ -388,7 +385,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	}
 
 	// upload singlepart
-	bucket, callback, err := f.newOSSBucket(ctx, ui)
+	bucket, callback, _, err := f.newOSSBucket(ctx, ui)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new OSS bucket: %w", err)
 	}
