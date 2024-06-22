@@ -511,7 +511,7 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
-	// parse object id from path remote:{ID}
+	// mod - parse object id from path remote:{ID}
 	var srcFile *api.File
 	if rootID, _ := parseRootID(path); len(rootID) > 6 {
 		f.opt.RootFolderID = rootID
