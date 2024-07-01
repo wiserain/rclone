@@ -22,6 +22,7 @@ import (
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/backend/115/cipher"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -353,6 +354,12 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		case 2:
 			// ui gives valid pickcode in this case but not available when listing
 			fs.Debugf(o, "Upload finished early. No outgoing traffic will occur!")
+			if acc, ok := in.(*accounting.Account); ok && acc != nil {
+				// if `in io.Reader` is still in type of `*accounting.Account` (meaning that it is unused)
+				// it is considered as a server side copy as no incoming/outgoing traffic occur at all
+				acc.ServerSideTransferStart()
+				acc.ServerSideCopyEnd(size)
+			}
 			return o, nil
 		case 7:
 			signKey = ui.SignKey
