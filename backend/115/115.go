@@ -1187,7 +1187,31 @@ func (o *Object) Storable() bool {
 	return true
 }
 
-// Open opens the file for read.  Call Close() on the returned io.ReadCloser
+// open a url for reading
+func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", o.durl.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Cookie", o.durl.Cookie())
+	fs.FixRangeOption(options, o.size)
+	fs.OpenOptionAddHTTPHeaders(req.Header, options)
+	if o.size == 0 {
+		// Don't supply range requests for 0 length objects as they always fail
+		delete(req.Header, "Range")
+	}
+	var res *http.Response
+	err = o.fs.pacer.Call(func() (bool, error) {
+		res, err = o.fs.client.Do(req)
+		return shouldRetry(ctx, res, nil, err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open file failed: %w", err)
+	}
+	return res.Body, nil
+}
+
+// Open opens the file for read. Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
 	if o.id == "" {
 		return nil, errors.New("can't download: no id")
@@ -1199,23 +1223,10 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	if err = o.setDownloadURL(ctx); err != nil {
 		return nil, fmt.Errorf("can't download: %w", err)
 	}
-	fs.FixRangeOption(options, o.size)
-	opts := rest.Opts{
-		Method:       "GET",
-		RootURL:      o.durl.URL,
-		Options:      options,
-		ExtraHeaders: map[string]string{"Cookie": o.durl.Cookie()},
+	if o.durl.URL == "" {
+		return nil, errors.New("can't download: no url")
 	}
-	var resp *http.Response
-	err = o.fs.pacer.Call(func() (bool, error) {
-		resp, err = o.fs.srv.Call(ctx, &opts)
-		return shouldRetry(ctx, resp, nil, err)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.Body, err
+	return o.open(ctx, options...)
 }
 
 // Remove this object
