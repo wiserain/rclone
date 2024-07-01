@@ -23,6 +23,7 @@ import (
 	"github.com/rclone/rclone/backend/115/cipher"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -326,6 +327,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	// Calculate sha1sum; grabbed from package jottacloud
 	hashStr, err := src.Hash(ctx, hash.SHA1)
 	if err != nil || hashStr == "" {
+		if f.opt.UploadHashOnly {
+			return nil, fserrors.NoRetryError(errors.New("skipping as no SHA1 from src"))
+		}
 		fs.Debugf(o, "Buffering to calculate SHA1...")
 		var cleanup func()
 		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(f.opt.HashMemoryThreshold))

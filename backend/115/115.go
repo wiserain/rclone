@@ -99,6 +99,12 @@ Fill in for rclone to use a non root folder as its starting point.
 			Advanced:  true,
 			Sensitive: true,
 		}, {
+			Name:     "upload_hash_only",
+			Default:  false,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help:     `Do not upload files with no SHA1 hash from source`,
+		}, {
 			Name:     "hash_memory_limit",
 			Help:     "Files bigger than this will be cached on disk to calculate hash if required.",
 			Default:  fs.SizeSuffix(10 * 1024 * 1024),
@@ -187,6 +193,7 @@ type Options struct {
 	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
+	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
 	MaxUploadParts      int                  `config:"max_upload_parts"`
