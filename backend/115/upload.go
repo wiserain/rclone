@@ -22,7 +22,6 @@ import (
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/backend/115/cipher"
 	"github.com/rclone/rclone/fs"
-	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -323,16 +322,11 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		return nil, err
 	}
 
-	var wrap accounting.WrapFn
-	var cleanup func()
-
 	// Calculate sha1sum; grabbed from package jottacloud
 	hashStr, err := src.Hash(ctx, hash.SHA1)
 	if err != nil || hashStr == "" {
 		fs.Debugf(o, "Buffering to calculate SHA1...")
-		// unwrap the accounting from the input, we use wrap to put it
-		// back on after the buffering
-		in, wrap = accounting.UnWrap(in)
+		var cleanup func()
 		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(f.opt.HashMemoryThreshold))
 		defer cleanup()
 		if err != nil {
@@ -369,11 +363,6 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		default:
 			return nil, fmt.Errorf("unexpected status: %#v", ui)
 		}
-	}
-
-	// Wrap the accounting back onto the stream
-	if wrap != nil {
-		in = wrap(in)
 	}
 
 	if size < 0 || size >= int64(o.fs.opt.UploadCutoff) {
