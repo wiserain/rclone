@@ -99,6 +99,11 @@ Fill in for rclone to use a non root folder as its starting point.
 			Advanced:  true,
 			Sensitive: true,
 		}, {
+			Name:     "list_chunk",
+			Default:  115,
+			Help:     "Size of listing chunk.",
+			Advanced: true,
+		}, {
 			Name:     "upload_hash_only",
 			Default:  false,
 			Advanced: true,
@@ -192,6 +197,7 @@ type Options struct {
 	UserAgent           string               `config:"user_agent"`
 	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
+	ListChunk           int                  `config:"list_chunk"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
@@ -708,7 +714,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 			fs.Infof(srcDir, "listing for merging %q", item.Name)
 			IDs = append(IDs, item.ID())
 			// API doesn't allow to move a large number of objects at once, so doing it in chunked
-			if len(IDs) >= ListLimit {
+			if len(IDs) >= f.opt.ListChunk {
 				if err = f.moveFiles(ctx, IDs, dstDir.ID()); err != nil {
 					return true
 				}
@@ -731,7 +737,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 		fs.Infof(srcDir, "removing empty directory")
 		IDs = append(IDs, srcDir.ID())
 		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
-		if len(IDs) >= ListLimit {
+		if len(IDs) >= f.opt.ListChunk {
 			if err = f.deleteFiles(ctx, IDs); err != nil {
 				return err
 			}

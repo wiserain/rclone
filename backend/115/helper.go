@@ -16,10 +16,6 @@ import (
 	"github.com/rclone/rclone/lib/rest"
 )
 
-const (
-	ListLimit = 100
-)
-
 // list the objects into the function supplied
 //
 // If directories is set it only sends directories
@@ -39,7 +35,7 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	params.Set("o", "user_ptime") // order by time or "file_type", "file_size", "file_name"
 	params.Set("asc", "0")        // ascending order? "0" or "1"
 	params.Set("show_dir", "1")   // "0" or "1"
-	params.Set("limit", strconv.Itoa(ListLimit))
+	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
 	params.Set("snap", "0")
 	params.Set("record_open_time", "1")
 	params.Set("count_folders", "1")
@@ -78,7 +74,7 @@ OUTER:
 				break OUTER
 			}
 		}
-		offset = info.Offset + ListLimit
+		offset = info.Offset + f.opt.ListChunk
 		if offset >= info.Count {
 			break
 		}
