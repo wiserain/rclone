@@ -35,9 +35,9 @@ const (
 	appVer           = "2.0.3.6"
 	defaultUserAgent = "Mozilla/5.0 115Desktop/" + appVer
 
-	minSleep      = 150 * time.Millisecond // 6.67 transactions per second
-	maxSleep      = 2 * time.Second
-	decayConstant = 2 // bigger for slower decay, exponential
+	defaultMinSleep = fs.Duration(150 * time.Millisecond) // 6.67 transactions per second
+	maxSleep        = 2 * time.Second
+	decayConstant   = 2 // bigger for slower decay, exponential
 
 	maxUploadSize       = 123480309760                   // 115 GiB from https://proapi.115.com/app/uploadinfo
 	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
@@ -104,6 +104,11 @@ Fill in for rclone to use a non root folder as its starting point.
 			Help:     "Size of listing chunk.",
 			Advanced: true,
 		}, {
+			Name:     "pacer_min_sleep",
+			Default:  defaultMinSleep,
+			Help:     "Minimum time to sleep between API calls.",
+			Advanced: true,
+		}, {}, {
 			Name:     "upload_hash_only",
 			Default:  false,
 			Advanced: true,
@@ -198,6 +203,7 @@ type Options struct {
 	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
+	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
@@ -365,7 +371,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 		Path:     "/",
 		HttpOnly: true,
 	})
-	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
+	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(opt.PacerMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
 }
 
