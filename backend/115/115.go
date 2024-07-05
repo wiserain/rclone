@@ -781,7 +781,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object
+	// Create temporary object - still needs id, sha1sum, pickCode, mTime, cTime, aTime
 	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
 	if err != nil {
 		return nil, err
@@ -794,6 +794,12 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		}
 	}
 	dstObj.id = srcObj.id
+	dstObj.sha1sum = srcObj.sha1sum
+	dstObj.pickCode = srcObj.pickCode
+	dstObj.mTime = srcObj.mTime
+	dstObj.cTime = srcObj.cTime
+	dstObj.aTime = srcObj.aTime
+	dstObj.hasMetaData = true
 
 	if srcLeaf != dstLeaf {
 		// Rename
@@ -802,7 +808,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 			return nil, fmt.Errorf("move: couldn't rename moved file: %w", err)
 		}
 	}
-	return dstObj, dstObj.readMetaData(ctx)
+	return dstObj, nil
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
