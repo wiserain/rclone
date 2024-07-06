@@ -40,6 +40,7 @@ const (
 	decayConstant   = 2 // bigger for slower decay, exponential
 
 	defaultConTimeout = fs.Duration(10 * time.Second) // from rclone global flags - Connect timeout (default 1m0s)
+	defaultTimeout    = fs.Duration(45 * time.Second) // from rclone global flags - IO idle timeout (default 5m0s)
 
 	maxUploadSize       = 123480309760                   // 115 GiB from https://proapi.115.com/app/uploadinfo
 	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
@@ -114,6 +115,11 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     "contimeout",
 			Default:  defaultConTimeout,
 			Help:     "Connect timeout.",
+			Advanced: true,
+		}, {
+			Name:     "timeout",
+			Default:  defaultTimeout,
+			Help:     "IO idle timeout.",
 			Advanced: true,
 		}, {
 			Name:     "upload_hash_only",
@@ -212,6 +218,7 @@ type Options struct {
 	ListChunk           int                  `config:"list_chunk"`
 	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
 	ConTimeout          fs.Duration          `config:"contimeout"`
+	Timeout             fs.Duration          `config:"timeout"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
@@ -329,6 +336,7 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 			InsecureSkipVerify: opt.NoCheckCertificate,
 		}
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
+		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
 	})
 	return &http.Client{
 		Transport: t,
