@@ -3,7 +3,6 @@ package _115
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -86,12 +85,6 @@ func init() {
 			Help: fmt.Sprintf(`HTTP user agent used for 115.
 
 Defaults to "%s" or "--115-user-agent" provided on command line.`, defaultUserAgent),
-		}, {
-			Name:     "no_check_certificate",
-			Default:  true,
-			Advanced: true,
-			Hide:     fs.OptionHideBoth,
-			Help:     `Do not verify the server SSL certificate for 115 (insecure)`,
 		}, {
 			Name: "root_folder_id",
 			Help: `ID of the root folder.
@@ -213,7 +206,6 @@ type Options struct {
 	SEID                string               `config:"seid"`
 	Cookie              string               `config:"cookie"`
 	UserAgent           string               `config:"user_agent"`
-	NoCheckCertificate  bool                 `config:"no_check_certificate"`
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
 	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
@@ -332,9 +324,6 @@ func errorHandler(resp *http.Response) error {
 // getClient makes an http client according to the options
 func getClient(ctx context.Context, opt *Options) *http.Client {
 	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
-		t.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: opt.NoCheckCertificate,
-		}
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
 	})
