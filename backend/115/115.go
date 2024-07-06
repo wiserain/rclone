@@ -39,6 +39,8 @@ const (
 	maxSleep        = 2 * time.Second
 	decayConstant   = 2 // bigger for slower decay, exponential
 
+	defaultConTimeout = fs.Duration(10 * time.Second) // from rclone global flags - Connect timeout (default 1m0s)
+
 	maxUploadSize       = 123480309760                   // 115 GiB from https://proapi.115.com/app/uploadinfo
 	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
 	minChunkSize        = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
@@ -108,7 +110,12 @@ Fill in for rclone to use a non root folder as its starting point.
 			Default:  defaultMinSleep,
 			Help:     "Minimum time to sleep between API calls.",
 			Advanced: true,
-		}, {}, {
+		}, {
+			Name:     "contimeout",
+			Default:  defaultConTimeout,
+			Help:     "Connect timeout.",
+			Advanced: true,
+		}, {
 			Name:     "upload_hash_only",
 			Default:  false,
 			Advanced: true,
@@ -204,6 +211,7 @@ type Options struct {
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
 	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
+	ConTimeout          fs.Duration          `config:"contimeout"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
 	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
@@ -320,6 +328,7 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 		t.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: opt.NoCheckCertificate,
 		}
+		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 	})
 	return &http.Client{
 		Transport: t,
