@@ -1,5 +1,22 @@
 package _115
 
+// ------------------------------------------------------------
+// NOTE
+// ------------------------------------------------------------
+
+// maximum concurrent downloads
+// `--transfers=10 --multi-thread-streams=1` or `--transfers=1 --multi-thread-streams=2`
+
+// Potential error when performing file operations like move, copy, delete, and addurls
+// for a large number of files. Maybe we should make API calls in chunked.
+
+// ------------------------------------------------------------
+// TODO
+// ------------------------------------------------------------
+
+// * Implement rclone cleanup command - where is an API for emptying trash?
+// * Implement rclone config userinfo - doesn't seem to have useful info https://my.115.com/?ct=ajax&ac=nav
+
 import (
 	"bytes"
 	"context"
@@ -1321,21 +1338,17 @@ func (o *Object) setMetaData(info *api.File) error {
 }
 
 // setDownloadURL ensures a link for opening an object
-func (o *Object) setDownloadURL(ctx context.Context) error {
+func (o *Object) setDownloadURL(ctx context.Context) (err error) {
 	o.durlMu.Lock()
 	defer o.durlMu.Unlock()
 
 	// check if the current link is valid
 	if o.durl.Valid() {
-		return nil
+		return
 	}
 
-	downURL, err := o.fs.getDownloadURL(ctx, o.pickCode)
-	if err != nil {
-		return err
-	}
-	o.durl = downURL
-	return nil
+	o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+	return
 }
 
 // readMetaData gets the metadata if it hasn't already been fetched
