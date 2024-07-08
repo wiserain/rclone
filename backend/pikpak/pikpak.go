@@ -1058,6 +1058,7 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	o = &Object{
 		fs:      f,
 		remote:  remote,
+		parent:  dirID,
 		size:    size,
 		modTime: modTime,
 		linkMu:  new(sync.Mutex),
@@ -1159,7 +1160,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object
+	// Create temporary object - still missing id, mimeType, gcid, md5sum
 	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
@@ -1172,6 +1173,12 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	// Copy the object
 	if err := f.copyObjects(ctx, []string{srcObj.id}, dstParentID); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	}
+	// Update info of the copied object with new parent but source name
+	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
+		return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
+	} else if err = dstObj.setMetaData(info); err != nil {
+		return nil, err
 	}
 
 	// Can't copy and change name in one step so we have to check if we have
@@ -1187,16 +1194,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
-		err = dstObj.setMetaData(info)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// Update info
-		err = dstObj.readMetaData(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
-		}
+		return dstObj, dstObj.setMetaData(info)
 	}
 	return dstObj, nil
 }
