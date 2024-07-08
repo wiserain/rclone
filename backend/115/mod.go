@@ -13,7 +13,7 @@ import (
 
 // parseRootID parses RootID from path
 func parseRootID(s string) (rootID string, err error) {
-	re := regexp.MustCompile(`\{([^}]{5,})\}`)
+	re := regexp.MustCompile(`^\{(\d{19})\}`)
 	m := re.FindStringSubmatch(s)
 	if m == nil {
 		return "", fmt.Errorf("%s does not contain a valid id", s)
