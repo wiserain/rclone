@@ -907,6 +907,7 @@ type Fs struct {
 	changeSAmu       *sync.Mutex                  // mod
 	changeSAtime     time.Time                    // mod
 	fileObj          *fs.Object                   // mod
+	gdsSvc           *drive.Service               // mod
 	dirResourceKeys  *sync.Map                    // map directory ID to resource key
 	permissionsMu    *sync.Mutex                  // protect the below
 	permissions      map[string]*drive.Permission // map permission IDs to Permissions
@@ -1157,6 +1158,9 @@ func (f *Fs) list(ctx context.Context, dirIDs []string, title string, directorie
 	}
 
 	list := f.svc.Files.List()
+	if f.gdsSvc != nil { // mod
+		list = f.gdsSvc.Files.List()
+	}
 	queryString := strings.Join(query, " and ")
 	if queryString != "" {
 		list.Q(queryString)
@@ -1457,12 +1461,23 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	// mod
+	var gdsSvc *drive.Service
 	if gds, ok, err := newGdsClient(ctx, opt); err != nil {
 		return nil, err
 	} else if ok {
 		gdsRemote, authErr := gds.getGdsRemote(ctx)
 		if authErr != nil {
-			return nil, fmt.Errorf("drive: failed to get remote from gds: %w", authErr)
+			return nil, fmt.Errorf("gds: failed to get remote: %w", authErr)
+		}
+		if token, ok := m.Get("token"); ok && token != "" {
+			cli, _, err := oauthutil.NewClientWithBaseClient(ctx, name, m, driveConfig, getClient(ctx, opt))
+			if err != nil {
+				return nil, fmt.Errorf("gds: failed to create oauth client: %w", err)
+			}
+			gdsSvc, err = drive.NewService(context.Background(), option.WithHTTPClient(cli))
+			if err != nil {
+				return nil, fmt.Errorf("gds: couldn't create Drive client: %w", err)
+			}
 		}
 		opt.Scope = gdsRemote.Scope
 		opt.ServiceAccountCredentials = string(gdsRemote.SA)
@@ -1521,6 +1536,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		f.changeSAmu = new(sync.Mutex)
 		fs.Infof(nil, "Changing service account is enabled")
 	}
+	f.gdsSvc = gdsSvc
 
 	// Create a new authorized Drive client.
 	f.client = oAuthClient
@@ -3736,6 +3752,9 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 
 func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, err error) {
 	list := f.svc.Files.List()
+	if f.gdsSvc != nil { // mod
+		list = f.gdsSvc.Files.List()
+	}
 	if query != "" {
 		list.Q(query)
 	}
