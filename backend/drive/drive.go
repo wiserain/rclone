@@ -1446,16 +1446,13 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	if err != nil {
 		return nil, err
 	}
-	if err := pool.LoadSA(); err == nil {
-		if sa, err := pool.GetSA(); err == nil {
-			opt.ServiceAccountFile = sa[0].ServiceAccountFile
-			opt.Impersonate = sa[0].Impersonate
-			if opt.Impersonate != "" {
-				fs.Debugf(nil, "Starting newFs with %q as %q", filepath.Base(opt.ServiceAccountFile), opt.Impersonate)
-			} else {
-				fs.Debugf(nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
-			}
-
+	if sa, err := pool.GetSA(); err == nil {
+		opt.ServiceAccountFile = sa[0].ServiceAccountFile
+		opt.Impersonate = sa[0].Impersonate
+		if opt.Impersonate != "" {
+			fs.Debugf(nil, "Starting newFs with %q as %q", filepath.Base(opt.ServiceAccountFile), opt.Impersonate)
+		} else {
+			fs.Debugf(nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
 		}
 	}
 
@@ -1466,13 +1463,12 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		gdsRemote, authErr := gds.getGdsRemote(ctx)
 		if authErr != nil {
 			return nil, fmt.Errorf("drive: failed to get remote from gds: %w", authErr)
-		} else {
-			opt.Scope = gdsRemote.Scope
-			opt.ServiceAccountCredentials = string(gdsRemote.SA)
-			opt.Impersonate = gdsRemote.Impersonate
-			opt.RootFolderID = gdsRemote.RootFolderID
-			fs.Debugf(nil, "Starting newFs with remote from gds")
 		}
+		opt.Scope = gdsRemote.Scope
+		opt.ServiceAccountCredentials = string(gdsRemote.SA)
+		opt.Impersonate = gdsRemote.Impersonate
+		opt.RootFolderID = gdsRemote.RootFolderID
+		fs.Debugf(nil, "Starting newFs with remote from gds")
 	}
 
 	oAuthClient, err := createOAuthClient(ctx, opt, name, m)

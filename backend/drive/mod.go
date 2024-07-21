@@ -111,6 +111,10 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 		mutex:   new(sync.Mutex),
 		maxLoad: opt.ServiceAccountMaxLoad,
 	}
+	// initial load
+	if err := p.LoadSA(); err != nil {
+		return nil, fmt.Errorf("service accout pool: initial load failed: %w", err)
+	}
 	return p, nil
 }
 
