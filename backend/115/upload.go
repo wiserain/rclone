@@ -200,7 +200,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	if decrypted, err = ecdhCipher.Decrypt(body); err != nil {
 		// FIXME failed to decrypt intermittenly
 		// seems to be caused by corrupted body
-		// low level retry deosn't help
+		// low level retry doesn't help
 		return
 	}
 	if err = json.Unmarshal(decrypted, &info); err != nil {
