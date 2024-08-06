@@ -468,18 +468,15 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	// mod - parse object id from path remote:{ID}
 	var srcFile *api.File
 	if rootID, _ := parseRootID(root); len(rootID) > 6 {
-		f.opt.RootFolderID = rootID
-
 		srcFile, err = f.getFile(ctx, rootID)
 		if err != nil {
-			return nil, fmt.Errorf("115: failed checking filetype: %w", err)
+			return nil, err
 		}
+		f.opt.RootFolderID = rootID
 		if !srcFile.IsDir() {
 			fs.Debugf(nil, "Root ID (File): %s", rootID)
 		} else {
-			// assume it is a file
 			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
-			f.opt.RootFolderID = rootID
 			srcFile = nil
 		}
 	}

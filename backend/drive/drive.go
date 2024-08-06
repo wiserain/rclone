@@ -1562,36 +1562,27 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		return nil, err
 	}
 
-	// mod -  parse object id from path remote:{ID}
+	// mod - parse object id from path remote:{ID}
 	var srcFile *drive.File
 	if rootID, _ := parseRootID(path); len(rootID) > 6 {
-		f.opt.RootFolderID = rootID
-
-		err = f.pacer.Call(func() (bool, error) {
-			srcFile, err = f.svc.Files.Get(rootID).
-				Fields("name", "id", "size", "mimeType", "driveId", "md5Checksum").
-				SupportsAllDrives(true).
-				Context(ctx).Do()
-			return f.shouldRetry(ctx, err)
-		})
-		if err == nil {
-			if srcFile.MimeType != "" && srcFile.MimeType != "application/vnd.google-apps.folder" {
-				fs.Debugf(nil, "Root ID (File): %s", rootID)
-			} else {
-				if srcFile.DriveId == rootID {
-					fs.Debugf(nil, "Root ID (Drive): %s", rootID)
-					f.opt.RootFolderID = ""
-					f.opt.TeamDriveID = rootID
-				} else {
-					fs.Debugf(nil, "Root ID (Folder): %s", rootID)
-					f.opt.RootFolderID = rootID
-				}
-				srcFile = nil
-			}
-			f.isTeamDrive = f.opt.TeamDriveID != ""
-		} else {
+		srcFile, err = f.getFile(ctx, rootID, "name,id,size,mimeType,driveId,md5Checksum")
+		if err != nil {
 			return nil, err
 		}
+		f.opt.RootFolderID = rootID
+		if srcFile.MimeType != "" && srcFile.MimeType != "application/vnd.google-apps.folder" {
+			fs.Debugf(nil, "Root ID (File): %s", rootID)
+		} else {
+			if srcFile.DriveId == rootID {
+				fs.Debugf(nil, "Root ID (Drive): %s", rootID)
+				f.opt.RootFolderID = ""
+				f.opt.TeamDriveID = rootID
+			} else {
+				fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+			}
+			srcFile = nil
+		}
+		f.isTeamDrive = f.opt.TeamDriveID != ""
 	}
 
 	// Set the root folder ID
