@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"time"
 
@@ -289,9 +290,17 @@ func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.Dow
 	return nil, fs.ErrorObjectNotFound
 }
 
-func (f *Fs) getDirID(ctx context.Context, remoteDir string) (cid string, err error) {
+// Looks up a directory ID using its absolute path.
+//
+// The input directory path should begin with a forward slash.
+// The output from API calls will be "0" if the path does not exist or is a file.
+func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
+	if dir == "" {
+		return "0", nil
+	}
+	dir = path.Join("/", dir)
 	params := url.Values{}
-	params.Set("path", f.opt.Enc.FromStandardPath(remoteDir))
+	params.Set("path", f.opt.Enc.FromStandardPath(dir))
 	opts := rest.Opts{
 		Method:     "GET",
 		Path:       "/files/getid",
@@ -310,7 +319,7 @@ func (f *Fs) getDirID(ctx context.Context, remoteDir string) (cid string, err er
 		return "", fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	cid = info.ID.String()
-	if cid == "0" && remoteDir != "/" {
+	if cid == "0" && dir != "/" {
 		return "", fs.ErrorDirNotFound
 	}
 	return
@@ -401,13 +410,13 @@ func (f *Fs) _addURLs(ctx context.Context, input []byte) (output []byte, err err
 }
 
 // add offline download task for multiple urls
-func (f *Fs) addURLs(ctx context.Context, path string, urls []string) (info *api.NewURL, err error) {
+func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.NewURL, err error) {
 	if f.userID == "" {
 		if err := f.getUploadBasicInfo(ctx); err != nil {
 			return nil, fmt.Errorf("failed to get user id: %w", err)
 		}
 	}
-	parentID, _ := f.dirCache.FindDir(ctx, path, false)
+	parentID, _ := f.dirCache.FindDir(ctx, dir, false)
 	payload := map[string]string{
 		"ac":         "add_task_urls",
 		"app_ver":    appVer,

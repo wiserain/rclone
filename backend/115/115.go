@@ -458,6 +458,22 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	return f, nil
 }
 
+// wraps dirCache.FindRoot() with warm-up cache
+func (f *Fs) dirCacheFindRoot(ctx context.Context) (err error) {
+	if f.rootFolderID != "0" {
+		return f.dirCache.FindRoot(ctx, false)
+	}
+	for dir, dirID := f.root, "-1"; dirID != f.rootFolderID && dir != ""; {
+		dirID, err = f.getDirID(ctx, dir)
+		if err != nil {
+			return err
+		}
+		f.dirCache.Put(dir, dirID)
+		dir, _ = dircache.SplitPath(dir)
+	}
+	return f.dirCache.FindRoot(ctx, false)
+}
+
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	f, err := newFs(ctx, name, root, m)
@@ -506,25 +522,8 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		return f, fs.ErrorIsFile
 	}
 
-	// warm up dircache
-	if f.rootFolderID == "0" {
-		if rootid, err := f.getDirID(ctx, f.root); err == nil {
-			stats, err := f.getStats(ctx, rootid)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get file stats: %w", err)
-			}
-			dirPath := ""
-			for _, parent := range stats.Paths[1:] {
-				dirPath = path.Join(dirPath, parent.FileName)
-				f.dirCache.Put(dirPath, parent.FileID.String())
-			}
-			dirPath = path.Join(dirPath, stats.FileName)
-			f.dirCache.Put(dirPath, rootid)
-		}
-	}
-
 	// Find the current root
-	err = f.dirCache.FindRoot(ctx, false)
+	err = f.dirCacheFindRoot(ctx)
 	if err != nil {
 		// Assume it is a file
 		newRoot, remote := dircache.SplitPath(f.root)
@@ -532,7 +531,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
 		tempF.root = newRoot
 		// Make new Fs which is the parent
-		err = tempF.dirCache.FindRoot(ctx, false)
+		err = tempF.dirCacheFindRoot(ctx)
 		if err != nil {
 			// No root so return old f
 			return f, nil
@@ -611,6 +610,7 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
+	fs.Logf(f, "===== FindLeaf calling listAll =====")
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
 		if item.Name == leaf && item.IsDir() {
