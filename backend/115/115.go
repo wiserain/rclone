@@ -1163,6 +1163,16 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			path = arg[0]
 		}
 		return f.getID(ctx, path)
+	case "stats": // 显示属性
+		path := ""
+		if len(arg) > 0 {
+			path = arg[0]
+		}
+		cid, err := f.getID(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		return f.getStats(ctx, cid)
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}

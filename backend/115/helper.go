@@ -355,6 +355,8 @@ func (f *Fs) getFile(ctx context.Context, fid string) (file *api.File, err error
 }
 
 // getStats gets information of a file or directory by its ID
+//
+// Note that the process can be quite slow, depending on the number of file objects.
 func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err error) {
 	params := url.Values{}
 	params.Set("cid", cid)
