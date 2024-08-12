@@ -610,7 +610,6 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
-	fs.Logf(f, "===== FindLeaf calling listAll =====")
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
 		if item.Name == leaf && item.IsDir() {
