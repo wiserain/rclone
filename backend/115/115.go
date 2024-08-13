@@ -667,6 +667,9 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
+	if f.shared != nil {
+		return "", errors.New("not allowed for shared filesystem")
+	}
 	info, err := f.makeDir(ctx, pathID, leaf)
 	if err != nil {
 		return
@@ -684,6 +687,9 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	if f.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
@@ -730,12 +736,18 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 // This will create a duplicate if we upload a new file without
 // checking to see if there is one already - use Put() for that.
 func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	if f.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	return f.putUnchecked(ctx, in, src, src.Remote(), options...)
 }
 
 // MergeDirs merges the contents of all the directories passed
 // in into the first one and rmdirs the other directories.
 func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
+	if f.shared != nil {
+		return errors.New("not allowed for shared filesystem")
+	}
 	if len(dirs) < 2 {
 		return nil
 	}
@@ -801,6 +813,9 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	if f.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	if src.Fs().Name() != f.Name() {
 		return nil, fs.ErrorCantMove
 	}
@@ -859,6 +874,9 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
+	if f.shared != nil {
+		return errors.New("not allowed for shared filesystem")
+	}
 	if src.Name() != f.Name() {
 		return fs.ErrorCantDirMove
 	}
@@ -904,6 +922,9 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	if f.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	srcObj, ok := src.(*Object)
 	if !ok {
 		fs.Debugf(src, "Can't copy - not same remote type")
@@ -995,6 +1016,9 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
+	if f.shared != nil {
+		return errors.New("not allowed for shared filesystem")
+	}
 	return f.purgeCheck(ctx, dir, true)
 }
 
@@ -1005,6 +1029,9 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
+	if f.shared != nil {
+		return errors.New("not allowed for shared filesystem")
+	}
 	return f.purgeCheck(ctx, dir, false)
 }
 
@@ -1160,6 +1187,9 @@ The 'path' should point to a directory not a file. Use an extra argument
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+	if f.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	switch name {
 	case "addurls":
 		return f.addURLs(ctx, "", arg)
@@ -1281,6 +1311,9 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // Open opens the file for read. Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
+	if o.fs.shared != nil {
+		return nil, errors.New("not allowed for shared filesystem")
+	}
 	if o.id == "" {
 		return nil, errors.New("can't download: no id")
 	}
@@ -1308,6 +1341,9 @@ func (o *Object) Remove(ctx context.Context) error {
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
+	if o.fs.shared != nil {
+		return errors.New("not allowed for shared filesystem")
+	}
 	if src.Size() < 0 {
 		return errors.New("refusing to update with unknown size")
 	}
