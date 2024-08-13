@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
@@ -29,6 +30,9 @@ type listAllFn func(*api.File) bool
 //
 // If the user fn ever returns true then it early exits with found = true
 func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+	if f.shared != nil {
+		return f.shared.Snap(ctx, dirID, fn)
+	}
 	// Url Parameters
 	params := url.Values{}
 	params.Set("aid", "1")
@@ -430,6 +434,83 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 	}
 	if err = json.Unmarshal(output, &info); err != nil {
 		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
+	}
+	return
+}
+
+// ------------------------------------------------------------
+
+// parses arguments for Shared from following URL pattern
+//
+// https://115.com/s/{shareCode}?password={receiveCode}
+func parseShareLink(rawURL string) (shareCode, receiveCode string, err error) {
+	if !strings.HasPrefix(rawURL, "http") || !strings.Contains(rawURL, "/s/") {
+		return "", "", fmt.Errorf("%q is not a share link", rawURL)
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid share link format: %w", err)
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid share link format: %w", err)
+	}
+	return strings.TrimPrefix(u.Path, "/s/"), q.Get("password"), nil
+}
+
+type Shared struct {
+	fs          *Fs
+	shareCode   string
+	receiveCode string
+}
+
+func (s *Shared) Snap(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+	// Url Parameters
+	params := url.Values{}
+	params.Set("share_code", s.shareCode)
+	params.Set("receive_code", s.receiveCode)
+	params.Set("cid", dirID)
+	params.Set("limit", strconv.Itoa(s.fs.opt.ListChunk))
+
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/share/snap",
+		Parameters: params,
+	}
+
+	offset := 0
+OUTER:
+	for {
+		params.Set("offset", strconv.Itoa(offset))
+
+		var info api.ShareInfo
+		var resp *http.Response
+		err = s.fs.pacer.Call(func() (bool, error) {
+			resp, err = s.fs.srv.CallJSON(ctx, &opts, nil, &info)
+			return shouldRetry(ctx, resp, &info, err)
+		})
+		if err != nil {
+			return found, fmt.Errorf("couldn't list files: %w", err)
+		} else if !info.State {
+			return found, fmt.Errorf("API State false: %q (%d)", info.Error, info.Errno)
+		}
+		if len(info.Data.List) == 0 {
+			break
+		}
+		for _, item := range info.Data.List {
+			item.Name = s.fs.opt.Enc.ToStandardName(item.Name)
+			if ts, terr := strconv.ParseInt(item.T, 10, 64); terr == nil {
+				item.Te = api.Time(time.Unix(ts, 0))
+			}
+			if fn(item) {
+				found = true
+				break OUTER
+			}
+		}
+		offset += s.fs.opt.ListChunk
+		if offset >= info.Data.Count {
+			break
+		}
 	}
 	return
 }

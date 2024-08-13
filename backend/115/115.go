@@ -251,6 +251,7 @@ type Fs struct {
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
 	userkey      string     // only for uploads
 	fileObj      *fs.Object // mod
+	shared       *Shared
 }
 
 // Object describes a 115 object
@@ -434,7 +435,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	// mod - override rootID from path remote:{ID}
-	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+	if rootID, _, _ := parseRootID(path); rootID != "" {
 		name += rootID
 		path = path[strings.Index(path, "}")+1:]
 	}
@@ -484,7 +485,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	// mod - parse object id from path remote:{ID}
 	var srcFile *api.File
-	if rootID, _ := parseRootID(root); len(rootID) > 6 {
+	if rootID, receiveCode, _ := parseRootID(root); len(rootID) == 19 {
 		srcFile, err = f.getFile(ctx, rootID)
 		if err != nil {
 			return nil, err
@@ -495,6 +496,12 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		} else {
 			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
 			srcFile = nil
+		}
+	} else if len(rootID) == 11 {
+		f.shared = &Shared{
+			fs:          f,
+			shareCode:   rootID,
+			receiveCode: receiveCode,
 		}
 	}
 
