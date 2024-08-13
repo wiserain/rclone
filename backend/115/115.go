@@ -451,6 +451,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		DuplicateFiles:          false, // duplicatefiles are only possible via web
 		CanHaveEmptyDirectories: true,  // can have empty directories
 		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
+		ServerSideAcrossConfigs: true,  // Can copy from shared FS (this is checked in Copy/Move/DirMove)
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx, opt); err != nil {
@@ -814,7 +815,8 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 	if f.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
+		fs.Debugf(src, "Can't move - shared filesystem")
+		return nil, fs.ErrorCantMove
 	}
 	if src.Fs().Name() != f.Name() {
 		return nil, fs.ErrorCantMove
@@ -875,7 +877,8 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
 	if f.shared != nil {
-		return errors.New("not allowed for shared filesystem")
+		fs.Debugf(src, "Can't move directory - shared filesystem")
+		return fs.ErrorCantDirMove
 	}
 	if src.Name() != f.Name() {
 		return fs.ErrorCantDirMove
@@ -912,6 +915,51 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	return nil
 }
 
+func (f *Fs) copyShared(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	srcObj, ok := src.(*Object)
+	if !ok {
+		fs.Debugf(src, "Can't copy - not same remote type")
+		return nil, fs.ErrorCantCopy
+	}
+	err := srcObj.readMetaData(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create temporary object - still needs id, sha1sum, pickCode, mTime, cTime, aTime
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	if err != nil {
+		return nil, err
+	}
+	if srcObj.parent == dstParentID {
+		// api restriction
+		fs.Debugf(src, "Can't copy - same parent")
+		return nil, fs.ErrorCantCopy
+	}
+
+	// Can't copy and change name in one step so we have to check if we have
+	// the correct name after copy
+	srcLeaf, _, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	if err != nil {
+		return nil, err
+	}
+	if srcLeaf != dstLeaf {
+		fs.Debugf(src, "Can't copy with a new name")
+		return nil, fs.ErrorCantCopy
+	}
+	// Copy the object
+	if err := srcObj.fs.shared.Receive(ctx, srcObj.id, dstParentID); err != nil {
+		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	}
+	// Update the copied object with new parent but old name
+	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
+		return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
+	} else if err = dstObj.setMetaData(info); err != nil {
+		return nil, err
+	}
+	return dstObj, dstObj.readMetaData(ctx)
+}
+
 // Copy src to this remote using server side copy operations.
 //
 // This is stored with the remote path given.
@@ -923,12 +971,17 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 	if f.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
+		fs.Debugf(src, "Can't copy - shared filesystem")
+		return nil, fs.ErrorCantCopy
 	}
 	srcObj, ok := src.(*Object)
 	if !ok {
 		fs.Debugf(src, "Can't copy - not same remote type")
 		return nil, fs.ErrorCantCopy
+	}
+	if srcObj.fs.shared != nil {
+		// If src is shared, then 
+		return f.copyShared(ctx, src, remote)
 	}
 	err := srcObj.readMetaData(ctx)
 	if err != nil {

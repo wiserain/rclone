@@ -514,3 +514,36 @@ OUTER:
 	}
 	return
 }
+
+func (s *Shared) Receive(ctx context.Context, file_id, cid string) (err error) {
+	if s.fs.userID == "" {
+		if err := s.fs.getUploadBasicInfo(ctx); err != nil {
+			return fmt.Errorf("failed to get user id: %w", err)
+		}
+	}
+	form := url.Values{}
+	form.Set("cid", cid) // dst
+	form.Set("user_id", s.fs.userID)
+	form.Set("share_code", s.shareCode)
+	form.Set("receive_code", s.receiveCode)
+	form.Set("file_id", file_id) // src
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/share/receive",
+		MultipartParams: form,
+	}
+
+	var info *api.Base
+	var resp *http.Response
+	err = s.fs.pacer.Call(func() (bool, error) {
+		resp, err = s.fs.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	return
+}
