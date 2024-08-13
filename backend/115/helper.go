@@ -519,18 +519,13 @@ OUTER:
 	return
 }
 
-func (s *Shared) Receive(ctx context.Context, fid, cid string) (err error) {
-	if s.fs.userID == "" {
-		if err := s.fs.getUploadBasicInfo(ctx); err != nil {
-			return fmt.Errorf("failed to get user id: %w", err)
-		}
-	}
+func (s *Shared) Receive(ctx context.Context, fid, cid, uid string) (err error) {
 	form := url.Values{}
-	form.Set("cid", cid)                    // dst
-	form.Set("user_id", s.fs.userID)        // dst
 	form.Set("share_code", s.shareCode)     // src
 	form.Set("receive_code", s.receiveCode) // src
 	form.Set("file_id", fid)                // src
+	form.Set("cid", cid)                    // dst
+	form.Set("user_id", uid)                // dst
 
 	opts := rest.Opts{
 		Method:          "POST",

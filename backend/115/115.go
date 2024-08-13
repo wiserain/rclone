@@ -948,7 +948,12 @@ func (f *Fs) copyShared(ctx context.Context, src fs.Object, remote string) (fs.O
 		return nil, fs.ErrorCantCopy
 	}
 	// Copy the object
-	if err := srcObj.fs.shared.Receive(ctx, srcObj.id, dstParentID); err != nil {
+	if f.userID == "" {
+		if err := f.getUploadBasicInfo(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get user id: %w", err)
+		}
+	}
+	if err := srcObj.fs.shared.Receive(ctx, srcObj.id, dstParentID, f.userID); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
 	}
 	// Update the copied object with new parent but old name
