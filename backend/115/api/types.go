@@ -415,3 +415,10 @@ type ShareSnap struct {
 		CanGlobalAppeal int `json:"can_global_appeal,omitempty"`
 	} `json:"user_appeal,omitempty"`
 }
+
+type ShareDownloadInfo struct {
+	FileID string `json:"fid"`
+	FileName string      `json:"fn"`
+	FileSize Int64       `json:"fs"`
+	URL      DownloadURL `json:"url"`
+}

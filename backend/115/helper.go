@@ -242,11 +242,15 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 }
 
 func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, cookies []*http.Cookie, err error) {
+	rootURL := "https://proapi.115.com/app/chrome/downurl"
+	if f.shared != nil {
+		rootURL = "https://proapi.115.com/app/share/downurl"
+	}
 	key := crypto.GenerateKey()
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
-		RootURL:         "https://proapi.115.com/app/chrome/downurl",
+		RootURL:         rootURL,
 		Parameters:      url.Values{"t": {t}},
 		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
 	}
@@ -515,18 +519,18 @@ OUTER:
 	return
 }
 
-func (s *Shared) Receive(ctx context.Context, file_id, cid string) (err error) {
+func (s *Shared) Receive(ctx context.Context, fid, cid string) (err error) {
 	if s.fs.userID == "" {
 		if err := s.fs.getUploadBasicInfo(ctx); err != nil {
 			return fmt.Errorf("failed to get user id: %w", err)
 		}
 	}
 	form := url.Values{}
-	form.Set("cid", cid) // dst
-	form.Set("user_id", s.fs.userID)
-	form.Set("share_code", s.shareCode)
-	form.Set("receive_code", s.receiveCode)
-	form.Set("file_id", file_id) // src
+	form.Set("cid", cid)                    // dst
+	form.Set("user_id", s.fs.userID)        // dst
+	form.Set("share_code", s.shareCode)     // src
+	form.Set("receive_code", s.receiveCode) // src
+	form.Set("file_id", fid)                // src
 
 	opts := rest.Opts{
 		Method:          "POST",
@@ -545,5 +549,27 @@ func (s *Shared) Receive(ctx context.Context, file_id, cid string) (err error) {
 	} else if !info.State {
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
+	return
+}
+
+func (s *Shared) getDownloadURL(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
+	// file_id -> data -> reqData
+	input, _ := json.Marshal(map[string]string{
+		"share_code":   s.shareCode,
+		"receive_code": s.receiveCode,
+		"file_id":      fid,
+	})
+	output, cookies, err := s.fs._getDownloadURL(ctx, input)
+	if err != nil {
+		return
+	}
+	downInfo := api.ShareDownloadInfo{}
+	if err := json.Unmarshal(output, &downInfo); err != nil {
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
+	}
+
+	durl = &downInfo.URL
+	durl.Cookies = cookies
+	durl.CreateTime = time.Now()
 	return
 }

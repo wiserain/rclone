@@ -463,7 +463,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 // wraps dirCache.FindRoot() with warm-up cache
 func (f *Fs) dirCacheFindRoot(ctx context.Context) (err error) {
-	if f.rootFolderID != "0" {
+	if f.rootFolderID != "0" || f.shared != nil {
 		return f.dirCache.FindRoot(ctx, false)
 	}
 	for dir, dirID := f.root, "-1"; dirID != f.rootFolderID && dir != ""; {
@@ -980,7 +980,6 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, fs.ErrorCantCopy
 	}
 	if srcObj.fs.shared != nil {
-		// If src is shared, then 
 		return f.copyShared(ctx, src, remote)
 	}
 	err := srcObj.readMetaData(ctx)
@@ -1364,9 +1363,6 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 
 // Open opens the file for read. Call Close() on the returned io.ReadCloser
 func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.ReadCloser, err error) {
-	if o.fs.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
-	}
 	if o.id == "" {
 		return nil, errors.New("can't download: no id")
 	}
@@ -1450,7 +1446,11 @@ func (o *Object) setDownloadURL(ctx context.Context) (err error) {
 		return
 	}
 
-	o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+	if o.fs.shared != nil {
+		o.durl, err = o.fs.shared.getDownloadURL(ctx, o.id)
+	} else {
+		o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+	}
 	return
 }
 
