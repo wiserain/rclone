@@ -1030,7 +1030,7 @@ func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) 
 	case item.IsDir(): // in case of dir
 		// cache the directory ID for later lookups
 		f.dirCache.Put(remote, item.ID())
-		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.ID()).SetParentID(item.PID)
+		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.ID()).SetParentID(item.ParentID())
 		return d, nil
 	default:
 		entry, err = f.newObjectWithInfo(ctx, remote, item)
@@ -1334,7 +1334,7 @@ func (o *Object) setMetaData(info *api.File) error {
 	}
 	o.hasMetaData = true
 	o.id = info.ID()
-	o.parent = info.CID
+	o.parent = info.ParentID()
 	o.size = info.Size
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode

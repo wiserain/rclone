@@ -109,7 +109,7 @@ type File struct {
 	FID       string      `json:"fid,omitempty"` // file; empty if dir
 	UID       json.Number `json:"uid,omitempty"` // user
 	AID       json.Number `json:"aid,omitempty"` // area
-	CID       string      `json:"cid,omitempty"` // category == directory
+	CID       json.Number `json:"cid,omitempty"` // category == directory
 	PID       string      `json:"pid,omitempty"` // parent
 	Name      string      `json:"n,omitempty"`
 	Size      int64       `json:"s,omitempty"`
@@ -133,10 +133,17 @@ func (f *File) IsDir() bool {
 }
 
 func (f *File) ID() string {
-	if f.FID == "" {
-		return f.CID
+	if f.IsDir() {
+		return f.CID.String()
 	}
 	return f.FID
+}
+
+func (f *File) ParentID() string {
+	if f.IsDir() {
+		return f.PID
+	}
+	return f.CID.String()
 }
 
 type FilePath struct {
