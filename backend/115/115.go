@@ -93,6 +93,14 @@ func init() {
 			Required:  true,
 			Sensitive: true,
 		}, {
+			Name:      "share_code",
+			Help:      "share code from share link",
+			Sensitive: true,
+		}, {
+			Name:      "receive_code",
+			Help:      "password from share link",
+			Sensitive: true,
+		}, {
 			// this is useless at the moment because there's no way to upload
 			// without defaultUserAgent and appVer 2.0.3.6
 			Name:     "user_agent",
@@ -222,6 +230,8 @@ type Options struct {
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
 	Cookie              string               `config:"cookie"`
+	ShareCode           string               `config:"share_code"`
+	ReceiveCode         string               `config:"receive_code"`
 	UserAgent           string               `config:"user_agent"`
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
@@ -250,8 +260,8 @@ type Fs struct {
 	rootFolderID string
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
 	userkey      string     // only for uploads
+	isShare      bool       // mark it is from shared or not
 	fileObj      *fs.Object // mod
-	shared       *Shared
 }
 
 // Object describes a 115 object
@@ -463,7 +473,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 // wraps dirCache.FindRoot() with warm-up cache
 func (f *Fs) dirCacheFindRoot(ctx context.Context) (err error) {
-	if f.rootFolderID != "0" || f.shared != nil {
+	if f.rootFolderID != "0" || f.isShare {
 		return f.dirCache.FindRoot(ctx, false)
 	}
 	for dir, dirID := f.root, "-1"; dirID != f.rootFolderID && dir != ""; {
@@ -499,12 +509,12 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			srcFile = nil
 		}
 	} else if len(rootID) == 11 {
-		f.shared = &Shared{
-			fs:          f,
-			shareCode:   rootID,
-			receiveCode: receiveCode,
-		}
+		f.opt.ShareCode = rootID
+		f.opt.ReceiveCode = receiveCode
 	}
+
+	// mark it is from shared or not
+	f.isShare = f.opt.ShareCode != "" && f.opt.ReceiveCode != ""
 
 	// Set the root folder ID
 	if f.opt.RootFolderID != "" {
@@ -668,8 +678,8 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
-	if f.shared != nil {
-		return "", errors.New("not allowed for shared filesystem")
+	if f.isShare {
+		return "", errors.New("unsupported for shared filesystem")
 	}
 	info, err := f.makeDir(ctx, pathID, leaf)
 	if err != nil {
@@ -688,9 +698,6 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	if f.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
-	}
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
@@ -737,17 +744,14 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 // This will create a duplicate if we upload a new file without
 // checking to see if there is one already - use Put() for that.
 func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
-	if f.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
-	}
 	return f.putUnchecked(ctx, in, src, src.Remote(), options...)
 }
 
 // MergeDirs merges the contents of all the directories passed
 // in into the first one and rmdirs the other directories.
 func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
-	if f.shared != nil {
-		return errors.New("not allowed for shared filesystem")
+	if f.isShare {
+		return errors.New("unsupported for shared filesystem")
 	}
 	if len(dirs) < 2 {
 		return nil
@@ -814,7 +818,7 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	if f.shared != nil {
+	if f.isShare {
 		fs.Debugf(src, "Can't move - shared filesystem")
 		return nil, fs.ErrorCantMove
 	}
@@ -876,7 +880,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
-	if f.shared != nil {
+	if f.isShare {
 		fs.Debugf(src, "Can't move directory - shared filesystem")
 		return fs.ErrorCantDirMove
 	}
@@ -915,56 +919,6 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	return nil
 }
 
-func (f *Fs) copyShared(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	srcObj, ok := src.(*Object)
-	if !ok {
-		fs.Debugf(src, "Can't copy - not same remote type")
-		return nil, fs.ErrorCantCopy
-	}
-	err := srcObj.readMetaData(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create temporary object - still needs id, sha1sum, pickCode, mTime, cTime, aTime
-	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
-	if err != nil {
-		return nil, err
-	}
-	if srcObj.parent == dstParentID {
-		// api restriction
-		fs.Debugf(src, "Can't copy - same parent")
-		return nil, fs.ErrorCantCopy
-	}
-
-	// Can't copy and change name in one step so we have to check if we have
-	// the correct name after copy
-	srcLeaf, _, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
-	if err != nil {
-		return nil, err
-	}
-	if srcLeaf != dstLeaf {
-		fs.Debugf(src, "Can't copy with a new name")
-		return nil, fs.ErrorCantCopy
-	}
-	// Copy the object
-	if f.userID == "" {
-		if err := f.getUploadBasicInfo(ctx); err != nil {
-			return nil, fmt.Errorf("failed to get user id: %w", err)
-		}
-	}
-	if err := srcObj.fs.shared.Receive(ctx, srcObj.id, dstParentID, f.userID); err != nil {
-		return nil, fmt.Errorf("couldn't copy file: %w", err)
-	}
-	// Update the copied object with new parent but old name
-	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
-		return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
-	} else if err = dstObj.setMetaData(info); err != nil {
-		return nil, err
-	}
-	return dstObj, dstObj.readMetaData(ctx)
-}
-
 // Copy src to this remote using server side copy operations.
 //
 // This is stored with the remote path given.
@@ -975,7 +929,7 @@ func (f *Fs) copyShared(ctx context.Context, src fs.Object, remote string) (fs.O
 //
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	if f.shared != nil {
+	if f.isShare {
 		fs.Debugf(src, "Can't copy - shared filesystem")
 		return nil, fs.ErrorCantCopy
 	}
@@ -983,9 +937,6 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	if !ok {
 		fs.Debugf(src, "Can't copy - not same remote type")
 		return nil, fs.ErrorCantCopy
-	}
-	if srcObj.fs.shared != nil {
-		return f.copyShared(ctx, src, remote)
 	}
 	err := srcObj.readMetaData(ctx)
 	if err != nil {
@@ -1003,8 +954,14 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, fs.ErrorCantCopy
 	}
 	// Copy the object
-	if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
-		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	if srcObj.fs.isShare {
+		if err := f.copyFromShare(ctx, src, dstParentID); err != nil {
+			return nil, fmt.Errorf("couldn't copy from share: %w", err)
+		}
+	} else {
+		if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
+			return nil, fmt.Errorf("couldn't copy file: %w", err)
+		}
 	}
 	// Update the copied object with new parent but old name
 	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
@@ -1033,6 +990,9 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 // purgeCheck removes the root directory, if check is set then it
 // refuses to do so if it has anything in
 func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
+	if f.isShare {
+		return errors.New("unsupported for shared filesystem")
+	}
 	root := path.Join(f.root, dir)
 	if root == "" {
 		return errors.New("can't purge root directory")
@@ -1073,9 +1033,6 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 //
 // Return an error if it doesn't exist or isn't empty
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
-	if f.shared != nil {
-		return errors.New("not allowed for shared filesystem")
-	}
 	return f.purgeCheck(ctx, dir, true)
 }
 
@@ -1086,9 +1043,6 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 //
 // Return an error if it doesn't exist
 func (f *Fs) Purge(ctx context.Context, dir string) error {
-	if f.shared != nil {
-		return errors.New("not allowed for shared filesystem")
-	}
 	return f.purgeCheck(ctx, dir, false)
 }
 
@@ -1244,8 +1198,8 @@ The 'path' should point to a directory not a file. Use an extra argument
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
-	if f.shared != nil {
-		return nil, errors.New("not allowed for shared filesystem")
+	if f.isShare {
+		return nil, errors.New("unsupported for shared filesystem")
 	}
 	switch name {
 	case "addurls":
@@ -1395,9 +1349,6 @@ func (o *Object) Remove(ctx context.Context) error {
 // But for unknown-sized objects (indicated by src.Size() == -1), Upload should either
 // return an error or update the object properly (rather than e.g. calling panic).
 func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) error {
-	if o.fs.shared != nil {
-		return errors.New("not allowed for shared filesystem")
-	}
 	if src.Size() < 0 {
 		return errors.New("refusing to update with unknown size")
 	}
@@ -1451,8 +1402,8 @@ func (o *Object) setDownloadURL(ctx context.Context) (err error) {
 		return
 	}
 
-	if o.fs.shared != nil {
-		o.durl, err = o.fs.shared.getDownloadURL(ctx, o.id)
+	if o.fs.isShare {
+		o.durl, err = o.fs.getDownloadURLFromShare(ctx, o.id)
 	} else {
 		o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
 	}

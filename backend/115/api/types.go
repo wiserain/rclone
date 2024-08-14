@@ -375,14 +375,14 @@ type NewURL struct {
 	Errcode int `json:"errcode,omitempty"`
 }
 
-type ShareInfo struct {
-	State bool       `json:"state,omitempty"`
-	Error string     `json:"error,omitempty"`
-	Errno Int        `json:"errno,omitempty"`
-	Data  *ShareSnap `json:"data,omitempty"`
+type ShareSnap struct {
+	State bool           `json:"state,omitempty"`
+	Error string         `json:"error,omitempty"`
+	Errno Int            `json:"errno,omitempty"`
+	Data  *ShareSnapData `json:"data,omitempty"`
 }
 
-type ShareSnap struct {
+type ShareSnapData struct {
 	Userinfo struct {
 		UserID   string `json:"user_id,omitempty"`
 		UserName string `json:"user_name,omitempty"`
@@ -405,9 +405,9 @@ type ShareSnap struct {
 		CanNotice        int    `json:"can_notice,omitempty"`
 		HaveVioFile      int    `json:"have_vio_file,omitempty"`
 	} `json:"shareinfo,omitempty"`
-	Count int     `json:"count,omitempty"`
-	List  []*File `json:"list,omitempty"`
-	ShareState string `json:"share_state,omitempty"`
+	Count      int     `json:"count,omitempty"`
+	List       []*File `json:"list,omitempty"`
+	ShareState string  `json:"share_state,omitempty"`
 	UserAppeal struct {
 		CanAppeal       int `json:"can_appeal,omitempty"`
 		CanShareAppeal  int `json:"can_share_appeal,omitempty"`
@@ -417,7 +417,7 @@ type ShareSnap struct {
 }
 
 type ShareDownloadInfo struct {
-	FileID string `json:"fid"`
+	FileID   string      `json:"fid"`
 	FileName string      `json:"fn"`
 	FileSize Int64       `json:"fs"`
 	URL      DownloadURL `json:"url"`

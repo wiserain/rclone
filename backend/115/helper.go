@@ -30,8 +30,8 @@ type listAllFn func(*api.File) bool
 //
 // If the user fn ever returns true then it early exits with found = true
 func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
-	if f.shared != nil {
-		return f.shared.Snap(ctx, dirID, fn)
+	if f.isShare {
+		return f.listShare(ctx, dirID, fn)
 	}
 	// Url Parameters
 	params := url.Values{}
@@ -243,7 +243,7 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 
 func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, cookies []*http.Cookie, err error) {
 	rootURL := "https://proapi.115.com/app/chrome/downurl"
-	if f.shared != nil {
+	if f.isShare {
 		rootURL = "https://proapi.115.com/app/share/downurl"
 	}
 	key := crypto.GenerateKey()
@@ -462,19 +462,16 @@ func parseShareLink(rawURL string) (shareCode, receiveCode string, err error) {
 	return strings.TrimPrefix(u.Path, "/s/"), q.Get("password"), nil
 }
 
-type Shared struct {
-	fs          *Fs
-	shareCode   string
-	receiveCode string
-}
-
-func (s *Shared) Snap(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+// listing filesystem from share link
+//
+// no need user authorization by cookies
+func (f *Fs) listShare(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
 	// Url Parameters
 	params := url.Values{}
-	params.Set("share_code", s.shareCode)
-	params.Set("receive_code", s.receiveCode)
+	params.Set("share_code", f.opt.ShareCode)
+	params.Set("receive_code", f.opt.ReceiveCode)
 	params.Set("cid", dirID)
-	params.Set("limit", strconv.Itoa(s.fs.opt.ListChunk))
+	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
 
 	opts := rest.Opts{
 		Method:     "GET",
@@ -487,10 +484,10 @@ OUTER:
 	for {
 		params.Set("offset", strconv.Itoa(offset))
 
-		var info api.ShareInfo
+		var info api.ShareSnap
 		var resp *http.Response
-		err = s.fs.pacer.Call(func() (bool, error) {
-			resp, err = s.fs.srv.CallJSON(ctx, &opts, nil, &info)
+		err = f.pacer.Call(func() (bool, error) {
+			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 			return shouldRetry(ctx, resp, &info, err)
 		})
 		if err != nil {
@@ -502,7 +499,7 @@ OUTER:
 			break
 		}
 		for _, item := range info.Data.List {
-			item.Name = s.fs.opt.Enc.ToStandardName(item.Name)
+			item.Name = f.opt.Enc.ToStandardName(item.Name)
 			if ts, terr := strconv.ParseInt(item.T, 10, 64); terr == nil {
 				item.Te = api.Time(time.Unix(ts, 0))
 			}
@@ -511,7 +508,7 @@ OUTER:
 				break OUTER
 			}
 		}
-		offset += s.fs.opt.ListChunk
+		offset += f.opt.ListChunk
 		if offset >= info.Data.Count {
 			break
 		}
@@ -519,13 +516,14 @@ OUTER:
 	return
 }
 
-func (s *Shared) Receive(ctx context.Context, fid, cid, uid string) (err error) {
+func (f *Fs) copyFromShare(ctx context.Context, src fs.Object, cid string) (err error) {
+	srcObj, _ := src.(*Object) // this is already checked
 	form := url.Values{}
-	form.Set("share_code", s.shareCode)     // src
-	form.Set("receive_code", s.receiveCode) // src
-	form.Set("file_id", fid)                // src
-	form.Set("cid", cid)                    // dst
-	form.Set("user_id", uid)                // dst
+	form.Set("share_code", srcObj.fs.opt.ShareCode)     // src
+	form.Set("receive_code", srcObj.fs.opt.ReceiveCode) // src
+	form.Set("file_id", srcObj.id)                      // src
+	form.Set("cid", cid)                                // dst
+	form.Set("user_id", f.userID)                       // dst
 
 	opts := rest.Opts{
 		Method:          "POST",
@@ -535,8 +533,8 @@ func (s *Shared) Receive(ctx context.Context, fid, cid, uid string) (err error) 
 
 	var info *api.Base
 	var resp *http.Response
-	err = s.fs.pacer.Call(func() (bool, error) {
-		resp, err = s.fs.srv.CallJSON(ctx, &opts, nil, &info)
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
@@ -547,14 +545,14 @@ func (s *Shared) Receive(ctx context.Context, fid, cid, uid string) (err error) 
 	return
 }
 
-func (s *Shared) getDownloadURL(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
+func (f *Fs) getDownloadURLFromShare(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
 	// file_id -> data -> reqData
 	input, _ := json.Marshal(map[string]string{
-		"share_code":   s.shareCode,
-		"receive_code": s.receiveCode,
+		"share_code":   f.opt.ShareCode,
+		"receive_code": f.opt.ReceiveCode,
 		"file_id":      fid,
 	})
-	output, cookies, err := s.fs._getDownloadURL(ctx, input)
+	output, cookies, err := f._getDownloadURL(ctx, input)
 	if err != nil {
 		return
 	}
