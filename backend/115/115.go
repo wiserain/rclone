@@ -93,6 +93,14 @@ func init() {
 			Required:  true,
 			Sensitive: true,
 		}, {
+			Name:      "share_code",
+			Help:      "share code from share link",
+			Sensitive: true,
+		}, {
+			Name:      "receive_code",
+			Help:      "password from share link",
+			Sensitive: true,
+		}, {
 			// this is useless at the moment because there's no way to upload
 			// without defaultUserAgent and appVer 2.0.3.6
 			Name:     "user_agent",
@@ -222,6 +230,8 @@ type Options struct {
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
 	Cookie              string               `config:"cookie"`
+	ShareCode           string               `config:"share_code"`
+	ReceiveCode         string               `config:"receive_code"`
 	UserAgent           string               `config:"user_agent"`
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
@@ -250,6 +260,7 @@ type Fs struct {
 	rootFolderID string
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
 	userkey      string     // only for uploads
+	isShare      bool       // mark it is from shared or not
 	fileObj      *fs.Object // mod
 }
 
@@ -434,7 +445,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	// mod - override rootID from path remote:{ID}
-	if rootID, _ := parseRootID(path); len(rootID) > 6 {
+	if rootID, _, _ := parseRootID(path); rootID != "" {
 		name += rootID
 		path = path[strings.Index(path, "}")+1:]
 	}
@@ -450,6 +461,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		DuplicateFiles:          false, // duplicatefiles are only possible via web
 		CanHaveEmptyDirectories: true,  // can have empty directories
 		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
+		ServerSideAcrossConfigs: true,  // Can copy from shared FS (this is checked in Copy/Move/DirMove)
 	}).Fill(ctx, f)
 
 	if err := f.newClientWithPacer(ctx, opt); err != nil {
@@ -461,7 +473,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 // wraps dirCache.FindRoot() with warm-up cache
 func (f *Fs) dirCacheFindRoot(ctx context.Context) (err error) {
-	if f.rootFolderID != "0" {
+	if f.rootFolderID != "0" || f.isShare {
 		return f.dirCache.FindRoot(ctx, false)
 	}
 	for dir, dirID := f.root, "-1"; dirID != f.rootFolderID && dir != ""; {
@@ -484,7 +496,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	// mod - parse object id from path remote:{ID}
 	var srcFile *api.File
-	if rootID, _ := parseRootID(root); len(rootID) > 6 {
+	if rootID, receiveCode, _ := parseRootID(root); len(rootID) == 19 {
 		srcFile, err = f.getFile(ctx, rootID)
 		if err != nil {
 			return nil, err
@@ -496,7 +508,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
 			srcFile = nil
 		}
+	} else if len(rootID) == 11 {
+		f.opt.ShareCode = rootID
+		f.opt.ReceiveCode = receiveCode
 	}
+
+	// mark it is from shared or not
+	f.isShare = f.opt.ShareCode != "" && f.opt.ReceiveCode != ""
 
 	// Set the root folder ID
 	if f.opt.RootFolderID != "" {
@@ -660,6 +678,9 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 
 // CreateDir makes a directory with pathID as parent and name leaf
 func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, err error) {
+	if f.isShare {
+		return "", errors.New("unsupported for shared filesystem")
+	}
 	info, err := f.makeDir(ctx, pathID, leaf)
 	if err != nil {
 		return
@@ -729,6 +750,9 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 // MergeDirs merges the contents of all the directories passed
 // in into the first one and rmdirs the other directories.
 func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
+	if f.isShare {
+		return errors.New("unsupported for shared filesystem")
+	}
 	if len(dirs) < 2 {
 		return nil
 	}
@@ -794,6 +818,10 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	if f.isShare {
+		fs.Debugf(src, "Can't move - shared filesystem")
+		return nil, fs.ErrorCantMove
+	}
 	if src.Fs().Name() != f.Name() {
 		return nil, fs.ErrorCantMove
 	}
@@ -852,6 +880,10 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
+	if f.isShare {
+		fs.Debugf(src, "Can't move directory - shared filesystem")
+		return fs.ErrorCantDirMove
+	}
 	if src.Name() != f.Name() {
 		return fs.ErrorCantDirMove
 	}
@@ -897,6 +929,10 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+	if f.isShare {
+		fs.Debugf(src, "Can't copy - shared filesystem")
+		return nil, fs.ErrorCantCopy
+	}
 	srcObj, ok := src.(*Object)
 	if !ok {
 		fs.Debugf(src, "Can't copy - not same remote type")
@@ -918,8 +954,14 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, fs.ErrorCantCopy
 	}
 	// Copy the object
-	if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
-		return nil, fmt.Errorf("couldn't copy file: %w", err)
+	if srcObj.fs.isShare {
+		if err := f.copyFromShareSrc(ctx, src, dstParentID); err != nil {
+			return nil, fmt.Errorf("couldn't copy from share: %w", err)
+		}
+	} else {
+		if err := f.copyFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
+			return nil, fmt.Errorf("couldn't copy file: %w", err)
+		}
 	}
 	// Update the copied object with new parent but old name
 	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
@@ -948,6 +990,9 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 // purgeCheck removes the root directory, if check is set then it
 // refuses to do so if it has anything in
 func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
+	if f.isShare {
+		return errors.New("unsupported for shared filesystem")
+	}
 	root := path.Join(f.root, dir)
 	if root == "" {
 		return errors.New("can't purge root directory")
@@ -1141,6 +1186,18 @@ Usage:
 The 'path' should point to a directory not a file. Use an extra argument
 'subpath' to get an ID of a file located in '115:path'.
 `,
+}, {
+	Name:  "addshare",
+	Short: "Add shared files/dirs from a share link",
+	Long: `This command adds shared files/dirs from a share link.
+
+Usage:
+
+    rclone backend addshare 115:dirpath link
+
+All content from the link will be copied to the folder "dirpath". 
+If the path doesn't exist, rclone will create it for you.
+`,
 }}
 
 // Command the backend to run a named command
@@ -1153,6 +1210,9 @@ The 'path' should point to a directory not a file. Use an extra argument
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
 func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+	if f.isShare {
+		return nil, errors.New("unsupported for shared filesystem")
+	}
 	switch name {
 	case "addurls":
 		return f.addURLs(ctx, "", arg)
@@ -1163,6 +1223,19 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			path = arg[0]
 		}
 		return f.getID(ctx, path)
+	case "addshare":
+		if len(arg) < 1 {
+			return nil, errors.New("need at least 1 argument")
+		}
+		shareCode, receiveCode, err := parseShareLink(arg[0])
+		if err != nil {
+			return nil, err
+		}
+		dirID, err := f.dirCache.FindDir(ctx, "", true)
+		if err != nil {
+			return nil, err
+		}
+		return nil, f.copyFromShare(ctx, shareCode, receiveCode, "", dirID)
 	case "stats": // 显示属性
 		path := ""
 		if len(arg) > 0 {
@@ -1354,7 +1427,11 @@ func (o *Object) setDownloadURL(ctx context.Context) (err error) {
 		return
 	}
 
-	o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+	if o.fs.isShare {
+		o.durl, err = o.fs.getDownloadURLFromShare(ctx, o.id)
+	} else {
+		o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+	}
 	return
 }
 

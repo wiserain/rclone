@@ -308,6 +308,9 @@ func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSp
 
 // upload uploads the object with or without using a temporary file name
 func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote string, options ...fs.OpenOption) (fs.Object, error) {
+	if f.isShare {
+		return nil, errors.New("unsupported for shared filesystem")
+	}
 	size := src.Size()
 
 	// check upload available

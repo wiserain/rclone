@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
@@ -29,6 +30,9 @@ type listAllFn func(*api.File) bool
 //
 // If the user fn ever returns true then it early exits with found = true
 func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+	if f.isShare {
+		return f.listShare(ctx, dirID, fn)
+	}
 	// Url Parameters
 	params := url.Values{}
 	params.Set("aid", "1")
@@ -238,11 +242,15 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 }
 
 func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, cookies []*http.Cookie, err error) {
+	rootURL := "https://proapi.115.com/app/chrome/downurl"
+	if f.isShare {
+		rootURL = "https://proapi.115.com/app/share/downurl"
+	}
 	key := crypto.GenerateKey()
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
 		Method:          "POST",
-		RootURL:         "https://proapi.115.com/app/chrome/downurl",
+		RootURL:         rootURL,
 		Parameters:      url.Values{"t": {t}},
 		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
 	}
@@ -431,5 +439,137 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 	if err = json.Unmarshal(output, &info); err != nil {
 		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
 	}
+	return
+}
+
+// ------------------------------------------------------------
+
+// parses arguments for Shared from following URL pattern
+//
+// https://115.com/s/{shareCode}?password={receiveCode}
+func parseShareLink(rawURL string) (shareCode, receiveCode string, err error) {
+	if !strings.HasPrefix(rawURL, "http") || !strings.Contains(rawURL, "/s/") {
+		return "", "", fmt.Errorf("%q is not a share link", rawURL)
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid share link format: %w", err)
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid share link format: %w", err)
+	}
+	return strings.TrimPrefix(u.Path, "/s/"), q.Get("password"), nil
+}
+
+// listing filesystem from share link
+//
+// no need user authorization by cookies
+func (f *Fs) listShare(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+	// Url Parameters
+	params := url.Values{}
+	params.Set("share_code", f.opt.ShareCode)
+	params.Set("receive_code", f.opt.ReceiveCode)
+	params.Set("cid", dirID)
+	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
+
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/share/snap",
+		Parameters: params,
+	}
+
+	offset := 0
+OUTER:
+	for {
+		params.Set("offset", strconv.Itoa(offset))
+
+		var info api.ShareSnap
+		var resp *http.Response
+		err = f.pacer.Call(func() (bool, error) {
+			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+			return shouldRetry(ctx, resp, &info, err)
+		})
+		if err != nil {
+			return found, fmt.Errorf("couldn't list files: %w", err)
+		} else if !info.State {
+			return found, fmt.Errorf("API State false: %q (%d)", info.Error, info.Errno)
+		}
+		if len(info.Data.List) == 0 {
+			break
+		}
+		for _, item := range info.Data.List {
+			item.Name = f.opt.Enc.ToStandardName(item.Name)
+			if ts, terr := strconv.ParseInt(item.T, 10, 64); terr == nil {
+				item.Te = api.Time(time.Unix(ts, 0))
+			}
+			if fn(item) {
+				found = true
+				break OUTER
+			}
+		}
+		offset += f.opt.ListChunk
+		if offset >= info.Data.Count {
+			break
+		}
+	}
+	return
+}
+
+// copyFromShare copies shared object by its shareCode, receiveCode, fid
+//
+// fid = "0" or "" means root directory containing all files/dirs
+func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid string) (err error) {
+	form := url.Values{}
+	form.Set("share_code", shareCode)     // src
+	form.Set("receive_code", receiveCode) // src
+	form.Set("file_id", fid)              // src
+	form.Set("cid", cid)                  // dst
+	form.Set("user_id", f.userID)         // dst
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/share/receive",
+		MultipartParams: form,
+	}
+
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	return
+}
+
+func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (err error) {
+	srcObj, _ := src.(*Object) // this is already checked
+	return f.copyFromShare(ctx, srcObj.fs.opt.ShareCode, srcObj.fs.opt.ReceiveCode, srcObj.id, cid)
+}
+
+func (f *Fs) getDownloadURLFromShare(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
+	// file_id -> data -> reqData
+	input, _ := json.Marshal(map[string]string{
+		"share_code":   f.opt.ShareCode,
+		"receive_code": f.opt.ReceiveCode,
+		"file_id":      fid,
+	})
+	output, cookies, err := f._getDownloadURL(ctx, input)
+	if err != nil {
+		return
+	}
+	downInfo := api.ShareDownloadInfo{}
+	if err := json.Unmarshal(output, &downInfo); err != nil {
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
+	}
+
+	durl = &downInfo.URL
+	durl.Cookies = cookies
+	durl.CreateTime = time.Now()
 	return
 }
