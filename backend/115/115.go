@@ -955,7 +955,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	// Copy the object
 	if srcObj.fs.isShare {
-		if err := f.copyFromShare(ctx, src, dstParentID); err != nil {
+		if err := f.copyFromShareSrc(ctx, src, dstParentID); err != nil {
 			return nil, fmt.Errorf("couldn't copy from share: %w", err)
 		}
 	} else {
@@ -1186,6 +1186,18 @@ Usage:
 The 'path' should point to a directory not a file. Use an extra argument
 'subpath' to get an ID of a file located in '115:path'.
 `,
+}, {
+	Name:  "addshare",
+	Short: "Add shared files/dirs from a share link",
+	Long: `This command adds shared files/dirs from a share link.
+
+Usage:
+
+    rclone backend addshare 115:dirpath link
+
+All content from the link will be copied to the folder "dirpath". 
+If the path doesn't exist, rclone will create it for you.
+`,
 }}
 
 // Command the backend to run a named command
@@ -1211,6 +1223,19 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			path = arg[0]
 		}
 		return f.getID(ctx, path)
+	case "addshare":
+		if len(arg) < 1 {
+			return nil, errors.New("need at least 1 argument")
+		}
+		shareCode, receiveCode, err := parseShareLink(arg[0])
+		if err != nil {
+			return nil, err
+		}
+		dirID, err := f.dirCache.FindDir(ctx, "", true)
+		if err != nil {
+			return nil, err
+		}
+		return nil, f.copyFromShare(ctx, shareCode, receiveCode, "", dirID)
 	case "stats": // 显示属性
 		path := ""
 		if len(arg) > 0 {

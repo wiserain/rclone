@@ -516,14 +516,16 @@ OUTER:
 	return
 }
 
-func (f *Fs) copyFromShare(ctx context.Context, src fs.Object, cid string) (err error) {
-	srcObj, _ := src.(*Object) // this is already checked
+// copyFromShare copies shared object by its shareCode, receiveCode, fid
+//
+// fid = "0" or "" means root directory containing all files/dirs
+func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid string) (err error) {
 	form := url.Values{}
-	form.Set("share_code", srcObj.fs.opt.ShareCode)     // src
-	form.Set("receive_code", srcObj.fs.opt.ReceiveCode) // src
-	form.Set("file_id", srcObj.id)                      // src
-	form.Set("cid", cid)                                // dst
-	form.Set("user_id", f.userID)                       // dst
+	form.Set("share_code", shareCode)     // src
+	form.Set("receive_code", receiveCode) // src
+	form.Set("file_id", fid)              // src
+	form.Set("cid", cid)                  // dst
+	form.Set("user_id", f.userID)         // dst
 
 	opts := rest.Opts{
 		Method:          "POST",
@@ -543,6 +545,11 @@ func (f *Fs) copyFromShare(ctx context.Context, src fs.Object, cid string) (err 
 		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
 	}
 	return
+}
+
+func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (err error) {
+	srcObj, _ := src.(*Object) // this is already checked
+	return f.copyFromShare(ctx, srcObj.fs.opt.ShareCode, srcObj.fs.opt.ReceiveCode, srcObj.id, cid)
 }
 
 func (f *Fs) getDownloadURLFromShare(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
