@@ -413,11 +413,6 @@ func (f *Fs) _addURLs(ctx context.Context, input []byte) (output []byte, err err
 
 // add offline download task for multiple urls
 func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.NewURL, err error) {
-	if f.userID == "" {
-		if err := f.getUploadBasicInfo(ctx); err != nil {
-			return nil, fmt.Errorf("failed to get user id: %w", err)
-		}
-	}
 	parentID, _ := f.dirCache.FindDir(ctx, dir, false)
 	payload := map[string]string{
 		"ac":         "add_task_urls",

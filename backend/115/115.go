@@ -248,8 +248,8 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
-	userID       string     // for uploads
-	userkey      string     // for uploads
+	userID       string     // for uploads, adding offline tasks, and receiving from share link
+	userkey      string     // only for uploads
 	fileObj      *fs.Object // mod
 }
 
@@ -394,6 +394,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 		Path:     "/",
 		HttpOnly: true,
 	})
+	f.userID, _, _ = strings.Cut(opt.UID, "_")
 	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(opt.PacerMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
 }

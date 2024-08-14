@@ -311,9 +311,12 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	size := src.Size()
 
 	// check upload available
-	if f.userID == "" {
+	if f.userkey == "" {
 		if err := f.getUploadBasicInfo(ctx); err != nil {
 			return nil, fmt.Errorf("failed to get upload basic info: %w", err)
+		}
+		if f.userID == "" || f.userkey == "" {
+			return nil, fmt.Errorf("empty userid or userkey")
 		}
 	}
 	if size > maxUploadSize {
