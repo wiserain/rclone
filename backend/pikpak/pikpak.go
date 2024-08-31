@@ -1292,12 +1292,11 @@ func (f *Fs) uploadByForm(ctx context.Context, in io.Reader, name string, size i
 
 func (f *Fs) uploadByResumable(ctx context.Context, in io.Reader, name string, size int64, resumable *api.Resumable) (err error) {
 	p := resumable.Params
-	endpoint := strings.Join(strings.Split(p.Endpoint, ".")[1:], ".") // "mypikpak.com"
 
 	cfg := &aws.Config{
 		Credentials: credentials.NewStaticCredentials(p.AccessKeyID, p.AccessKeySecret, p.SecurityToken),
 		Region:      aws.String("pikpak"),
-		Endpoint:    &endpoint,
+		Endpoint:    aws.String(p.Endpoint), // "mypikpak.com"
 	}
 	sess, err := session.NewSession(cfg)
 	if err != nil {
