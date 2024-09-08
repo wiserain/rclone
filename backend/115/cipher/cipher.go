@@ -199,7 +199,7 @@ func xor(src, key []byte) []byte {
 	num := 0
 	for _, s := range src {
 		if num >= keyLen {
-			num = num % keyLen
+			num %= keyLen
 		}
 		secret = append(secret, s^key[num])
 		num++
