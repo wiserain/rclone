@@ -5,8 +5,8 @@ package mount2
 
 import (
 	"fmt"
-	"log"
 	"runtime"
+	"time"
 
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -149,7 +149,7 @@ func mountOptions(fsys *FS, f fs.Fs, opt *mountlib.Options) (mountOpts *fuse.Mou
 		opts = append(opts, "ro")
 	}
 	if fsys.opt.WritebackCache {
-		log.Printf("FIXME --write-back-cache not supported")
+		fs.Printf(nil, "FIXME --write-back-cache not supported")
 		// FIXME opts = append(opts,fuse.WritebackCache())
 	}
 	// Some OS X only options
@@ -215,8 +215,8 @@ func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error
 	// FIXME fill out
 	opts := fusefs.Options{
 		MountOptions: *mountOpts,
-		EntryTimeout: &opt.AttrTimeout,
-		AttrTimeout:  &opt.AttrTimeout,
+		EntryTimeout: (*time.Duration)(&opt.AttrTimeout),
+		AttrTimeout:  (*time.Duration)(&opt.AttrTimeout),
 		GID:          VFS.Opt.GID,
 		UID:          VFS.Opt.UID,
 	}

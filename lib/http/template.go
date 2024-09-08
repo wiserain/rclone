@@ -3,14 +3,15 @@ package http
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"html/template"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
 
+	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/flags"
 )
 
@@ -56,7 +57,7 @@ be used to render HTML based on specific conditions.
 
 	tmpl, err := template.New("template help").Parse(help)
 	if err != nil {
-		log.Fatal("Fatal error parsing template", err)
+		fs.Fatal(nil, fmt.Sprint("Fatal error parsing template", err))
 	}
 
 	data := struct {
@@ -67,14 +68,21 @@ be used to render HTML based on specific conditions.
 	buf := &bytes.Buffer{}
 	err = tmpl.Execute(buf, data)
 	if err != nil {
-		log.Fatal("Fatal error executing template", err)
+		fs.Fatal(nil, fmt.Sprint("Fatal error executing template", err))
 	}
 	return buf.String()
 }
 
+// TemplateConfigInfo descripts the Options in use
+var TemplateConfigInfo = fs.Options{{
+	Name:    "template",
+	Default: "",
+	Help:    "User-specified template",
+}}
+
 // TemplateConfig for the templating functionality
 type TemplateConfig struct {
-	Path string
+	Path string `config:"template"`
 }
 
 // AddFlagsPrefix for the templating functionality
@@ -88,6 +96,9 @@ func AddTemplateFlagsPrefix(flagSet *pflag.FlagSet, prefix string, cfg *Template
 }
 
 // DefaultTemplateCfg returns a new config which can be customized by command line flags
+//
+// Note that this needs to be kept in sync with TemplateConfigInfo above and
+// can be removed when all callers have been converted.
 func DefaultTemplateCfg() TemplateConfig {
 	return TemplateConfig{}
 }

@@ -278,6 +278,36 @@ provider.`,
 				Value: "pca",
 				Help:  "OVH Public Cloud Archive",
 			}},
+		}, {
+			Name: "fetch_until_empty_page",
+			Help: `When paginating, always fetch unless we received an empty page.
+
+Consider using this option if rclone listings show fewer objects
+than expected, or if repeated syncs copy unchanged objects.
+
+It is safe to enable this, but rclone may make more API calls than
+necessary.
+
+This is one of a pair of workarounds to handle implementations
+of the Swift API that do not implement pagination as expected.  See
+also "partial_page_fetch_threshold".`,
+			Default:  false,
+			Advanced: true,
+		}, {
+			Name: "partial_page_fetch_threshold",
+			Help: `When paginating, fetch if the current page is within this percentage of the limit.
+
+Consider using this option if rclone listings show fewer objects
+than expected, or if repeated syncs copy unchanged objects.
+
+It is safe to enable this, but rclone may make more API calls than
+necessary.
+
+This is one of a pair of workarounds to handle implementations
+of the Swift API that do not implement pagination as expected.  See
+also "fetch_until_empty_page".`,
+			Default:  0,
+			Advanced: true,
 		}}, SharedOptions...),
 	})
 }
@@ -308,6 +338,8 @@ type Options struct {
 	NoLargeObjects              bool                 `config:"no_large_objects"`
 	UseSegmentsContainer        fs.Tristate          `config:"use_segments_container"`
 	Enc                         encoder.MultiEncoder `config:"encoding"`
+	FetchUntilEmptyPage         bool                 `config:"fetch_until_empty_page"`
+	PartialPageFetchThreshold   int                  `config:"partial_page_fetch_threshold"`
 }
 
 // Fs represents a remote swift server
@@ -462,6 +494,8 @@ func swiftConnection(ctx context.Context, opt *Options, name string) (*swift.Con
 		ConnectTimeout:              10 * ci.ConnectTimeout, // Use the timeouts in the transport
 		Timeout:                     10 * ci.Timeout,        // Use the timeouts in the transport
 		Transport:                   fshttp.NewTransport(ctx),
+		FetchUntilEmptyPage:         opt.FetchUntilEmptyPage,
+		PartialPageFetchThreshold:   opt.PartialPageFetchThreshold,
 	}
 	if opt.EnvAuth {
 		err := c.ApplyEnvironment()
@@ -849,7 +883,7 @@ func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) (
 
 // About gets quota information
 func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
-	var total, objects int64
+	var used, objects, total int64
 	if f.rootContainer != "" {
 		var container swift.Container
 		err = f.pacer.Call(func() (bool, error) {
@@ -859,8 +893,9 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("container info failed: %w", err)
 		}
-		total = container.Bytes
+		used = container.Bytes
 		objects = container.Count
+		total = container.QuotaBytes
 	} else {
 		var containers []swift.Container
 		err = f.pacer.Call(func() (bool, error) {
@@ -871,13 +906,18 @@ func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
 			return nil, fmt.Errorf("container listing failed: %w", err)
 		}
 		for _, c := range containers {
-			total += c.Bytes
+			used += c.Bytes
 			objects += c.Count
+			total += c.QuotaBytes
 		}
 	}
 	usage = &fs.Usage{
-		Used:    fs.NewUsageValue(total),   // bytes in use
+		Used:    fs.NewUsageValue(used),    // bytes in use
 		Objects: fs.NewUsageValue(objects), // objects in use
+	}
+	if total > 0 {
+		usage.Total = fs.NewUsageValue(total)
+		usage.Free = fs.NewUsageValue(total - used)
 	}
 	return usage, nil
 }
@@ -1374,14 +1414,6 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return shouldRetryHeaders(ctx, rxHeaders, err)
 	})
 	return
-}
-
-// min returns the smallest of x, y
-func min(x, y int64) int64 {
-	if x < y {
-		return x
-	}
-	return y
 }
 
 // Get the segments for a large object

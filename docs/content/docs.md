@@ -42,12 +42,15 @@ See the following for detailed instructions for
   * [Digi Storage](/koofr/#digi-storage)
   * [Dropbox](/dropbox/)
   * [Enterprise File Fabric](/filefabric/)
+  * [Files.com](/filescom/)
   * [FTP](/ftp/)
+  * [Gofile](/gofile/)
   * [Google Cloud Storage](/googlecloudstorage/)
   * [Google Drive](/drive/)
   * [Google Photos](/googlephotos/)
   * [Hasher](/hasher/) - to handle checksums for other remotes
   * [HDFS](/hdfs/)
+  * [Hetzner Storage Box](/sftp/#hetzner-storage-box)
   * [HiDrive](/hidrive/)
   * [HTTP](/http/)
   * [Internet Archive](/internetarchive/)
@@ -65,11 +68,13 @@ See the following for detailed instructions for
   * [Oracle Object Storage](/oracleobjectstorage/)
   * [Pcloud](/pcloud/)
   * [PikPak](/pikpak/)
+  * [Pixeldrain](/pixeldrain/)
   * [premiumize.me](/premiumizeme/)
   * [put.io](/putio/)
   * [Proton Drive](/protondrive/)
   * [QingStor](/qingstor/)
   * [Quatrix by Maytech](/quatrix/)
+  * [rsync.net](/sftp/#rsync-net)
   * [Seafile](/seafile/)
   * [SFTP](/sftp/)
   * [Sia](/sia/)
@@ -153,7 +158,7 @@ The main rclone commands with most used first
 * [rclone authorize](/commands/rclone_authorize/)	- Remote authorization.
 * [rclone cat](/commands/rclone_cat/)		- Concatenate any files and send them to stdout.
 * [rclone copyto](/commands/rclone_copyto/)	- Copy files from source to dest, skipping already copied.
-* [rclone genautocomplete](/commands/rclone_genautocomplete/)	- Output shell completion scripts for rclone.
+* [rclone completion](/commands/rclone_completion/)	- Output shell completion scripts for rclone.
 * [rclone gendocs](/commands/rclone_gendocs/)	- Output markdown docs for rclone to the directory supplied.
 * [rclone listremotes](/commands/rclone_listremotes/)	- List all the remotes in the config file.
 * [rclone mount](/commands/rclone_mount/)	- Mount the remote as a mountpoint.
@@ -724,12 +729,20 @@ for upload:download, e.g.`10M:1M`.
   characters. It is optional.
 - `HH:MM` is an hour from 00:00 to 23:59.
 
+Entries can be separated by spaces or semicolons.
+
+**Note:** Semicolons can be used as separators instead of spaces to avoid parsing issues in environments like Docker.
+
 An example of a typical timetable to avoid link saturation during daytime
 working hours could be:
 
+Using spaces as separators:
 `--bwlimit "08:00,512k 12:00,10M 13:00,512k 18:00,30M 23:00,off"`
 
-In this example, the transfer bandwidth will be set to 512 KiB/s
+Using semicolons as separators:
+`--bwlimit "08:00,512k;12:00,10M;13:00,512k;18:00,30M;23:00,off"`
+
+In these examples, the transfer bandwidth will be set to 512 KiB/s
 at 8am every day. At noon, it will rise to 10 MiB/s, and drop back
 to 512 KiB/sec at 1pm. At 6pm, the bandwidth limit will be set to
 30 MiB/s, and at 11pm it will be completely disabled (full speed).
@@ -737,7 +750,11 @@ Anything between 11pm and 8am will remain unlimited.
 
 An example of timetable with `WEEKDAY` could be:
 
+Using spaces as separators:
 `--bwlimit "Mon-00:00,512 Fri-23:59,10M Sat-10:00,1M Sun-20:00,off"`
+
+Using semicolons as separators:
+`--bwlimit "Mon-00:00,512;Fri-23:59,10M;Sat-10:00,1M;Sun-20:00,off"`
 
 It means that, the transfer bandwidth will be set to 512 KiB/s on
 Monday. It will rise to 10 MiB/s before the end of Friday. At 10:00
@@ -1330,11 +1347,12 @@ flag set) such as:
 - local
 - ftp
 - sftp
+- pcloud
 
 Without `--inplace` (the default) rclone will first upload to a
 temporary file with an extension like this, where `XXXXXX` represents a
-random string and `.partial` is [--partial-suffix](#partial-suffix) value
-(`.partial` by default).
+hash of the source file's fingerprint and `.partial` is 
+[--partial-suffix](#partial-suffix) value (`.partial` by default).
 
     original-file-name.XXXXXX.partial
 
@@ -1906,11 +1924,12 @@ Suffix length limit is 16 characters.
 
 The default is `.partial`.
 
-### --password-command SpaceSepList ###
+### --password-command SpaceSepList {#password-command}
 
 This flag supplies a program which should supply the config password
 when run. This is an alternative to rclone prompting for the password
-or setting the `RCLONE_CONFIG_PASS` variable.
+or setting the `RCLONE_CONFIG_PASS` variable. It is also used when
+setting the config password for the first time.
 
 The argument to this should be a command with a space separated list
 of arguments. If one of the arguments has a space in then enclose it
@@ -1923,6 +1942,11 @@ Eg
     --password-command "echo hello"
     --password-command 'echo "hello with space"'
     --password-command 'echo "hello with ""quotes"" and space"'
+
+Note that when changing the configuration password the environment
+variable `RCLONE_PASSWORD_CHANGE=1` will be set. This can be used to
+distinguish initial decryption of the config file from the new
+password.
 
 See the [Configuration Encryption](#configuration-encryption) for more info.
 
@@ -2527,6 +2551,12 @@ encryption from your configuration.
 
 There is no way to recover the configuration if you lose your password.
 
+You can also use
+
+- [rclone config encryption set](/commands/rclone_config_encryption_set/) to set the config encryption directly
+- [rclone config encryption remove](/commands/rclone_config_encryption_remove/) to remove it
+- [rclone config encryption check](/commands/rclone_config_encryption_check/) to check that it is encrypted properly.
+
 rclone uses [nacl secretbox](https://godoc.org/golang.org/x/crypto/nacl/secretbox)
 which in turn uses XSalsa20 and Poly1305 to encrypt and authenticate
 your configuration with secret-key cryptography.
@@ -2559,7 +2589,7 @@ An alternate means of supplying the password is to provide a script
 which will retrieve the password and print on standard output.  This
 script should have a fully specified path name and not rely on any
 environment variables.  The script is supplied either via
-`--password-command="..."` command line argument or via the
+[`--password-command="..."`](#password-command) command line argument or via the
 `RCLONE_PASSWORD_COMMAND` environment variable.
 
 One useful example of this is using the `passwordstore` application
@@ -2596,11 +2626,62 @@ a configuration file, you can avoid it being loaded by overriding the
 location, e.g. with one of the documented special values for
 memory-only configuration. Since only backend options can be stored
 in configuration files, this is normally unnecessary for commands
-that do not operate on backends, e.g. `genautocomplete`. However,
+that do not operate on backends, e.g. `completion`. However,
 it will be relevant for commands that do operate on backends in
 general, but are used without referencing a stored remote, e.g.
 listing local filesystem paths, or
 [connection strings](#connection-strings): `rclone --config="" ls .`
+
+Configuration Encryption Cheatsheet
+-----------------------------------
+You can quickly apply a configuration encryption without plain-text
+at rest or transfer. Detailed instructions for popular OSes:
+
+### Mac ###
+
+* Generate and store a password
+
+`security add-generic-password -a rclone -s config -w $(openssl rand -base64 40)`
+
+* Add the retrieval instruction to your .zprofile / .profile
+
+`export RCLONE_PASSWORD_COMMAND="/usr/bin/security find-generic-password -a rclone -s config -w"`
+
+### Linux ###
+
+* Prerequisite
+
+Linux doesn't come with a default password manager. Let's install
+the "pass" utility using a package manager, e.g. `apt install pass`,
+ `yum install pass`,
+ [etc.](https://www.passwordstore.org/#download); then initialize a
+ password store:
+
+`pass init rclone`
+
+* Generate and store a password
+
+`echo $(openssl rand -base64 40) | pass insert -m rclone/config`
+
+* Add the retrieval instruction
+
+`export RCLONE_PASSWORD_COMMAND="/usr/bin/pass rclone/config"`
+
+### Windows ###
+
+* Generate and store a password
+
+`New-Object -TypeName PSCredential -ArgumentList "rclone", (ConvertTo-SecureString -String ([System.Web.Security.Membership]::GeneratePassword(40, 10)) -AsPlainText -Force) | Export-Clixml -Path "rclone-credential.xml"`
+
+* Add the password retrieval instruction
+
+`[Environment]::SetEnvironmentVariable("RCLONE_PASSWORD_COMMAND", "[System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR((Import-Clixml -Path "rclone-credential.xml").Password))")`
+
+### Encrypt the config file (all systems) ###
+
+* Execute `rclone config` -> `s`
+
+* Add/update the password from previous steps
 
 Developer options
 -----------------
@@ -2754,6 +2835,17 @@ If you use the `--syslog` flag then rclone will log to syslog and the
 Rclone prefixes all log messages with their level in capitals, e.g. INFO
 which makes it easy to grep the log file for different kinds of
 information.
+
+Metrics
+-------
+
+Rclone can publish metrics in the OpenMetrics/Prometheus format.
+
+To enable the metrics endpoint, use the `--metrics-addr` flag. Metrics can also be published on the `--rc-addr` port if the `--rc` flag and `--rc-enable-metrics` flags are supplied or if using rclone rcd `--rc-enable-metrics`
+
+Rclone provides extensive configuration options for the metrics HTTP endpoint. These settings are grouped under the Metrics section and have a prefix `--metrics-*`.
+
+When metrics are enabled with `--rc-enable-metrics`, they will be published on the same port as the rc API. In this case, the `--metrics-*` flags will be ignored, and the HTTP endpoint configuration will be managed by the `--rc-*` parameters.
 
 Exit Code
 ---------

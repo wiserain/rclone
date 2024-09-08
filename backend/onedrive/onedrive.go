@@ -1927,7 +1927,7 @@ func (f *Fs) PublicLink(ctx context.Context, remote string, expire fs.Duration, 
 		return shareURL, nil
 	}
 
-	cnvFailMsg := "Don't know how to convert share link to direct link - returning the link as is"
+	const cnvFailMsg = "Don't know how to convert share link to direct link - returning the link as is"
 	directURL := ""
 	segments := strings.Split(shareURL, "/")
 	switch f.driveType {
@@ -2538,6 +2538,9 @@ func (o *Object) uploadSinglepart(ctx context.Context, in io.Reader, src fs.Obje
 	}
 	// Set the mod time now and read metadata
 	info, err = o.fs.fetchAndUpdateMetadata(ctx, src, options, o)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch and update metadata: %w", err)
+	}
 	return info, o.setMetaData(info)
 }
 

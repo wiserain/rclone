@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -26,7 +25,6 @@ import (
 	"github.com/rclone/rclone/fs/walk"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/vfs/vfscommon"
-	"github.com/rclone/rclone/vfs/vfsflags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,19 +48,19 @@ func RunTests(t *testing.T, useVFS bool, minimumRequiredCacheMode vfscommon.Cach
 	}
 	tests := []struct {
 		cacheMode vfscommon.CacheMode
-		writeBack time.Duration
+		writeBack fs.Duration
 	}{
 		{cacheMode: vfscommon.CacheModeOff},
 		{cacheMode: vfscommon.CacheModeMinimal},
 		{cacheMode: vfscommon.CacheModeWrites},
 		{cacheMode: vfscommon.CacheModeFull},
-		{cacheMode: vfscommon.CacheModeFull, writeBack: 100 * time.Millisecond},
+		{cacheMode: vfscommon.CacheModeFull, writeBack: fs.Duration(100 * time.Millisecond)},
 	}
 	for _, test := range tests {
 		if test.cacheMode < minimumRequiredCacheMode {
 			continue
 		}
-		vfsOpt := vfsflags.Opt
+		vfsOpt := vfscommon.Opt
 		vfsOpt.CacheMode = test.cacheMode
 		vfsOpt.WriteBack = test.writeBack
 		run = newRun(useVFS, &vfsOpt, mountFn)
@@ -70,7 +68,7 @@ func RunTests(t *testing.T, useVFS bool, minimumRequiredCacheMode vfscommon.Cach
 		if test.writeBack > 0 {
 			what += fmt.Sprintf(",WriteBack=%v", test.writeBack)
 		}
-		log.Printf("Starting test run with %s", what)
+		fs.Logf(nil, "Starting test run with %s", what)
 		ok := t.Run(what, func(t *testing.T) {
 			t.Run("TestTouchAndDelete", TestTouchAndDelete)
 			t.Run("TestRenameOpenHandle", TestRenameOpenHandle)
@@ -101,7 +99,7 @@ func RunTests(t *testing.T, useVFS bool, minimumRequiredCacheMode vfscommon.Cach
 			t.Run("TestWriteFileDup", TestWriteFileDup)
 			t.Run("TestWriteFileAppend", TestWriteFileAppend)
 		})
-		log.Printf("Finished test run with %s (ok=%v)", what, ok)
+		fs.Logf(nil, "Finished test run with %s (ok=%v)", what, ok)
 		run.Finalise()
 		if !ok {
 			break
@@ -147,12 +145,12 @@ func newRun(useVFS bool, vfsOpt *vfscommon.Options, mountFn mountlib.MountFn) *R
 	var err error
 	r.fremote, r.fremoteName, r.cleanRemote, err = fstest.RandomRemote()
 	if err != nil {
-		log.Fatalf("Failed to open remote %q: %v", *fstest.RemoteName, err)
+		fs.Fatalf(nil, "Failed to open remote %q: %v", *fstest.RemoteName, err)
 	}
 
 	err = r.fremote.Mkdir(context.Background(), "")
 	if err != nil {
-		log.Fatalf("Failed to open mkdir %q: %v", *fstest.RemoteName, err)
+		fs.Fatalf(nil, "Failed to open mkdir %q: %v", *fstest.RemoteName, err)
 	}
 
 	r.startMountSubProcess()
@@ -177,14 +175,14 @@ func (r *Run) Finalise() {
 		r.sendMountCommand("exit")
 		_, err := r.cmd.Process.Wait()
 		if err != nil {
-			log.Fatalf("mount sub process failed: %v", err)
+			fs.Fatalf(nil, "mount sub process failed: %v", err)
 		}
 	}
 	r.cleanRemote()
 	if !r.useVFS {
 		err := os.RemoveAll(r.mountPath)
 		if err != nil {
-			log.Printf("Failed to clean mountPath %q: %v", r.mountPath, err)
+			fs.Logf(nil, "Failed to clean mountPath %q: %v", r.mountPath, err)
 		}
 	}
 }
@@ -235,10 +233,10 @@ func (r *Run) readLocal(t *testing.T, dir dirMap, filePath string) {
 		if fi.IsDir() {
 			dir[name+"/"] = struct{}{}
 			r.readLocal(t, dir, name)
-			assert.Equal(t, r.vfsOpt.DirPerms&os.ModePerm, fi.Mode().Perm())
+			assert.Equal(t, os.FileMode(r.vfsOpt.DirPerms)&os.ModePerm, fi.Mode().Perm())
 		} else {
 			dir[fmt.Sprintf("%s %d", name, fi.Size())] = struct{}{}
-			assert.Equal(t, r.vfsOpt.FilePerms&os.ModePerm, fi.Mode().Perm())
+			assert.Equal(t, os.FileMode(r.vfsOpt.FilePerms)&os.ModePerm, fi.Mode().Perm())
 		}
 	}
 }
@@ -377,5 +375,5 @@ func TestRoot(t *testing.T) {
 	fi, err := os.Lstat(run.mountPath)
 	require.NoError(t, err)
 	assert.True(t, fi.IsDir())
-	assert.Equal(t, run.vfsOpt.DirPerms&os.ModePerm, fi.Mode().Perm())
+	assert.Equal(t, os.FileMode(run.vfsOpt.DirPerms)&os.ModePerm, fi.Mode().Perm())
 }
