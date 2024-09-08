@@ -304,7 +304,7 @@ jobs:
       - name: Code quality test (Linux)
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.59.1
+          version: latest
           skip-cache: true
 
       - name: Code quality test (Windows)
@@ -312,7 +312,7 @@ jobs:
         env:
           GOOS: "windows"
         with:
-          version: v1.59.1
+          version: latest
           skip-cache: true
 
       - name: Code quality test (macOS)
@@ -320,7 +320,7 @@ jobs:
         env:
           GOOS: "darwin"
         with:
-          version: v1.59.1
+          version: latest
           skip-cache: true
 
       - name: Code quality test (FreeBSD)
@@ -328,7 +328,7 @@ jobs:
         env:
           GOOS: "freebsd"
         with:
-          version: v1.59.1
+          version: latest
           skip-cache: true
 
       - name: Code quality test (OpenBSD)
@@ -336,7 +336,7 @@ jobs:
         env:
           GOOS: "openbsd"
         with:
-          version: v1.59.1
+          version: latest
           skip-cache: true
 
       - name: Install govulncheck
