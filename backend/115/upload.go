@@ -141,7 +141,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		filesize     = strconv.FormatInt(size, 10)
 		fileID       = strings.ToUpper(sha1sum)
 		target       = "U_1_" + dirID            // target id
-		ts           = time.Now().Unix()         // timestamp in int64
+		ts           = time.Now().UnixMilli()    // timestamp in int64
 		t            = strconv.FormatInt(ts, 10) // timestamp in string
 		ecdhCipher   *cipher.EcdhCipher
 		encodedToken string
