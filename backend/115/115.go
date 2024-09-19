@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"path"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -48,8 +49,7 @@ import (
 const (
 	domain           = "www.115.com"
 	rootURL          = "https://webapi.115.com"
-	appVer           = "27.0.3.7"
-	defaultUserAgent = "Mozilla/5.0 115Browser/" + appVer
+	defaultUserAgent = "Mozilla/5.0 115Browser/27.0.3.7"
 
 	defaultMinSleep = fs.Duration(250 * time.Millisecond) // 4 transactions per second
 	maxSleep        = 2 * time.Second
@@ -101,8 +101,6 @@ func init() {
 			Help:      "password from share link",
 			Sensitive: true,
 		}, {
-			// this is useless at the moment because there's no way to upload
-			// without defaultUserAgent and appVer 2.0.3.6
 			Name:     "user_agent",
 			Default:  defaultUserAgent,
 			Advanced: true,
@@ -258,6 +256,7 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolderID string
+	appVer       string     // parsed from user-agent; // https://appversion.115.com/1/web/1.0/api/getMultiVer
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
 	userkey      string     // only for uploads
 	isShare      bool       // mark it is from shared or not
@@ -463,6 +462,15 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
 		ServerSideAcrossConfigs: true,  // Can copy from shared FS (this is checked in Copy/Move/DirMove)
 	}).Fill(ctx, f)
+
+	// setting appVer
+	re := regexp.MustCompile(`\d+\.\d+\.\d+(\.\d+)?$`)
+	if m := re.FindStringSubmatch(opt.UserAgent); m == nil {
+		return nil, fmt.Errorf("%q does not contain a valid app version", opt.UserAgent)
+	} else {
+		f.appVer = m[0]
+		fs.Debugf(nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
+	}
 
 	if err := f.newClientWithPacer(ctx, opt); err != nil {
 		return nil, err

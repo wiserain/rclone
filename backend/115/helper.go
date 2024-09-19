@@ -430,7 +430,7 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 	parentID, _ := f.dirCache.FindDir(ctx, dir, false)
 	payload := map[string]string{
 		"ac":         "add_task_urls",
-		"app_ver":    appVer,
+		"app_ver":    f.appVer,
 		"uid":        f.userID,
 		"wp_path_id": parentID,
 	}

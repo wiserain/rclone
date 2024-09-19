@@ -127,7 +127,7 @@ func generateSignature(userID, fileID, target, userKey string) string {
 	return strings.ToUpper(hex.EncodeToString(sh1Sig[:]))
 }
 
-func generateToken(userID, fileID, fileSize, signKey, signVal, timeStamp string) string {
+func generateToken(userID, fileID, fileSize, signKey, signVal, timeStamp, appVer string) string {
 	userIDMd5 := md5.Sum([]byte(userID))
 	tokenMd5 := md5.Sum([]byte(md5Salt + fileID + fileSize + signKey + signVal + userID + timeStamp + hex.EncodeToString(userIDMd5[:]) + appVer))
 	return hex.EncodeToString(tokenMd5[:])
@@ -161,7 +161,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	// form that will be encrypted
 	form := url.Values{}
 	form.Set("appid", "0")
-	form.Set("appversion", appVer) // const
+	form.Set("appversion", f.appVer)
 	form.Set("userid", userID)
 	form.Set("filename", filename)
 	form.Set("filesize", filesize)
@@ -169,7 +169,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	form.Set("target", target)
 	form.Set("sig", generateSignature(userID, fileID, target, userKey))
 	form.Set("t", t)
-	form.Set("token", generateToken(userID, fileID, filesize, signKey, signVal, t))
+	form.Set("token", generateToken(userID, fileID, filesize, signKey, signVal, t, f.appVer))
 	if signKey != "" && signVal != "" {
 		form.Set("sign_key", signKey)
 		form.Set("sign_val", signVal)
