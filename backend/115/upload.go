@@ -279,6 +279,18 @@ func (f *Fs) newOSSBucket(ctx context.Context, ui *api.UploadInitInfo) (bucket *
 	return
 }
 
+// unWrapObjectInfo returns the underlying Object unwrapped as much as
+// possible or nil.
+func unWrapObjectInfo(oi fs.ObjectInfo) fs.Object {
+	if o, ok := oi.(fs.Object); ok {
+		return fs.UnWrapObject(o)
+	} else if do, ok := oi.(*fs.OverrideRemote); ok {
+		// Unwrap if it is an operations.OverrideRemote
+		return do.UnWrap()
+	}
+	return nil
+}
+
 func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSpec string) (sha1sum string, err error) {
 	var start, end int64
 	if _, err = fmt.Sscanf(rangeSpec, "%d-%d", &start, &end); err != nil {
@@ -288,7 +300,7 @@ func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSp
 	var reader io.Reader
 	if ra, ok := in.(io.ReaderAt); ok {
 		reader = io.NewSectionReader(ra, start, end-start+1)
-	} else if srcObj := fs.UnWrapObjectInfo(src); srcObj != nil {
+	} else if srcObj := unWrapObjectInfo(src); srcObj != nil {
 		rc, err := srcObj.Open(ctx, &fs.RangeOption{Start: start, End: end})
 		if err != nil {
 			return "", fmt.Errorf("failed to open source: %w", err)
