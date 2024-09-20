@@ -258,7 +258,7 @@ type Fs struct {
 	rootFolderID string
 	appVer       string     // parsed from user-agent; // https://appversion.115.com/1/web/1.0/api/getMultiVer
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
-	userkey      string     // only for uploads
+	userkey      string     // lazy-loaded as it's only for uploads
 	isShare      bool       // mark it is from shared or not
 	fileObj      *fs.Object // mod
 }

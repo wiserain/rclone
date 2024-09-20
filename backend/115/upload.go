@@ -135,8 +135,6 @@ func generateToken(userID, fileID, fileSize, signKey, signVal, timeStamp, appVer
 
 func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, signKey, signVal string) (info *api.UploadInitInfo, err error) {
 	var (
-		userID       = f.userID
-		userKey      = f.userkey
 		filename     = f.opt.Enc.FromStandardName(name)
 		filesize     = strconv.FormatInt(size, 10)
 		fileID       = strings.ToUpper(sha1sum)
@@ -162,14 +160,14 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	form := url.Values{}
 	form.Set("appid", "0")
 	form.Set("appversion", f.appVer)
-	form.Set("userid", userID)
+	form.Set("userid", f.userID)
 	form.Set("filename", filename)
 	form.Set("filesize", filesize)
 	form.Set("fileid", fileID)
 	form.Set("target", target)
-	form.Set("sig", generateSignature(userID, fileID, target, userKey))
+	form.Set("sig", generateSignature(f.userID, fileID, target, f.userkey))
 	form.Set("t", t)
-	form.Set("token", generateToken(userID, fileID, filesize, signKey, signVal, t, f.appVer))
+	form.Set("token", generateToken(f.userID, fileID, filesize, signKey, signVal, t, f.appVer))
 	if signKey != "" && signVal != "" {
 		form.Set("sign_key", signKey)
 		form.Set("sign_val", signVal)
