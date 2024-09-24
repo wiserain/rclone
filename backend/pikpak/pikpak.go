@@ -194,7 +194,8 @@ func init() {
 			Default:  defaultUserAgent,
 			Advanced: true,
 			Help: fmt.Sprintf(`HTTP user agent for pikpak.
-	Defaults to "%s" or "--pikpak-user-agent" provided on command line.`, defaultUserAgent),
+
+Defaults to "%s" or "--pikpak-user-agent" provided on command line.`, defaultUserAgent),
 		}, {
 			Name: "root_folder_id",
 			Help: `ID of the root folder.
@@ -303,7 +304,6 @@ type Fs struct {
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer          // pacer for API calls
 	rootFolderID string             // the id of the root folder
-	deviceID     string             // device id used for api requests
 	client       *http.Client       // authorized client
 	fileObj      *fs.Object         // mod
 	m            configmap.Mapper
@@ -555,7 +555,13 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		CanHaveEmptyDirectories: true, // can have empty directories
 		NoMultiThreading:        true, // can't have multiple threads downloading
 	}).Fill(ctx, f)
-	f.deviceID = genDeviceID()
+
+	// new device id if necessary
+	if len(f.opt.DeviceID) != 32 {
+		f.opt.DeviceID = genDeviceID()
+		m.Set("device_id", f.opt.DeviceID)
+		fs.Infof(nil, "Using new device id %q", f.opt.DeviceID)
+	}
 
 	// new device id if necessary
 	if len(f.opt.DeviceID) != 32 {
