@@ -27,7 +27,10 @@ func parseRootID(s string) (rootID, receiveCode string, err error) {
 		return m[len(m)-1], "", nil
 	}
 	// Assume it is a share link
-	return parseShareLink(rootID)
+	if sCode, rCode, _ := parseShareLink(rootID); len(sCode) == 11 {
+		return sCode, rCode, nil
+	}
+	return "", "", nil
 }
 
 // get an id of file or directory
