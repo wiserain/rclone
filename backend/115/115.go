@@ -637,6 +637,18 @@ func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 
 // FindLeaf finds a directory of name leaf in the folder with ID pathID
 func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut string, found bool, err error) {
+	// try using getDirID first
+	if f.rootFolderID == "0" && !f.isShare {
+		if path, ok := f.dirCache.GetInv(pathID); ok {
+			if pathIDOut, err = f.getDirID(ctx, path+"/"+leaf); err != nil {
+				if err == fs.ErrorDirNotFound {
+					return pathIDOut, found, nil
+				}
+				return
+			}
+			return pathIDOut, true, err
+		}
+	}
 	// Find the leaf in pathID
 	found, err = f.listAll(ctx, pathID, func(item *api.File) bool {
 		if item.Name == leaf && item.IsDir() {

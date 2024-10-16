@@ -303,12 +303,12 @@ func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.Dow
 // The input directory path should begin with a forward slash.
 // The output from API calls will be "0" if the path does not exist or is a file.
 func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
+	dir = strings.TrimPrefix(dir, "/")
 	if dir == "" {
 		return "0", nil
 	}
-	dir = path.Join("/", dir)
 	params := url.Values{}
-	params.Set("path", f.opt.Enc.FromStandardPath(dir))
+	params.Set("path", f.opt.Enc.FromStandardPath("/"+dir))
 	opts := rest.Opts{
 		Method:     "GET",
 		Path:       "/files/getid",
