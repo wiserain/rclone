@@ -273,9 +273,7 @@ type Object struct {
 	size        int64
 	sha1sum     string
 	pickCode    string
-	mTime       time.Time        // modified/updated at
-	cTime       time.Time        // created at
-	aTime       time.Time        // last accessed at
+	modTime     time.Time        // modification time of the object
 	durl        *api.DownloadURL // link to download the object
 	durlMu      *sync.Mutex
 }
@@ -861,8 +859,8 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object - still needs id, sha1sum, pickCode, mTime, cTime, aTime
-	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	// Create temporary object - still needs id, sha1sum, pickCode, modTime
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
@@ -876,9 +874,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	dstObj.id = srcObj.id
 	dstObj.sha1sum = srcObj.sha1sum
 	dstObj.pickCode = srcObj.pickCode
-	dstObj.mTime = srcObj.mTime
-	dstObj.cTime = srcObj.cTime
-	dstObj.aTime = srcObj.aTime
+	dstObj.modTime = srcObj.modTime
 	dstObj.hasMetaData = true
 
 	if srcLeaf != dstLeaf {
@@ -963,8 +959,8 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object - still needs id, sha1sum, pickCode, mTime, cTime, aTime
-	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.mTime, srcObj.size)
+	// Create temporary object - still needs id, sha1sum, pickCode, modTime
+	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
@@ -1095,7 +1091,7 @@ func (f *Fs) itemToDirEntry(ctx context.Context, remote string, item *api.File) 
 	case item.IsDir(): // in case of dir
 		// cache the directory ID for later lookups
 		f.dirCache.Put(remote, item.ID())
-		d := fs.NewDir(remote, time.Time(item.Te)).SetID(item.ID()).SetParentID(item.ParentID())
+		d := fs.NewDir(remote, item.ModTime()).SetID(item.ID()).SetParentID(item.ParentID())
 		return d, nil
 	default:
 		entry, err = f.newObjectWithInfo(ctx, remote, item)
@@ -1165,12 +1161,12 @@ func (f *Fs) createObject(ctx context.Context, remote string, modTime time.Time,
 	}
 	// Temporary Object under construction
 	o = &Object{
-		fs:     f,
-		remote: remote,
-		parent: dirID,
-		size:   size,
-		mTime:  modTime,
-		durlMu: new(sync.Mutex),
+		fs:      f,
+		remote:  remote,
+		parent:  dirID,
+		size:    size,
+		modTime: modTime,
+		durlMu:  new(sync.Mutex),
 	}
 	return o, leaf, dirID, nil
 }
@@ -1299,7 +1295,7 @@ func (o *Object) ModTime(ctx context.Context) time.Time {
 		fs.Logf(o, "failed to read metadata: %v", err)
 		return time.Now()
 	}
-	return o.mTime
+	return o.modTime
 }
 
 // Size returns the size of the file
@@ -1431,9 +1427,7 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.size = info.Size
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
-	o.mTime = time.Time(info.Te)
-	o.cTime = time.Time(info.Tp)
-	o.aTime = time.Time(info.To)
+	o.modTime = info.ModTime()
 	return nil
 }
 

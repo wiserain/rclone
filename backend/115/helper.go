@@ -506,9 +506,6 @@ OUTER:
 		}
 		for _, item := range info.Data.List {
 			item.Name = f.opt.Enc.ToStandardName(item.Name)
-			if ts, terr := strconv.ParseInt(item.T, 10, 64); terr == nil {
-				item.Te = api.Time(time.Unix(ts, 0))
-			}
 			if fn(item) {
 				found = true
 				break OUTER

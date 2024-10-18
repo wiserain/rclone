@@ -114,11 +114,11 @@ type File struct {
 	Name      string      `json:"n,omitempty"`
 	Size      int64       `json:"s,omitempty"`
 	PickCode  string      `json:"pc,omitempty"`
-	T         string      `json:"t,omitempty"`  // mtime "2024-05-19 03:54" or "1715919337"
-	Te        Time        `json:"te,omitempty"` // mtime
-	Tp        Time        `json:"tp,omitempty"` // ctime
-	Tu        Time        `json:"tu,omitempty"` // mtime
-	To        Time        `json:"to,omitempty"` // atime 0 if never accessed or "1716165082"
+	T         string      `json:"t,omitempty"`  // representative time? "2024-05-19 03:54" or "1715919337"
+	Te        Time        `json:"te,omitempty"` // modify time
+	Tp        Time        `json:"tp,omitempty"` // create time
+	Tu        Time        `json:"tu,omitempty"` // update time?
+	To        Time        `json:"to,omitempty"` // last opened 0 if never accessed or "1716165082"
 	Ico       string      `json:"ico,omitempty"`
 	Class     string      `json:"class,omitempty"`
 	Sha       string      `json:"sha,omitempty"`
@@ -144,6 +144,20 @@ func (f *File) ParentID() string {
 		return f.PID
 	}
 	return f.CID.String()
+}
+
+func (f *File) ModTime() time.Time {
+	if t := time.Time(f.Te); !t.IsZero() {
+		return t
+	}
+	if t := time.Time(f.Tu); !t.IsZero() {
+		return t
+	}
+	// file object in ShareSnap.Data.List[] has T field only
+	if ts, err := strconv.ParseInt(f.T, 10, 64); err == nil {
+		return time.Unix(ts, 0)
+	}
+	return time.Time{}
 }
 
 type FilePath struct {
@@ -225,15 +239,15 @@ type FileStats struct {
 	FolderCount  json.Number `json:"folder_count,omitempty"`
 	ShowPlayLong int         `json:"show_play_long,omitempty"`
 	PlayLong     int         `json:"play_long,omitempty"`
-	Ptime        string      `json:"ptime,omitempty"` // ctime
-	Utime        string      `json:"utime,omitempty"` // mtime
+	Ptime        string      `json:"ptime,omitempty"` // create time
+	Utime        string      `json:"utime,omitempty"` // update time?
 	IsShare      string      `json:"is_share,omitempty"`
 	FileName     string      `json:"file_name,omitempty"`
 	PickCode     string      `json:"pick_code,omitempty"`
 	Sha1         string      `json:"sha1,omitempty"`
 	IsMark       string      `json:"is_mark,omitempty"`
 	Fvs          int         `json:"fvs,omitempty"`
-	OpenTime     int         `json:"open_time,omitempty"` // atime
+	OpenTime     int         `json:"open_time,omitempty"` // last opened
 	Score        int         `json:"score,omitempty"`
 	Desc         string      `json:"desc,omitempty"`
 	FileCategory string      `json:"file_category,omitempty"` // "0" if dir
