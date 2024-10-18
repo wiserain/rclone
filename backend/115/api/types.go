@@ -389,25 +389,25 @@ type ShareSnapData struct {
 		Face     string `json:"face,omitempty"`
 	} `json:"userinfo,omitempty"`
 	Shareinfo struct {
-		SnapID           string `json:"snap_id,omitempty"`
-		FileSize         string `json:"file_size,omitempty"`
-		ShareTitle       string `json:"share_title,omitempty"`
-		ShareState       string `json:"share_state,omitempty"`
-		ForbidReason     string `json:"forbid_reason,omitempty"`
-		CreateTime       string `json:"create_time,omitempty"`
-		ReceiveCode      string `json:"receive_code,omitempty"`
-		ReceiveCount     string `json:"receive_count,omitempty"`
-		ExpireTime       int    `json:"expire_time,omitempty"`
-		FileCategory     int    `json:"file_category,omitempty"`
-		AutoRenewal      string `json:"auto_renewal,omitempty"`
-		AutoFillRecvcode string `json:"auto_fill_recvcode,omitempty"`
-		CanReport        int    `json:"can_report,omitempty"`
-		CanNotice        int    `json:"can_notice,omitempty"`
-		HaveVioFile      int    `json:"have_vio_file,omitempty"`
+		SnapID           string      `json:"snap_id,omitempty"`
+		FileSize         string      `json:"file_size,omitempty"`
+		ShareTitle       string      `json:"share_title,omitempty"`
+		ShareState       json.Number `json:"share_state,omitempty"`
+		ForbidReason     string      `json:"forbid_reason,omitempty"`
+		CreateTime       string      `json:"create_time,omitempty"`
+		ReceiveCode      string      `json:"receive_code,omitempty"`
+		ReceiveCount     string      `json:"receive_count,omitempty"`
+		ExpireTime       int         `json:"expire_time,omitempty"`
+		FileCategory     int         `json:"file_category,omitempty"`
+		AutoRenewal      string      `json:"auto_renewal,omitempty"`
+		AutoFillRecvcode string      `json:"auto_fill_recvcode,omitempty"`
+		CanReport        int         `json:"can_report,omitempty"`
+		CanNotice        int         `json:"can_notice,omitempty"`
+		HaveVioFile      int         `json:"have_vio_file,omitempty"`
 	} `json:"shareinfo,omitempty"`
-	Count      int     `json:"count,omitempty"`
-	List       []*File `json:"list,omitempty"`
-	ShareState string  `json:"share_state,omitempty"`
+	Count      int         `json:"count,omitempty"`
+	List       []*File     `json:"list,omitempty"`
+	ShareState json.Number `json:"share_state,omitempty"`
 	UserAppeal struct {
 		CanAppeal       int `json:"can_appeal,omitempty"`
 		CanShareAppeal  int `json:"can_share_appeal,omitempty"`
