@@ -182,7 +182,7 @@ type FileList struct {
 	PageSize       int         `json:"page_size,omitempty"`
 	AID            string      `json:"aid,omitempty"`
 	CID            json.Number `json:"cid,omitempty"`
-	IsAsc          int         `json:"is_asc,omitempty"`
+	IsAsc          json.Number `json:"is_asc,omitempty"`
 	Star           int         `json:"star,omitempty"`
 	IsShare        int         `json:"is_share,omitempty"`
 	Type           int         `json:"type,omitempty"`

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +25,33 @@ import (
 // Should return true to finish processing
 type listAllFn func(*api.File) bool
 
+// listOrder sets order of directory listing
+func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) {
+	form := url.Values{}
+	form.Set("file_id", cid)
+	form.Set("user_order", order)
+	form.Set("user_asc", asc)
+	form.Set("fc_mix", "0")
+
+	opts := rest.Opts{
+		Method:          "POST",
+		Path:            "/files/order",
+		MultipartParams: form,
+	}
+	var info *api.Base
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+	}
+	return
+}
+
 // Lists the directory required calling the user function on each item found
 //
 // If the user fn ever returns true then it early exits with found = true
@@ -33,15 +59,25 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	if f.isShare {
 		return f.listShare(ctx, dirID, fn)
 	}
+	order := "user_ptime"
+	asc := "0"
+
 	// Url Parameters
 	params := url.Values{}
 	params.Set("aid", "1")
 	params.Set("cid", dirID)
-	params.Set("o", "user_ptime") // order by time or "file_type", "file_size", "file_name"
-	params.Set("asc", "0")        // ascending order? "0" or "1"
-	params.Set("show_dir", "1")   // "0" or "1"
+	params.Set("o", order) // following options are avaialbe for listing order
+	// * file_name
+	// * file_size
+	// * file_type
+	// * user_ptime (create_time) == sorted by tp
+	// * user_utime (modify_time) == sorted by te
+	// * user_otime (last_opened) == sorted by to
+	params.Set("asc", asc)      // ascending order "0" or "1"
+	params.Set("show_dir", "1") // this is not for showing dirs_only. It will list all files in dir recursively if "0".
 	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
 	params.Set("snap", "0")
+	params.Set("natsort", "1")
 	params.Set("record_open_time", "1")
 	params.Set("count_folders", "1")
 	params.Set("format", "json")
@@ -49,11 +85,15 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 
 	opts := rest.Opts{
 		Method:     "GET",
-		Path:       "/files",
+		RootURL:    "https://webapi.115.com/files",
 		Parameters: params,
+	}
+	if order == "file_name" {
+		opts.RootURL = "https://aps.115.com/natsort/files.php"
 	}
 
 	offset := 0
+	retries := 0 // to prevent infinite loop
 OUTER:
 	for {
 		params.Set("offset", strconv.Itoa(offset))
@@ -71,6 +111,16 @@ OUTER:
 		}
 		if len(info.Files) == 0 {
 			break
+		}
+		if order != info.Order || asc != info.IsAsc.String() {
+			if retries > 3 {
+				return found, fmt.Errorf("max retries exceeded for setting list order")
+			}
+			if ordErr := f.listOrder(ctx, dirID, order, asc); ordErr != nil {
+				return found, fmt.Errorf("failed to set list order: %w", ordErr)
+			}
+			retries++
+			continue // retry with same offset
 		}
 		for _, item := range info.Files {
 			item.Name = f.opt.Enc.ToStandardName(item.Name)
