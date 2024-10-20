@@ -749,7 +749,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		return false
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to located updated file: %w", err)
+		return nil, fmt.Errorf("failed to locate updated file: %w", err)
 	}
 	if !found {
 		return nil, fs.ErrorObjectNotFound
@@ -1424,7 +1424,7 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.hasMetaData = true
 	o.id = info.ID()
 	o.parent = info.ParentID()
-	o.size = info.Size
+	o.size = int64(info.Size)
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
 	o.modTime = info.ModTime()

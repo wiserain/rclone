@@ -194,6 +194,8 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	for i, fid := range fids {
 		form.Set(fmt.Sprintf("fid[%d]", i), fid)
 	}
+	// form.Set("pid", pid)
+	form.Set("ignore_warn", "1")
 
 	opts := rest.Opts{
 		Method:          "POST",
@@ -220,6 +222,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 		form.Set(fmt.Sprintf("fid[%d]", i), fid)
 	}
 	form.Set("pid", pid)
+	form.Set("ignore_warn", "1")
 
 	opts := rest.Opts{
 		Method:          "POST",

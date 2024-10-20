@@ -112,7 +112,7 @@ type File struct {
 	CID       json.Number `json:"cid,omitempty"` // category == directory
 	PID       string      `json:"pid,omitempty"` // parent
 	Name      string      `json:"n,omitempty"`
-	Size      int64       `json:"s,omitempty"`
+	Size      Int64       `json:"s,omitempty"`
 	PickCode  string      `json:"pc,omitempty"`
 	T         string      `json:"t,omitempty"`  // representative time? "2024-05-19 03:54" or "1715919337"
 	Te        Time        `json:"te,omitempty"` // modify time
