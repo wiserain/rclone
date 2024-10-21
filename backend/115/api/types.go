@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -346,6 +347,14 @@ type UploadInitInfo struct {
 	// New fields in upload v4.0
 	SignKey   string `json:"sign_key"`
 	SignCheck string `json:"sign_check"`
+}
+
+func (ui *UploadInitInfo) GetCallback() string {
+	return base64.StdEncoding.EncodeToString([]byte(ui.Callback.Callback))
+}
+
+func (ui *UploadInitInfo) GetCallbackVar() string {
+	return base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))
 }
 
 type OSSToken struct {
