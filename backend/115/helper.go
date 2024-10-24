@@ -77,7 +77,6 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	params.Set("show_dir", "1") // this is not for showing dirs_only. It will list all files in dir recursively if "0".
 	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
 	params.Set("snap", "0")
-	params.Set("natsort", "1")
 	params.Set("record_open_time", "1")
 	params.Set("count_folders", "1")
 	params.Set("format", "json")
@@ -89,6 +88,7 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 		Parameters: params,
 	}
 	if order == "file_name" {
+		params.Set("natsort", "1")
 		opts.RootURL = "https://aps.115.com/natsort/files.php"
 	}
 
