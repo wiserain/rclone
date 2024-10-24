@@ -156,6 +156,7 @@ type ossChunkWriter struct {
 	client        *oss.Client
 	callback      string
 	callbackVar   string
+	callbackRes   map[string]any
 	imur          *oss.InitiateMultipartUploadResult
 }
 
@@ -335,8 +336,9 @@ func (w *ossChunkWriter) Abort(ctx context.Context) (err error) {
 // Close and finalise the multipart upload
 func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 	// Finalise the upload session
+	var res *oss.CompleteMultipartUploadResult
 	err = w.f.pacer.Call(func() (bool, error) {
-		_, err := w.client.CompleteMultipartUpload(ctx, &oss.CompleteMultipartUploadRequest{
+		res, err = w.client.CompleteMultipartUpload(ctx, &oss.CompleteMultipartUploadRequest{
 			Bucket:   w.imur.Bucket,
 			Key:      w.imur.Key,
 			UploadId: w.imur.UploadId,
@@ -351,6 +353,7 @@ func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
+	w.callbackRes = res.CallbackResult
 	fs.Debugf(w.o, "multipart upload: %q finished", *w.imur.UploadId)
 	return
 }

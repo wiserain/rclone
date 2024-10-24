@@ -740,6 +740,10 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	}
 	o := newObj.(*Object)
 
+	if o.hasMetaData {
+		return o, nil
+	}
+
 	var info *api.File
 	found, err := f.listAll(ctx, o.parent, func(item *api.File) bool {
 		if strings.ToLower(item.Sha) == o.sha1sum && !item.IsDir() {
@@ -859,7 +863,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object - still needs id, sha1sum, pickCode, modTime
+	// Create temporary object - still needs id, sha1sum, pickCode
 	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
@@ -874,7 +878,6 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	dstObj.id = srcObj.id
 	dstObj.sha1sum = srcObj.sha1sum
 	dstObj.pickCode = srcObj.pickCode
-	dstObj.modTime = srcObj.modTime
 	dstObj.hasMetaData = true
 
 	if srcLeaf != dstLeaf {
@@ -959,7 +962,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		return nil, err
 	}
 
-	// Create temporary object - still needs id, sha1sum, pickCode, modTime
+	// Create temporary object - still needs id, sha1sum, pickCode
 	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
@@ -1428,6 +1431,15 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
 	o.modTime = info.ModTime()
+	return nil
+}
+
+// setMetaDataFromCallBack sets the metadata from callback
+func (o *Object) setMetaDataFromCallBack(data *api.CallbackData) error {
+	// parent, size, sha1sum and modTime are assumed to be set
+	o.hasMetaData = true
+	o.id = data.FileID
+	o.pickCode = data.PickCode
 	return nil
 }
 

@@ -328,7 +328,7 @@ type UploadInitInfo struct {
 	ErrorMsg  string `json:"statusmsg"`
 
 	Status   Int    `json:"status"`
-	PickCode string `json:"pickcode"` // this pickcode is not the same as for downloading!
+	PickCode string `json:"pickcode"` // valid depending on Status
 	Target   string `json:"target"`
 	Version  string `json:"version"`
 
@@ -355,6 +355,25 @@ func (ui *UploadInitInfo) GetCallback() string {
 
 func (ui *UploadInitInfo) GetCallbackVar() string {
 	return base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))
+}
+
+type CallbackInfo struct {
+	Code    Int           `json:"code,omitempty"`
+	Data    *CallbackData `json:"data,omitempty"`
+	Message string        `json:"message,omitempty"`
+	State   bool          `json:"state,omitempty"`
+}
+
+type CallbackData struct {
+	AID      int    `json:"aid,omitempty"`
+	CID      string `json:"cid,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	FileName string `json:"file_name,omitempty"`
+	FileSize Int64  `json:"file_size,omitempty"`
+	IsVideo  int    `json:"is_video,omitempty"`
+	PickCode string `json:"pick_code,omitempty"`
+	Sha      string `json:"sha1,omitempty"`
+	ThumbURL string `json:"thumb_url,omitempty"`
 }
 
 type OSSToken struct {

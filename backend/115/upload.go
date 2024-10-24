@@ -214,6 +214,21 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 	}
 }
 
+func (f *Fs) postUpload(v map[string]any) (*api.CallbackData, error) {
+	callbackJson, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var info api.CallbackInfo
+	if err := json.Unmarshal(callbackJson, &info); err != nil {
+		return nil, err
+	}
+	if !info.State {
+		return nil, fmt.Errorf("API State false: %s (%d)", info.Message, info.Code)
+	}
+	return info.Data, nil
+}
+
 // ------------------------------------------------------------
 
 func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
@@ -379,7 +394,14 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		if err != nil {
 			return nil, fmt.Errorf("multipart upload failed to initialise: %w", err)
 		}
-		return o, mu.Upload(ctx)
+		if err = mu.Upload(ctx); err != nil {
+			return nil, err
+		}
+		data, err := f.postUpload(mu.callbackRes)
+		if err != nil {
+			return nil, fmt.Errorf("multipart upload failed to finalize: %w", err)
+		}
+		return o, o.setMetaDataFromCallBack(data)
 	}
 
 	// upload singlepart
@@ -409,6 +431,13 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		}
 	}
 
-	_, err = client.PutObject(ctx, req)
-	return o, err
+	res, err := client.PutObject(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	data, err := f.postUpload(res.CallbackResult)
+	if err != nil {
+		return nil, fmt.Errorf("failed to finalize upload: %w", err)
+	}
+	return o, o.setMetaDataFromCallBack(data)
 }
