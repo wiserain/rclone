@@ -242,7 +242,7 @@ func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 		return shouldRetry(ctx, resp, info, err)
 	})
 	if err == nil && info.StatusCode != "200" {
-		return nil, fmt.Errorf("StateCode: %s", info.StatusCode)
+		return nil, fmt.Errorf("failed to get OSS token: %s (%s)", info.ErrorMessage, info.ErrorCode)
 	}
 	return
 }

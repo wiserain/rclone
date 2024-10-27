@@ -382,6 +382,8 @@ type OSSToken struct {
 	Expiration      time.Time `json:"Expiration"`
 	SecurityToken   string    `json:"SecurityToken"`
 	StatusCode      string    `json:"StatusCode"`
+	ErrorCode       string    `json:"ErrorCode,omitempty"`
+	ErrorMessage    string    `json:"ErrorMessage,omitempty"`
 }
 
 func (t *OSSToken) TimeToExpiry() time.Duration {
