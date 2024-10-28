@@ -248,7 +248,7 @@ func (f *Fs) getOSSToken(ctx context.Context) (info *api.OSSToken, err error) {
 }
 
 func (f *Fs) newOSSClient() (client *oss.Client) {
-	customerProvider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+	fetcher := credentials.CredentialsFetcherFunc(func(ctx context.Context) (credentials.Credentials, error) {
 		t, err := f.getOSSToken(ctx)
 		if err != nil {
 			return credentials.Credentials{}, err
@@ -259,9 +259,7 @@ func (f *Fs) newOSSClient() (client *oss.Client) {
 			SecurityToken:   t.SecurityToken,
 			Expires:         &t.Expiration}, nil
 	})
-	provider := credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
-		return customerProvider.GetCredentials(ctx)
-	})
+	provider := credentials.NewCredentialsFetcherProvider(fetcher)
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(provider).
