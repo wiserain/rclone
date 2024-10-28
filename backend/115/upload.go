@@ -362,7 +362,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	for retry := true; retry; {
 		ui, err = f.initUpload(ctx, size, leaf, dirID, hashStr, signKey, signVal)
 		if err != nil {
-			return nil, fmt.Errorf("failed to init upload: %w", err)
+			// In this case, the upload (perhaps via hash) could be successful,
+			/// so let the subsequent process locate the uploaded object.
+			return o, fmt.Errorf("failed to init upload: %w", err)
 		}
 		retry = ui.Status == 7
 		switch ui.Status {
