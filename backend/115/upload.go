@@ -367,6 +367,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		retry = ui.Status == 7
 		switch ui.Status {
 		case 1:
+			if f.opt.UploadHashOnly {
+				return nil, fserrors.NoRetryError(errors.New("skipping as --115-upload-hash-only flag turned on"))
+			}
 			fs.Debugf(o, "Upload will begin shortly. Outgoing traffic will occur...")
 		case 2:
 			// ui gives valid pickcode in this case but not available when listing
