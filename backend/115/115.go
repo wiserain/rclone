@@ -205,7 +205,7 @@ concurrently for multipart uploads and copies.
 If you are uploading small numbers of large files over high-speed links
 and these uploads do not fully utilize your bandwidth, then increasing
 this may help to speed up the transfers.`,
-			Default:  4,
+			Default:  1,
 			Advanced: true,
 		}, {
 			Name:     config.ConfigEncoding,
