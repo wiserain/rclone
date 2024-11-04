@@ -164,12 +164,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		remote: remote,
 	}
 
-	uploadParts := f.opt.MaxUploadParts
-	if uploadParts < 1 {
-		uploadParts = 1
-	} else if uploadParts > maxUploadParts {
-		uploadParts = maxUploadParts
-	}
+	uploadParts := min(max(1, f.opt.MaxUploadParts), maxUploadParts)
 	size := src.Size()
 
 	// calculate size of parts
@@ -187,15 +182,10 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		chunkSize = chunksize.Calculator(src, size, uploadParts, chunkSize)
 	}
 
-	con := w.f.opt.UploadConcurrency
-	if con < 1 {
-		con = 1
-	}
-
 	w = &ossChunkWriter{
 		chunkSize: int64(chunkSize),
 		size:      size,
-		con:       con,
+		con:       max(1, f.opt.UploadConcurrency),
 		f:         f,
 		o:         o,
 		in:        in,
