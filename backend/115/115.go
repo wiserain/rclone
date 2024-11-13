@@ -478,7 +478,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	// mod - parse object id from path remote:{ID}
 	if rootID, receiveCode, _ := parseRootID(root); len(rootID) == 19 {
-		info, err := f.getFile(ctx, rootID)
+		info, err := f.getFile(ctx, rootID, "")
 		if err != nil {
 			return nil, err
 		}

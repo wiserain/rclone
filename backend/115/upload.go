@@ -380,6 +380,9 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 				acc.ServerSideTransferStart()
 				acc.ServerSideCopyEnd(size)
 			}
+			if info, err := f.getFile(ctx, "", ui.PickCode); err == nil {
+				return o, o.setMetaData(info)
+			}
 			return o, nil
 		case 7:
 			signKey = ui.SignKey

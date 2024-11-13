@@ -386,13 +386,18 @@ func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
 	return
 }
 
-// getFile gets information of a file or directory by its ID
-func (f *Fs) getFile(ctx context.Context, fid string) (file *api.File, err error) {
+// getFile gets information of a file or directory by its ID or pickCode
+func (f *Fs) getFile(ctx context.Context, fid, pc string) (file *api.File, err error) {
 	if fid == "0" {
 		return nil, errors.New("can't get information about root directory")
 	}
 	params := url.Values{}
-	params.Set("file_id", fid)
+	if fid != "" {
+		params.Set("file_id", fid)
+	}
+	if pc != "" {
+		params.Set("pick_code", pc)
+	}
 	opts := rest.Opts{
 		Method:     "GET",
 		Path:       "/files/get_info",

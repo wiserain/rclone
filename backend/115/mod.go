@@ -36,7 +36,7 @@ func parseRootID(s string) (rootID, receiveCode string, err error) {
 // get an id of file or directory
 func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 	if id, _, _ := parseRootID(path); len(id) == 19 {
-		info, err := f.getFile(ctx, id)
+		info, err := f.getFile(ctx, id, "")
 		if err != nil {
 			return "", fmt.Errorf("no such object with id %q: %w", id, err)
 		}
