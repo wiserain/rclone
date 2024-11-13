@@ -55,9 +55,9 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 // Lists the directory required calling the user function on each item found
 //
 // If the user fn ever returns true then it early exits with found = true
-func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+func (f *Fs) listAll(ctx context.Context, dirID string, limit int, fn listAllFn) (found bool, err error) {
 	if f.isShare {
-		return f.listShare(ctx, dirID, fn)
+		return f.listShare(ctx, dirID, limit, fn)
 	}
 	order := "user_ptime"
 	asc := "0"
@@ -75,7 +75,7 @@ func (f *Fs) listAll(ctx context.Context, dirID string, fn listAllFn) (found boo
 	// * user_otime (last_opened) == sorted by to
 	params.Set("asc", asc)      // ascending order "0" or "1"
 	params.Set("show_dir", "1") // this is not for showing dirs_only. It will list all files in dir recursively if "0".
-	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
+	params.Set("limit", strconv.Itoa(limit))
 	params.Set("snap", "0")
 	params.Set("record_open_time", "1")
 	params.Set("count_folders", "1")
@@ -524,13 +524,13 @@ func parseShareLink(rawURL string) (shareCode, receiveCode string, err error) {
 // listing filesystem from share link
 //
 // no need user authorization by cookies
-func (f *Fs) listShare(ctx context.Context, dirID string, fn listAllFn) (found bool, err error) {
+func (f *Fs) listShare(ctx context.Context, dirID string, limit int, fn listAllFn) (found bool, err error) {
 	// Url Parameters
 	params := url.Values{}
 	params.Set("share_code", f.opt.ShareCode)
 	params.Set("receive_code", f.opt.ReceiveCode)
 	params.Set("cid", dirID)
-	params.Set("limit", strconv.Itoa(f.opt.ListChunk))
+	params.Set("limit", strconv.Itoa(limit))
 
 	opts := rest.Opts{
 		Method:     "GET",
