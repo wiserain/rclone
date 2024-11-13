@@ -33,6 +33,7 @@ import (
 
 	"github.com/pierrec/lz4/v4"
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/backend/115/dircache"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -40,7 +41,6 @@ import (
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
-	"github.com/rclone/rclone/lib/dircache"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/rest"
@@ -469,22 +469,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	return f, nil
 }
 
-// wraps dirCache.FindRoot() with warm-up cache
-func (f *Fs) dirCacheFindRoot(ctx context.Context) (err error) {
-	if f.rootFolderID != "0" || f.isShare {
-		return f.dirCache.FindRoot(ctx, false)
-	}
-	for dir, dirID := f.root, "-1"; dirID != f.rootFolderID && dir != ""; {
-		dirID, err = f.getDirID(ctx, dir)
-		if err != nil {
-			return err
-		}
-		f.dirCache.Put(dir, dirID)
-		dir, _ = dircache.SplitPath(dir)
-	}
-	return f.dirCache.FindRoot(ctx, false)
-}
-
 // NewFs constructs an Fs from the path, container:path
 func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, error) {
 	f, err := newFs(ctx, name, root, m)
@@ -493,19 +477,23 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 
 	// mod - parse object id from path remote:{ID}
-	var srcFile *api.File
 	if rootID, receiveCode, _ := parseRootID(root); len(rootID) == 19 {
-		srcFile, err = f.getFile(ctx, rootID)
+		info, err := f.getFile(ctx, rootID)
 		if err != nil {
 			return nil, err
 		}
-		f.opt.RootFolderID = rootID
-		if !srcFile.IsDir() {
-			fs.Debugf(nil, "Root ID (File): %s", rootID)
-		} else {
-			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
-			srcFile = nil
+		if !info.IsDir() {
+			// When the parsed `rootID` points to a file,
+			// commands requiring listing operations (e.g., `ls*`, `cat`) are not supported
+			// `copy` has been verified to work correctly
+			f.dirCache = dircache.New("", info.ParentID(), f)
+			f.dirCache.FindRoot(ctx, false)
+			obj, _ := f.newObjectWithInfo(ctx, info.Name, info)
+			f.root = "isFile:" + info.Name
+			f.fileObj = &obj
+			return f, fs.ErrorIsFile
 		}
+		f.opt.RootFolderID = rootID
 	} else if len(rootID) == 11 {
 		f.opt.ShareCode = rootID
 		f.opt.ReceiveCode = receiveCode
@@ -515,7 +503,10 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	f.isShare = f.opt.ShareCode != "" && f.opt.ReceiveCode != ""
 
 	// Set the root folder ID
-	if f.opt.RootFolderID != "" {
+	if f.isShare {
+		// should be empty to let dircache run with forward search
+		f.rootFolderID = ""
+	} else if f.opt.RootFolderID != "" {
 		// use root_folder ID if set
 		f.rootFolderID = f.opt.RootFolderID
 	} else {
@@ -524,31 +515,17 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
 
-	// mod - in case parsed rootID is pointing to a file
-	if srcFile != nil {
-		tempF := *f
-		newRoot := ""
-		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
-		tempF.root = newRoot
-		f.dirCache = tempF.dirCache
-		f.root = tempF.root
-
-		obj, _ := f.newObjectWithInfo(ctx, srcFile.Name, srcFile)
-		f.root = "isFile:" + srcFile.Name
-		f.fileObj = &obj
-		return f, fs.ErrorIsFile
-	}
-
 	// Find the current root
-	err = f.dirCacheFindRoot(ctx)
+	err = f.dirCache.FindRoot(ctx, false)
 	if err != nil {
 		// Assume it is a file
 		newRoot, remote := dircache.SplitPath(f.root)
 		tempF := *f
 		tempF.dirCache = dircache.New(newRoot, f.rootFolderID, &tempF)
 		tempF.root = newRoot
+		tempF.dirCache.Fill(f.dirCache)
 		// Make new Fs which is the parent
-		err = tempF.dirCacheFindRoot(ctx)
+		err = tempF.dirCache.FindRoot(ctx, false)
 		if err != nil {
 			// No root so return old f
 			return f, nil
@@ -648,6 +625,11 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 		return false
 	})
 	return pathIDOut, found, err
+}
+
+// GetDirID wraps `getDirID` to provide an interface for DirCacher
+func (f *Fs) GetDirID(ctx context.Context, dir string) (string, error) {
+	return f.getDirID(ctx, dir)
 }
 
 // List the objects and directories in dir into entries.  The
