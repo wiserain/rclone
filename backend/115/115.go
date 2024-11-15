@@ -488,7 +488,7 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 			// commands requiring listing operations (e.g., `ls*`, `cat`) are not supported
 			// `copy` has been verified to work correctly
 			f.dirCache = dircache.New("", info.ParentID(), f)
-			f.dirCache.FindRoot(ctx, false)
+			_ = f.dirCache.FindRoot(ctx, false)
 			obj, _ := f.newObjectWithInfo(ctx, info.Name, info)
 			f.root = "isFile:" + info.Name
 			f.fileObj = &obj
