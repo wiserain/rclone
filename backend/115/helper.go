@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -63,24 +64,9 @@ func (f *Fs) listAll(ctx context.Context, dirID string, limit int, fn listAllFn)
 	asc := "0"
 
 	// Url Parameters
-	params := url.Values{}
-	params.Set("aid", "1")
-	params.Set("cid", dirID)
-	params.Set("o", order) // following options are avaialbe for listing order
-	// * file_name
-	// * file_size
-	// * file_type
-	// * user_ptime (create_time) == sorted by tp
-	// * user_utime (modify_time) == sorted by te
-	// * user_otime (last_opened) == sorted by to
-	params.Set("asc", asc)      // ascending order "0" or "1"
-	params.Set("show_dir", "1") // this is not for showing dirs_only. It will list all files in dir recursively if "0".
-	params.Set("limit", strconv.Itoa(limit))
-	params.Set("snap", "0")
-	params.Set("record_open_time", "1")
-	params.Set("count_folders", "1")
-	params.Set("format", "json")
-	params.Set("fc_mix", "0")
+	params := listParams(dirID, limit)
+	params.Set("o", order)
+	params.Set("asc", asc)
 
 	opts := rest.Opts{
 		Method:     "GET",
@@ -133,6 +119,64 @@ OUTER:
 		if offset >= info.Count {
 			break
 		}
+	}
+	return
+}
+
+// listParams generates a default parameter set for list API
+func listParams(dirID string, limit int) url.Values {
+	params := url.Values{}
+	params.Set("aid", "1")
+	params.Set("cid", dirID)
+	params.Set("o", "user_ptime") // following options are avaialbe for listing order
+	// * file_name
+	// * file_size
+	// * file_type
+	// * user_ptime (create_time) == sorted by tp
+	// * user_utime (modify_time) == sorted by te
+	// * user_otime (last_opened) == sorted by to
+	params.Set("asc", "0")      // ascending order "0" or "1"
+	params.Set("show_dir", "1") // this is not for showing dirs_only. It will list all files in dir recursively if "0".
+	params.Set("limit", strconv.Itoa(limit))
+	params.Set("snap", "0")
+	params.Set("record_open_time", "1")
+	params.Set("count_folders", "1")
+	params.Set("format", "json")
+	params.Set("fc_mix", "0")
+	params.Set("offset", "0")
+	return params
+}
+
+// getDirPath returns an absolute path of dirID
+func (f *Fs) getDirPath(ctx context.Context, dirID string) (dir string, err error) {
+	if dirID == "0" {
+		return "", nil
+	}
+	// Url Parameters
+	params := listParams(dirID, 32)
+
+	opts := rest.Opts{
+		Method:     "GET",
+		RootURL:    "https://webapi.115.com/files",
+		Parameters: params,
+	}
+
+	var info api.FileList
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, &info, err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("couldn't get file list: %w", err)
+	} else if !info.State {
+		return "", fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
+	}
+	for _, p := range info.Path {
+		if p.CID.String() == "0" {
+			continue
+		}
+		dir = path.Join(dir, f.opt.Enc.ToStandardName(p.Name))
 	}
 	return
 }

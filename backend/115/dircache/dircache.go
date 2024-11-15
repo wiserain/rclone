@@ -226,9 +226,13 @@ func (dc *DirCache) _findDir(ctx context.Context, path string, create bool) (pat
 		return pathID, nil
 	}
 
-	// mod
-	if dc.trueRootID == "0" {
-		pathID, err = dc.fs.GetDirID(ctx, path)
+	// mod - only when the Fs is shared
+	if dc.trueRootID != "" {
+		dirPath := path
+		if dc.foundRoot {
+			dirPath = dc.root + "/" + dirPath
+		}
+		pathID, err = dc.fs.GetDirID(ctx, dirPath)
 		if err == nil {
 			dc.Put(path, pathID)
 			return
@@ -250,8 +254,8 @@ func (dc *DirCache) _findDir(ctx context.Context, path string, create bool) (pat
 
 	}
 
-	// mod
-	if dc.trueRootID == "0" {
+	// mod - only when the Fs is shared
+	if dc.trueRootID != "" {
 		pathID, err = dc.fs.CreateDir(ctx, parentPathID, leaf)
 		if err != nil {
 			return "", fmt.Errorf("failed to make directory: %w", err)

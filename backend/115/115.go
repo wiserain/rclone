@@ -258,6 +258,7 @@ type Fs struct {
 	srv          *rest.Client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
+	rootFolder   string // path of the absolute root
 	rootFolderID string
 	appVer       string     // parsed from user-agent; // https://appversion.115.com/1/web/1.0/api/getMultiVer
 	userID       string     // for uploads, adding offline tasks, and receiving from share link
@@ -513,6 +514,14 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		f.rootFolderID = "0" //根目录 = root directory
 	}
 
+	// Set the root folder path if it is not on the absolute root
+	if f.rootFolderID != "" && f.rootFolderID != "0" {
+		f.rootFolder, err = f.getDirPath(ctx, f.rootFolderID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	f.dirCache = dircache.New(f.root, f.rootFolderID, f)
 
 	// Find the current root
@@ -629,7 +638,7 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 
 // GetDirID wraps `getDirID` to provide an interface for DirCacher
 func (f *Fs) GetDirID(ctx context.Context, dir string) (string, error) {
-	return f.getDirID(ctx, dir)
+	return f.getDirID(ctx, f.rootFolder+"/"+dir)
 }
 
 // List the objects and directories in dir into entries.  The
