@@ -226,10 +226,10 @@ func (dc *DirCache) _findDir(ctx context.Context, path string, create bool) (pat
 		return pathID, nil
 	}
 
-	// mod - only when the Fs is shared
+	// mod - only when the Fs is not shared
 	if dc.trueRootID != "" {
 		dirPath := path
-		if dc.foundRoot {
+		if dc.foundRoot && dc.rootParentID != "" {
 			dirPath = dc.root + "/" + dirPath
 		}
 		pathID, err = dc.fs.GetDirID(ctx, dirPath)
@@ -254,7 +254,7 @@ func (dc *DirCache) _findDir(ctx context.Context, path string, create bool) (pat
 
 	}
 
-	// mod - only when the Fs is shared
+	// mod - only when the Fs is not shared
 	if dc.trueRootID != "" {
 		pathID, err = dc.fs.CreateDir(ctx, parentPathID, leaf)
 		if err != nil {
@@ -399,7 +399,7 @@ func (dc *DirCache) RootID(ctx context.Context, create bool) (ID string, err err
 func (dc *DirCache) RootParentID(ctx context.Context, create bool) (ID string, err error) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
-	if !dc.foundRoot {
+	if dc.rootParentID == "" {
 		if dc.root == "" {
 			return "", errors.New("is root directory")
 		}
