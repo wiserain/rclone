@@ -699,6 +699,9 @@ func (f *Fs) CreateDir(ctx context.Context, pathID, leaf string) (newID string, 
 // will return the object and the error, otherwise will return
 // nil and the error
 func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	if fs.GetConfig(ctx).NoCheckDest {
+		return f.PutUnchecked(ctx, in, src, options...)
+	}
 	existingObj, err := f.NewObject(ctx, src.Remote())
 	switch err {
 	case nil:
@@ -1393,7 +1396,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	// updating object with the same contents(sha1) simply updates some attributes
 	// rather than creating a new one. So we shouldn't delete old object
 	newO := newObj.(*Object)
-	if !(newO.id == o.id && newO.pickCode == o.pickCode && newO.sha1sum == o.sha1sum) {
+	if o.hasMetaData && !(newO.id == o.id && newO.pickCode == o.pickCode && newO.sha1sum == o.sha1sum) {
 		// Delete duplicate after successful upload
 		if err = o.Remove(ctx); err != nil {
 			return fmt.Errorf("failed to remove old version: %w", err)
