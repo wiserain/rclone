@@ -626,8 +626,8 @@ func (f *Fs) FindLeaf(ctx context.Context, pathID, leaf string) (pathIDOut strin
 		}
 	}
 	// Find the leaf in pathID
-	found, err = f.listAll(ctx, pathID, f.opt.ListChunk, func(item *api.File) bool {
-		if item.Name == leaf && item.IsDir() {
+	found, err = f.listAll(ctx, pathID, f.opt.ListChunk, false, true, func(item *api.File) bool {
+		if item.Name == leaf {
 			pathIDOut = item.ID()
 			return true
 		}
@@ -657,7 +657,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 		return nil, err
 	}
 	var iErr error
-	_, err = f.listAll(ctx, dirID, f.opt.ListChunk, func(item *api.File) bool {
+	_, err = f.listAll(ctx, dirID, f.opt.ListChunk, false, false, func(item *api.File) bool {
 		entry, err := f.itemToDirEntry(ctx, path.Join(dir, item.Name), item)
 		if err != nil {
 			iErr = err
@@ -732,8 +732,8 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	}
 
 	var info *api.File
-	found, err := f.listAll(ctx, o.parent, 32, func(item *api.File) bool {
-		if strings.ToLower(item.Sha) == o.sha1sum && !item.IsDir() {
+	found, err := f.listAll(ctx, o.parent, 32, true, false, func(item *api.File) bool {
+		if strings.ToLower(item.Sha) == o.sha1sum {
 			info = item
 			return true
 		}
@@ -769,7 +769,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 	for _, srcDir := range dirs[1:] {
 		// list the objects
 		var IDs []string
-		_, err = f.listAll(ctx, srcDir.ID(), f.opt.ListChunk, func(item *api.File) bool {
+		_, err = f.listAll(ctx, srcDir.ID(), f.opt.ListChunk, false, false, func(item *api.File) bool {
 			fs.Infof(srcDir, "listing for merging %q", item.Name)
 			IDs = append(IDs, item.ID())
 			// API doesn't allow to move a large number of objects at once, so doing it in chunked
@@ -1009,7 +1009,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 	}
 
 	if check {
-		found, err := f.listAll(ctx, rootID, 32, func(item *api.File) bool {
+		found, err := f.listAll(ctx, rootID, 32, false, false, func(item *api.File) bool {
 			fs.Debugf(dir, "Rmdir: contains file: %q", item.Name)
 			return true
 		})
@@ -1121,8 +1121,8 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string) (info *api.Fi
 	}
 
 	// checking whether fileObj with name of leaf exists in dirID
-	found, err := f.listAll(ctx, dirID, f.opt.ListChunk, func(item *api.File) bool {
-		if item.Name == leaf && !item.IsDir() {
+	found, err := f.listAll(ctx, dirID, f.opt.ListChunk, true, false, func(item *api.File) bool {
+		if item.Name == leaf {
 			info = item
 			return true
 		}

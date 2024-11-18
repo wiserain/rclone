@@ -56,7 +56,7 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 // Lists the directory required calling the user function on each item found
 //
 // If the user fn ever returns true then it early exits with found = true
-func (f *Fs) listAll(ctx context.Context, dirID string, limit int, fn listAllFn) (found bool, err error) {
+func (f *Fs) listAll(ctx context.Context, dirID string, limit int, filesOnly, dirsOnly bool, fn listAllFn) (found bool, err error) {
 	if f.isShare {
 		return f.listShare(ctx, dirID, limit, fn)
 	}
@@ -78,7 +78,13 @@ OUTER:
 		if err != nil {
 			return found, fmt.Errorf("couldn't get files: %w", err)
 		}
-		if len(info.Files) == 0 {
+		if info.Count == 0 {
+			break
+		}
+		if filesOnly && info.FileCount == 0 {
+			break
+		}
+		if dirsOnly && info.FolderCount == 0 {
 			break
 		}
 		if order != info.Order || asc != info.IsAsc.String() {
@@ -92,6 +98,12 @@ OUTER:
 			continue // retry with same offset
 		}
 		for _, item := range info.Files {
+			if filesOnly && item.IsDir() {
+				continue
+			}
+			if dirsOnly && !item.IsDir() {
+				continue
+			}
 			item.Name = f.opt.Enc.ToStandardName(item.Name)
 			if fn(item) {
 				found = true
