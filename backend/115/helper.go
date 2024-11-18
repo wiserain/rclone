@@ -68,32 +68,15 @@ func (f *Fs) listAll(ctx context.Context, dirID string, limit int, fn listAllFn)
 	params.Set("o", order)
 	params.Set("asc", asc)
 
-	opts := rest.Opts{
-		Method:     "GET",
-		RootURL:    "https://webapi.115.com/files",
-		Parameters: params,
-	}
-	if order == "file_name" {
-		params.Set("natsort", "1")
-		opts.RootURL = "https://aps.115.com/natsort/files.php"
-	}
-
 	offset := 0
 	retries := 0 // to prevent infinite loop
 OUTER:
 	for {
 		params.Set("offset", strconv.Itoa(offset))
 
-		var info api.FileList
-		var resp *http.Response
-		err = f.pacer.Call(func() (bool, error) {
-			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-			return shouldRetry(ctx, resp, &info, err)
-		})
+		info, err := f.getFiles(ctx, params)
 		if err != nil {
-			return found, fmt.Errorf("couldn't list files: %w", err)
-		} else if !info.State {
-			return found, fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
+			return found, fmt.Errorf("couldn't get files: %w", err)
 		}
 		if len(info.Files) == 0 {
 			break
@@ -147,30 +130,39 @@ func listParams(dirID string, limit int) url.Values {
 	return params
 }
 
-// getDirPath returns an absolute path of dirID
-func (f *Fs) getDirPath(ctx context.Context, dirID string) (dir string, err error) {
-	if dirID == "0" {
-		return "", nil
-	}
-	// Url Parameters
-	params := listParams(dirID, 32)
-
+// getFiles fetches a single chunk of file lists filtered by the given parameters
+func (f *Fs) getFiles(ctx context.Context, params url.Values) (info *api.FileList, err error) {
 	opts := rest.Opts{
 		Method:     "GET",
 		RootURL:    "https://webapi.115.com/files",
 		Parameters: params,
 	}
+	if params.Get("o") == "file_name" {
+		params.Set("natsort", "1")
+		opts.RootURL = "https://aps.115.com/natsort/files.php"
+	}
 
-	var info api.FileList
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, &info, err)
 	})
 	if err != nil {
-		return "", fmt.Errorf("couldn't get file list: %w", err)
+		return
 	} else if !info.State {
-		return "", fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
+		return nil, fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
+	}
+	return
+}
+
+// getDirPath returns an absolute path of dirID
+func (f *Fs) getDirPath(ctx context.Context, dirID string) (dir string, err error) {
+	if dirID == "0" {
+		return "", nil
+	}
+	info, err := f.getFiles(ctx, listParams(dirID, 32))
+	if err != nil {
+		return "", fmt.Errorf("couldn't get files: %w", err)
 	}
 	for _, p := range info.Path {
 		if p.CID.String() == "0" {
