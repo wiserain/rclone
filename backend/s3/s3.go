@@ -3368,6 +3368,10 @@ func setQuirks(opt *Options) {
 			opt.ChunkSize = 64 * fs.Mebi
 		}
 		useAlreadyExists = false // returns BucketAlreadyExists
+		// Storj doesn't support multi-part server side copy:
+		// https://github.com/storj/roadmap/issues/40
+		// So make cutoff very large which it does support
+		opt.CopyCutoff = math.MaxInt64
 	case "Synology":
 		useMultipartEtag = false
 		useAlreadyExists = false // untested
@@ -5746,7 +5750,7 @@ func (o *Object) downloadFromURL(ctx context.Context, bucketPath string, options
 		ContentEncoding:    header("Content-Encoding"),
 		ContentLanguage:    header("Content-Language"),
 		ContentType:        header("Content-Type"),
-		StorageClass:       types.StorageClass(*header("X-Amz-Storage-Class")),
+		StorageClass:       types.StorageClass(deref(header("X-Amz-Storage-Class"))),
 	}
 	o.setMetaData(&head)
 	return resp.Body, err
@@ -5940,8 +5944,8 @@ func (f *Fs) OpenChunkWriter(ctx context.Context, remote string, src fs.ObjectIn
 		chunkSize:            int64(chunkSize),
 		size:                 size,
 		f:                    f,
-		bucket:               mOut.Bucket,
-		key:                  mOut.Key,
+		bucket:               ui.req.Bucket,
+		key:                  ui.req.Key,
 		uploadID:             mOut.UploadId,
 		multiPartUploadInput: &mReq,
 		completedParts:       make([]types.CompletedPart, 0),
