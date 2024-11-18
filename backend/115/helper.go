@@ -110,7 +110,7 @@ OUTER:
 				break OUTER
 			}
 		}
-		offset = info.Offset + f.opt.ListChunk
+		offset = info.Offset + len(info.Files)
 		if offset >= info.Count {
 			break
 		}

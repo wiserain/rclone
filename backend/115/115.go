@@ -120,7 +120,7 @@ Fill in for rclone to use a non root folder as its starting point.
 		}, {
 			Name:     "list_chunk",
 			Default:  115,
-			Help:     "Size of listing chunk.",
+			Help:     "Size of listing chunk. Max: 1150",
 			Advanced: true,
 		}, {
 			Name:     "pacer_min_sleep",
