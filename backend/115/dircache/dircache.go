@@ -364,7 +364,9 @@ func (dc *DirCache) _findRoot(ctx context.Context, create bool) error {
 	// Find the parent of the root while we still have the root
 	// directory tree cached
 	rootParentPath, _ := SplitPath(dc.root)
-	dc.rootParentID, _ = dc.Get(rootParentPath)
+	if rootParentID, ok := dc.Get(rootParentPath); ok {
+		dc.rootParentID = rootParentID
+	}
 
 	// Reset the tree based on dc.root
 	dc.Flush()
@@ -399,7 +401,7 @@ func (dc *DirCache) RootID(ctx context.Context, create bool) (ID string, err err
 func (dc *DirCache) RootParentID(ctx context.Context, create bool) (ID string, err error) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
-	if dc.rootParentID == "" {
+	if !dc.foundRoot || dc.rootParentID == "" {
 		if dc.root == "" {
 			return "", errors.New("is root directory")
 		}
