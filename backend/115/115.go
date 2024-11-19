@@ -52,7 +52,7 @@ const (
 	rootURL          = "https://webapi.115.com"
 	defaultUserAgent = "Mozilla/5.0 115Browser/27.0.6.3"
 
-	defaultMinSleep = fs.Duration(250 * time.Millisecond) // 4 transactions per second
+	defaultMinSleep = fs.Duration(1000 * time.Millisecond) // 1 transactions per second
 	maxSleep        = 2 * time.Second
 	decayConstant   = 2 // bigger for slower decay, exponential
 
