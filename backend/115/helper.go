@@ -48,7 +48,7 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -162,7 +162,7 @@ func (f *Fs) getFiles(ctx context.Context, params url.Values) (info *api.FileLis
 	if err != nil {
 		return
 	} else if !info.State {
-		return nil, fmt.Errorf("API State false: %q (%d)", info.Error, info.ErrNo)
+		return nil, fmt.Errorf("API Error: %q (%d)", info.Error, info.ErrNo)
 	}
 	return
 }
@@ -207,7 +207,7 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 		if info.Errno == 20004 {
 			return nil, fs.ErrorDirExists
 		}
-		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -232,7 +232,7 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -259,7 +259,7 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -287,7 +287,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -314,7 +314,7 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }
@@ -334,7 +334,7 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	if err != nil {
 		return
 	} else if !info.State {
-		return nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	if data = info.Data.IndexInfo; data == nil {
 		return nil, errors.New("no data")
@@ -364,7 +364,7 @@ func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, 
 	if err != nil {
 		return
 	} else if !info.State {
-		return nil, nil, fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return nil, nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	if info.Data.EncodedData == "" {
 		return nil, nil, errors.New("no data")
@@ -425,7 +425,7 @@ func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
 	if err != nil {
 		return
 	} else if !info.State {
-		return "", fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return "", fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	cid = info.ID.String()
 	if cid == "0" && dir != "/" {
@@ -461,7 +461,7 @@ func (f *Fs) getFile(ctx context.Context, fid, pc string) (file *api.File, err e
 	if err != nil {
 		return
 	} else if !info.State {
-		return nil, fmt.Errorf("API State false: %s (%d)", info.Message, info.Code)
+		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
 	}
 	if len(info.Data) > 0 {
 		file = info.Data[0]
@@ -605,7 +605,7 @@ OUTER:
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)
 		} else if !info.State {
-			return found, fmt.Errorf("API State false: %q (%d)", info.Error, info.Errno)
+			return found, fmt.Errorf("API Error: %q (%d)", info.Error, info.Errno)
 		}
 		if len(info.Data.List) == 0 {
 			break
@@ -651,7 +651,7 @@ func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	return
 }

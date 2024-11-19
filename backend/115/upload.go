@@ -50,7 +50,7 @@ func (f *Fs) getUploadBasicInfo(ctx context.Context) (err error) {
 	if err != nil {
 		return
 	} else if !info.State {
-		return fmt.Errorf("API State false: %s (%d)", info.Error, info.Errno)
+		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
 	userID := info.UserID.String()
 	if userID == "0" {
@@ -224,7 +224,7 @@ func (f *Fs) postUpload(v map[string]any) (*api.CallbackData, error) {
 		return nil, err
 	}
 	if !info.State {
-		return nil, fmt.Errorf("API State false: %s (%d)", info.Message, info.Code)
+		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
 	}
 	return info.Data, nil
 }

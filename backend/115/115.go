@@ -304,10 +304,10 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 			if !apiInfo.State && apiInfo.Errno == 990009 {
 				time.Sleep(time.Second)
 				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
-				return true, fserrors.RetryErrorf("API State false: %s (%d)", apiInfo.Error, apiInfo.Errno)
+				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
 			} else if !apiInfo.State && apiInfo.Errno == 50038 {
-				// can't download: API State false:  (50038)
-				return true, fserrors.RetryErrorf("API State false: %s (%d)", apiInfo.Error, apiInfo.Errno)
+				// can't download: API Error:  (50038)
+				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
 			}
 		}
 		return false, nil
