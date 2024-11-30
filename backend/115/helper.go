@@ -357,8 +357,12 @@ func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, 
 	}
 	var info *api.Base
 	var resp *http.Response
+	srv := f.srv
+	if f.dsrv != nil {
+		srv = f.dsrv
+	}
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		resp, err = srv.CallJSON(ctx, &opts, nil, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
