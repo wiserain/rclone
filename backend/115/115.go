@@ -400,11 +400,11 @@ func setCookies(client *rest.Client, opt *Options) {
 }
 
 // getClient makes an http client according to the options
-func getClient(ctx context.Context, opt *Options, noProxy bool) *http.Client {
+func getClient(ctx context.Context, opt *Options) *http.Client {
 	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
-		if noProxy {
+		if opt.DownloadCookie != "" && opt.DownloadNoProxy {
 			t.Proxy = nil
 		}
 	})
@@ -418,7 +418,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	// Override few config settings and create a client
 	newCtx, ci := fs.AddConfig(ctx)
 	ci.UserAgent = opt.UserAgent
-	f.client = getClient(newCtx, opt, false)
+	f.client = getClient(newCtx, opt)
 
 	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
 
@@ -429,7 +429,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	setCookies(f.srv, opt)
 
 	if f.opt.DownloadCookie != "" {
-		f.dclient = getClient(newCtx, opt, f.opt.DownloadNoProxy)
+		f.dclient = getClient(newCtx, opt)
 		f.dsrv = rest.NewClient(f.dclient).SetRoot(rootURL).SetErrorHandler(errorHandler)
 		extractCookies(opt, opt.DownloadCookie)
 		setCookies(f.dsrv, opt)
