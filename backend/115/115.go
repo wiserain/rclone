@@ -104,7 +104,6 @@ func init() {
 			Name:     "user_agent",
 			Default:  defaultUserAgent,
 			Advanced: true,
-			Hide:     fs.OptionHideBoth,
 			Help: fmt.Sprintf(`HTTP user agent used for 115.
 
 Defaults to "%s" or "--115-user-agent" provided on command line.`, defaultUserAgent),
@@ -141,7 +140,6 @@ Fill in for rclone to use a non root folder as its starting point.
 			Name:     "upload_hash_only",
 			Default:  false,
 			Advanced: true,
-			Hide:     fs.OptionHideBoth,
 			Help: `Skip uploading files that require network traffic, including
 
 	1) Incoming traffic for calculating file hashes locally
@@ -210,7 +208,6 @@ this may help to speed up the transfers.`,
 		}, {
 			Name:     "download_cookie",
 			Advanced: true,
-			Hide:     fs.OptionHideBoth,
 			Help: `Set an additional cookie for the download-only client. 
 
 This enables a separate client instance for downloading files.`,
@@ -218,7 +215,6 @@ This enables a separate client instance for downloading files.`,
 			Name:     "download_no_proxy",
 			Default:  false,
 			Advanced: true,
-			Hide:     fs.OptionHideBoth,
 			Help: `Disable proxy settings for the download-only client.
 			
 Use this flag with the "--115-download-cookie" option to bypass proxy settings for downloads.`,
