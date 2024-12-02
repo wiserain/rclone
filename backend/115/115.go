@@ -208,6 +208,21 @@ this may help to speed up the transfers.`,
 			Default:  1,
 			Advanced: true,
 		}, {
+			Name:     "download_cookie",
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help: `Set an additional cookie for the download-only client. 
+
+This enables a separate client instance for downloading files.`,
+		}, {
+			Name:     "download_no_proxy",
+			Default:  false,
+			Advanced: true,
+			Hide:     fs.OptionHideBoth,
+			Help: `Disable proxy settings for the download-only client.
+			
+Use this flag with the "--115-download-cookie" option to bypass proxy settings for downloads.`,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
@@ -245,6 +260,8 @@ type Options struct {
 	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
 	MaxUploadParts      int                  `config:"max_upload_parts"`
 	UploadConcurrency   int                  `config:"upload_concurrency"`
+	DownloadCookie      string               `config:"download_cookie"`
+	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
@@ -255,7 +272,9 @@ type Fs struct {
 	opt          Options
 	features     *fs.Features
 	client       *http.Client // authorized client
+	dclient      *http.Client // download-only client
 	srv          *rest.Client
+	dsrv         *rest.Client       // download-only client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolder   string // path of the absolute root
@@ -350,11 +369,44 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
+// extractCookies extracts UID, CID, and SEID from a cookie string and sets them in Options
+func extractCookies(opt *Options, cookie string) {
+	if cookie == "" {
+		return
+	}
+
+	items := strings.Split(cookie, ";")
+	for _, item := range items {
+		kv := strings.Split(strings.TrimSpace(item), "=")
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(strings.ToUpper(kv[0]))
+		val := strings.TrimSpace(kv[1])
+		switch key {
+		case "UID", "CID", "SEID":
+			reflect.ValueOf(opt).Elem().FieldByName(key).SetString(val)
+		}
+	}
+}
+
+// setCookies applies UID, CID, and SEID cookies to the provided REST client
+func setCookies(client *rest.Client, opt *Options) {
+	client.SetCookie(
+		&http.Cookie{Name: "UID", Value: opt.UID, Domain: domain, Path: "/", HttpOnly: true},
+		&http.Cookie{Name: "CID", Value: opt.CID, Domain: domain, Path: "/", HttpOnly: true},
+		&http.Cookie{Name: "SEID", Value: opt.SEID, Domain: domain, Path: "/", HttpOnly: true},
+	)
+}
+
 // getClient makes an http client according to the options
 func getClient(ctx context.Context, opt *Options) *http.Client {
 	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
+		if opt.DownloadCookie != "" && opt.DownloadNoProxy {
+			t.Proxy = nil
+		}
 	})
 	return &http.Client{
 		Transport: t,
@@ -372,40 +424,16 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 
 	// UID, CID, SEID from cookie
 	if opt.Cookie != "" {
-		if items := strings.Split(opt.Cookie, ";"); len(items) > 2 {
-			for _, item := range items {
-				kv := strings.Split(strings.TrimSpace(item), "=")
-				if len(kv) != 2 {
-					continue
-				}
-				key := strings.TrimSpace(strings.ToUpper(kv[0]))
-				val := strings.TrimSpace(kv[1])
-				switch key {
-				case "UID", "CID", "SEID":
-					reflect.ValueOf(opt).Elem().FieldByName(key).SetString(val)
-				}
-			}
-		}
+		extractCookies(opt, opt.Cookie)
 	}
-	f.srv.SetCookie(&http.Cookie{
-		Name:     "UID",
-		Value:    opt.UID,
-		Domain:   domain,
-		Path:     "/",
-		HttpOnly: true,
-	}, &http.Cookie{
-		Name:     "CID",
-		Value:    opt.CID,
-		Domain:   domain,
-		Path:     "/",
-		HttpOnly: true,
-	}, &http.Cookie{
-		Name:     "SEID",
-		Value:    opt.SEID,
-		Domain:   domain,
-		Path:     "/",
-		HttpOnly: true,
-	})
+	setCookies(f.srv, opt)
+
+	if f.opt.DownloadCookie != "" {
+		f.dclient = getClient(newCtx, opt)
+		f.dsrv = rest.NewClient(f.dclient).SetRoot(rootURL).SetErrorHandler(errorHandler)
+		extractCookies(opt, opt.DownloadCookie)
+		setCookies(f.dsrv, opt)
+	}
 	f.userID, _, _ = strings.Cut(opt.UID, "_")
 	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(opt.PacerMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
@@ -1344,8 +1372,12 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		delete(req.Header, "Range")
 	}
 	var res *http.Response
+	client := o.fs.client
+	if o.fs.dclient != nil {
+		client = o.fs.dclient
+	}
 	err = o.fs.pacer.Call(func() (bool, error) {
-		res, err = o.fs.client.Do(req)
+		res, err = client.Do(req)
 		return shouldRetry(ctx, res, nil, err)
 	})
 	if err != nil {
