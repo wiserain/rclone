@@ -25,7 +25,6 @@ import (
 	"io"
 	"net/http"
 	"path"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -52,7 +51,7 @@ const (
 	rootURL          = "https://webapi.115.com"
 	defaultUserAgent = "Mozilla/5.0 115Browser/27.0.7.5"
 
-	defaultMinSleep = fs.Duration(1000 * time.Millisecond) // 1 transactions per second
+	defaultMinSleep = fs.Duration(1025 * time.Millisecond) // 1 transactions per second
 	maxSleep        = 2 * time.Second
 	decayConstant   = 2 // bigger for slower decay, exponential
 
@@ -267,10 +266,8 @@ type Fs struct {
 	root         string
 	opt          Options
 	features     *fs.Features
-	client       *http.Client // authorized client
-	dclient      *http.Client // download-only client
-	srv          *rest.Client
-	dsrv         *rest.Client       // download-only client
+	srv          *poolClient        // authorized client
+	dsrv         *poolClient        // download-only client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolder   string // path of the absolute root
@@ -365,8 +362,8 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
-// extractCookies extracts UID, CID, and SEID from a cookie string and sets them in Options
-func extractCookies(opt *Options, cookie string) {
+// getCookies extracts UID, CID, and SEID from a cookie string and returns of a list of *http.Cookie
+func getCookies(cookie string) (cks []*http.Cookie) {
 	if cookie == "" {
 		return
 	}
@@ -381,18 +378,12 @@ func extractCookies(opt *Options, cookie string) {
 		val := strings.TrimSpace(kv[1])
 		switch key {
 		case "UID", "CID", "SEID":
-			reflect.ValueOf(opt).Elem().FieldByName(key).SetString(val)
+			if val != "" {
+				cks = append(cks, &http.Cookie{Name: key, Value: val, Domain: domain, Path: "/", HttpOnly: true})
+			}
 		}
 	}
-}
-
-// setCookies applies UID, CID, and SEID cookies to the provided REST client
-func setCookies(client *rest.Client, opt *Options) {
-	client.SetCookie(
-		&http.Cookie{Name: "UID", Value: opt.UID, Domain: domain, Path: "/", HttpOnly: true},
-		&http.Cookie{Name: "CID", Value: opt.CID, Domain: domain, Path: "/", HttpOnly: true},
-		&http.Cookie{Name: "SEID", Value: opt.SEID, Domain: domain, Path: "/", HttpOnly: true},
-	)
+	return
 }
 
 // getClient makes an http client according to the options
@@ -409,29 +400,79 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 	}
 }
 
-// newClientWithPacer sets a new http/rest client with a pacer to Fs
+// poolClient wraps a pool of rest.Client for load-balancing requests
+type poolClient struct {
+	clients      []*rest.Client
+	clientMu     *sync.Mutex
+	currentIndex int
+}
+
+func (p *poolClient) client() *rest.Client {
+	if len(p.clients) == 1 {
+		return p.clients[0]
+	}
+	p.clientMu.Lock()
+	defer p.clientMu.Unlock()
+	cli := p.clients[p.currentIndex]
+	p.currentIndex = (p.currentIndex + 1) % len(p.clients)
+	return cli
+}
+
+func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
+	return p.client().CallJSON(ctx, opts, request, response)
+}
+
+func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Response, err error) {
+	return p.client().Call(ctx, opts)
+}
+
+func (p *poolClient) Do(req *http.Request) (*http.Response, error) {
+	return p.client().Do(req)
+}
+
+func newPoolClient(ctx context.Context, opt *Options, cookies string) *poolClient {
+	var clients []*rest.Client
+	for _, cookie := range strings.Split(cookies, ",") {
+		if cks := getCookies(cookie); len(cks) == 3 {
+			cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
+			cli.SetCookie(cks...)
+			clients = append(clients, cli)
+		}
+	}
+	if len(clients) == 0 {
+		return nil
+	}
+	return &poolClient{
+		clients:  clients,
+		clientMu: new(sync.Mutex),
+	}
+}
+
+// newClientWithPacer sets a new pool client with a pacer to Fs
 func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	// Override few config settings and create a client
 	newCtx, ci := fs.AddConfig(ctx)
 	ci.UserAgent = opt.UserAgent
-	f.client = getClient(newCtx, opt)
 
-	f.srv = rest.NewClient(f.client).SetRoot(rootURL).SetErrorHandler(errorHandler)
-
-	// UID, CID, SEID from cookie
-	if opt.Cookie != "" {
-		extractCookies(opt, opt.Cookie)
+	f.srv = newPoolClient(newCtx, opt, opt.Cookie)
+	if f.srv == nil {
+		// if not found from opt.Cookie
+		cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s", opt.UID, opt.CID, opt.SEID)
+		f.srv = newPoolClient(newCtx, opt, cookie)
 	}
-	setCookies(f.srv, opt)
-
-	if f.opt.DownloadCookie != "" {
-		f.dclient = getClient(newCtx, opt)
-		f.dsrv = rest.NewClient(f.dclient).SetRoot(rootURL).SetErrorHandler(errorHandler)
-		extractCookies(opt, opt.DownloadCookie)
-		setCookies(f.dsrv, opt)
+	if f.srv == nil {
+		return fmt.Errorf("no cookies")
 	}
+
+	// download-only clients
+	f.dsrv = newPoolClient(newCtx, opt, opt.DownloadCookie)
 	f.userID, _, _ = strings.Cut(opt.UID, "_")
-	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(opt.PacerMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
+	adjustedMinSleep := time.Duration(opt.PacerMinSleep)
+	if numClients := len(f.srv.clients); numClients > 1 {
+		adjustedMinSleep /= time.Duration(numClients)
+		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
+	}
+	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(adjustedMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
 }
 
@@ -487,8 +528,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		fs.Debugf(nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
 	}
 
-	if err := f.newClientWithPacer(ctx, opt); err != nil {
-		return nil, err
+	err = f.newClientWithPacer(ctx, opt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize clients: %w", err)
 	}
 
 	return f, nil
@@ -1368,12 +1410,12 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		delete(req.Header, "Range")
 	}
 	var res *http.Response
-	client := o.fs.client
-	if o.fs.dclient != nil {
-		client = o.fs.dclient
+	srv := o.fs.srv
+	if o.fs.dsrv != nil {
+		srv = o.fs.dsrv
 	}
 	err = o.fs.pacer.Call(func() (bool, error) {
-		res, err = client.Do(req)
+		res, err = srv.Do(req)
 		return shouldRetry(ctx, res, nil, err)
 	})
 	if err != nil {
