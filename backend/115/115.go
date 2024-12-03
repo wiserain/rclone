@@ -51,7 +51,7 @@ const (
 	rootURL          = "https://webapi.115.com"
 	defaultUserAgent = "Mozilla/5.0 115Browser/27.0.7.5"
 
-	defaultMinSleep = fs.Duration(1025 * time.Millisecond) // 1 transactions per second
+	defaultMinSleep = fs.Duration(1000 * time.Millisecond) // 1 transactions per second
 	maxSleep        = 2 * time.Second
 	decayConstant   = 2 // bigger for slower decay, exponential
 
@@ -87,8 +87,12 @@ func init() {
 			Required:  true,
 			Sensitive: true,
 		}, {
-			Name:      "cookie",
-			Help:      "cookie including UID, CID, SEID",
+			Name: "cookie",
+			Help: `Provide a cookie in the format "UID=...; CID=...; SEID=...".
+
+This setting takes precedence over any individually defined UID, CID, or SEID options.
+Additionally, you can provide a comma-separated list of cookies to distribute requests 
+across multiple client instances for load balancing.`,
 			Required:  true,
 			Sensitive: true,
 		}, {
@@ -205,11 +209,12 @@ this may help to speed up the transfers.`,
 			Default:  1,
 			Advanced: true,
 		}, {
-			Name:     "download_cookie",
-			Advanced: true,
-			Help: `Set an additional cookie for the download-only client. 
+			Name:      "download_cookie",
+			Sensitive: true,
+			Advanced:  true,
+			Help: `Set a comma-separated list of cookies for the download-only clients. 
 
-This enables a separate client instance for downloading files.`,
+This enables separate client instances dedicated to downloading files`,
 		}, {
 			Name:     "download_no_proxy",
 			Default:  false,
