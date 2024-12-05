@@ -73,24 +73,28 @@ func init() {
 		CommandHelp: commandHelp,
 		Options: []fs.Option{{
 			Name:      "uid",
-			Help:      "UID from cookie",
+			Help:      "UID from cookie (deprecated, consider migrating to option cookie)",
 			Required:  true,
 			Sensitive: true,
+			Hide:      fs.OptionHideBoth,
 		}, {
 			Name:      "cid",
-			Help:      "CID from cookie",
+			Help:      "CID from cookie (deprecated, consider migrating to option cookie)",
 			Required:  true,
 			Sensitive: true,
+			Hide:      fs.OptionHideBoth,
 		}, {
 			Name:      "seid",
-			Help:      "SEID from cookie",
+			Help:      "SEID from cookie (deprecated, consider migrating to option cookie)",
 			Required:  true,
 			Sensitive: true,
+			Hide:      fs.OptionHideBoth,
 		}, {
 			Name:      "kid",
-			Help:      "KID from cookie",
+			Help:      "KID from cookie (deprecated, consider migrating to option cookie)",
 			Required:  true,
 			Sensitive: true,
+			Hide:      fs.OptionHideBoth,
 		}, {
 			Name: "cookie",
 			Help: `Provide a cookie in the format "UID=...; CID=...; SEID=...; KID=...;".
