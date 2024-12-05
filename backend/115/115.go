@@ -87,10 +87,15 @@ func init() {
 			Required:  true,
 			Sensitive: true,
 		}, {
+			Name:      "kid",
+			Help:      "KID from cookie",
+			Required:  true,
+			Sensitive: true,
+		}, {
 			Name: "cookie",
-			Help: `Provide a cookie in the format "UID=...; CID=...; SEID=...".
+			Help: `Provide a cookie in the format "UID=...; CID=...; SEID=...; KID=...;".
 
-This setting takes precedence over any individually defined UID, CID, or SEID options.
+This setting takes precedence over any individually defined UID, CID, SEID or KID options.
 Additionally, you can provide a comma-separated list of cookies to distribute requests 
 across multiple client instances for load balancing.`,
 			Required:  true,
@@ -245,6 +250,7 @@ type Options struct {
 	UID                 string               `config:"uid"`
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
+	KID                 string               `config:"kid"`
 	Cookie              string               `config:"cookie"`
 	ShareCode           string               `config:"share_code"`
 	ReceiveCode         string               `config:"receive_code"`
@@ -367,7 +373,7 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
-// getCookies extracts UID, CID, and SEID from a cookie string and returns of a list of *http.Cookie
+// getCookies extracts UID, CID, SEID and KID from a cookie string and returns of a list of *http.Cookie
 func getCookies(cookie string) (cks []*http.Cookie) {
 	if cookie == "" {
 		return
@@ -382,7 +388,7 @@ func getCookies(cookie string) (cks []*http.Cookie) {
 		key := strings.TrimSpace(strings.ToUpper(kv[0]))
 		val := strings.TrimSpace(kv[1])
 		switch key {
-		case "UID", "CID", "SEID":
+		case "UID", "CID", "SEID", "KID":
 			if val != "" {
 				cks = append(cks, &http.Cookie{Name: key, Value: val, Domain: domain, Path: "/", HttpOnly: true})
 			}
@@ -438,7 +444,7 @@ func (p *poolClient) Do(req *http.Request) (*http.Response, error) {
 func newPoolClient(ctx context.Context, opt *Options, cookies string) *poolClient {
 	var clients []*rest.Client
 	for _, cookie := range strings.Split(cookies, ",") {
-		if cks := getCookies(cookie); len(cks) == 3 {
+		if cks := getCookies(cookie); len(cks) == 4 {
 			cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
 			cli.SetCookie(cks...)
 			clients = append(clients, cli)
@@ -462,7 +468,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	f.srv = newPoolClient(newCtx, opt, opt.Cookie)
 	if f.srv == nil {
 		// if not found from opt.Cookie
-		cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s", opt.UID, opt.CID, opt.SEID)
+		cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s;KID=%s", opt.UID, opt.CID, opt.SEID, opt.KID)
 		f.srv = newPoolClient(newCtx, opt, cookie)
 	}
 	if f.srv == nil {
