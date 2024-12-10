@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -104,6 +105,10 @@ Additionally, you can provide a comma-separated list of cookies to distribute re
 across multiple client instances for load balancing.`,
 			Required:  true,
 			Sensitive: true,
+		}, {
+			Name:     "cookie_from",
+			Help:     `Specify a space-separated list of remote names to read cookies from`,
+			Advanced: true,
 		}, {
 			Name:      "share_code",
 			Help:      "share code from share link",
@@ -255,7 +260,8 @@ type Options struct {
 	CID                 string               `config:"cid"`
 	SEID                string               `config:"seid"`
 	KID                 string               `config:"kid"`
-	Cookie              string               `config:"cookie"`
+	Cookie              fs.CommaSepList      `config:"cookie"`
+	CookieFrom          fs.SpaceSepList      `config:"cookie_from"`
 	ShareCode           string               `config:"share_code"`
 	ReceiveCode         string               `config:"receive_code"`
 	UserAgent           string               `config:"user_agent"`
@@ -270,7 +276,7 @@ type Options struct {
 	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
 	MaxUploadParts      int                  `config:"max_upload_parts"`
 	UploadConcurrency   int                  `config:"upload_concurrency"`
-	DownloadCookie      string               `config:"download_cookie"`
+	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
@@ -377,14 +383,27 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
-// getCookies extracts UID, CID, SEID and KID from a cookie string and returns of a list of *http.Cookie
-func getCookies(cookie string) (cks []*http.Cookie) {
-	if cookie == "" {
-		return
-	}
+type Credential struct {
+	UID  string
+	CID  string
+	SEID string
+	KID  string
+}
 
-	items := strings.Split(cookie, ";")
-	for _, item := range items {
+// Valid reports whether the credential is valid.
+func (cr *Credential) Valid() error {
+	if cr == nil {
+		return fmt.Errorf("nil credential")
+	}
+	if cr.UID == "" || cr.CID == "" || cr.SEID == "" {
+		return fmt.Errorf("missing UID, CID, or SEID")
+	}
+	return nil
+}
+
+// FromCookie loads credential from cookie string
+func (cr *Credential) FromCookie(cookieStr string) *Credential {
+	for _, item := range strings.Split(cookieStr, ";") {
 		kv := strings.Split(strings.TrimSpace(item), "=")
 		if len(kv) != 2 {
 			continue
@@ -393,12 +412,26 @@ func getCookies(cookie string) (cks []*http.Cookie) {
 		val := strings.TrimSpace(kv[1])
 		switch key {
 		case "UID", "CID", "SEID", "KID":
-			if val != "" {
-				cks = append(cks, &http.Cookie{Name: key, Value: val, Domain: domain, Path: "/", HttpOnly: true})
-			}
+			reflect.ValueOf(cr).Elem().FieldByName(key).SetString(val)
 		}
 	}
-	return
+	return cr
+}
+
+// Cookie turns the credential into a list of http cookie
+func (cr *Credential) Cookie() []*http.Cookie {
+	return []*http.Cookie{
+		{Name: "UID", Value: cr.UID, Domain: domain, Path: "/", HttpOnly: true},
+		{Name: "CID", Value: cr.CID, Domain: domain, Path: "/", HttpOnly: true},
+		{Name: "KID", Value: cr.KID, Domain: domain, Path: "/", HttpOnly: true},
+		{Name: "SEID", Value: cr.SEID, Domain: domain, Path: "/", HttpOnly: true},
+	}
+}
+
+// UserID parses userID from UID field
+func (cr *Credential) UserID() string {
+	userID, _, _ := strings.Cut(cr.UID, "_")
+	return userID
 }
 
 // getClient makes an http client according to the options
@@ -406,7 +439,7 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
-		if opt.DownloadCookie != "" && opt.DownloadNoProxy {
+		if len(opt.DownloadCookie) != 0 && opt.DownloadNoProxy {
 			t.Proxy = nil
 		}
 	})
@@ -420,6 +453,7 @@ type poolClient struct {
 	clients      []*rest.Client
 	clientMu     *sync.Mutex
 	currentIndex int
+	credentials  []*Credential
 }
 
 func (p *poolClient) client() *rest.Client {
@@ -445,22 +479,64 @@ func (p *poolClient) Do(req *http.Request) (*http.Response, error) {
 	return p.client().Do(req)
 }
 
-func newPoolClient(ctx context.Context, opt *Options, cookies string) *poolClient {
-	var clients []*rest.Client
-	for _, cookie := range strings.Split(cookies, ",") {
-		if cks := getCookies(cookie); len(cks) == 4 {
-			cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
-			cli.SetCookie(cks...)
-			clients = append(clients, cli)
+func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (pc *poolClient, err error) {
+	// cookies -> credentials
+	var creds []*Credential
+	seen := make(map[string]bool)
+	for _, cookie := range cookies {
+		cred := (&Credential{}).FromCookie(cookie)
+		if err = cred.Valid(); err != nil {
+			return nil, fmt.Errorf("%w: %q", err, cookie)
+		}
+		if seen[cred.UID] {
+			return nil, fmt.Errorf("duplicate UID: %q", cookie)
+		}
+		seen[cred.UID] = true
+		creds = append(creds, cred)
+	}
+	if len(creds) == 0 {
+		return nil, nil
+	}
+	if len(creds) > 1 {
+		UserID := creds[0].UserID()
+		for _, cred := range creds[1:] {
+			if user := cred.UserID(); UserID != user {
+				return nil, fmt.Errorf("inconsistent UserID: %s != %s", UserID, user)
+			}
 		}
 	}
-	if len(clients) == 0 {
-		return nil
+
+	// credentials -> rest clients
+	var clients []*rest.Client
+	for _, cred := range creds {
+		cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
+		clients = append(clients, cli.SetCookie(cred.Cookie()...))
 	}
 	return &poolClient{
-		clients:  clients,
-		clientMu: new(sync.Mutex),
+		clients:     clients,
+		clientMu:    new(sync.Mutex),
+		credentials: creds,
+	}, nil
+}
+
+// getCookieFrom retrieves a cookie from `remote` configured in rclone.conf
+func getCookieFrom(remote string) (cookie fs.CommaSepList, err error) {
+	fsInfo, _, _, config, err := fs.ConfigFs(remote)
+	if err != nil {
+		return nil, err
 	}
+	if fsInfo.Name != "115" {
+		return nil, fmt.Errorf("not 115 remote")
+	}
+	opt := new(Options)
+	err = configstruct.Set(config, opt)
+	if err != nil {
+		return nil, err
+	}
+	if len(opt.Cookie) == 0 {
+		return nil, fmt.Errorf("empty cookie")
+	}
+	return opt.Cookie, nil
 }
 
 // newClientWithPacer sets a new pool client with a pacer to Fs
@@ -469,19 +545,39 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	newCtx, ci := fs.AddConfig(ctx)
 	ci.UserAgent = opt.UserAgent
 
-	f.srv = newPoolClient(newCtx, opt, opt.Cookie)
+	var remoteCookies fs.CommaSepList
+	for _, remote := range opt.CookieFrom {
+		cookie, err := getCookieFrom(remote)
+		if err != nil {
+			return fmt.Errorf("couldn't get cookie from %q: %w", remote, err)
+		}
+		remoteCookies = append(remoteCookies, cookie...)
+	}
+	if f.srv, err = newPoolClient(newCtx, opt, remoteCookies); err != nil {
+		return err
+	}
 	if f.srv == nil {
-		// if not found from opt.Cookie
-		cookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s;KID=%s", opt.UID, opt.CID, opt.SEID, opt.KID)
-		f.srv = newPoolClient(newCtx, opt, cookie)
+		// if not any from opt.CookieFrom
+		if f.srv, err = newPoolClient(newCtx, opt, opt.Cookie); err != nil {
+			return err
+		}
+	}
+	if f.srv == nil {
+		// if not any from opt.Cookie
+		oldCookie := fmt.Sprintf("UID=%s;CID=%s;SEID=%s;KID=%s", opt.UID, opt.CID, opt.SEID, opt.KID)
+		if f.srv, err = newPoolClient(newCtx, opt, fs.CommaSepList{oldCookie}); err != nil {
+			return err
+		}
 	}
 	if f.srv == nil {
 		return fmt.Errorf("no cookies")
 	}
 
 	// download-only clients
-	f.dsrv = newPoolClient(newCtx, opt, opt.DownloadCookie)
-	f.userID, _, _ = strings.Cut(opt.UID, "_")
+	if f.dsrv, err = newPoolClient(newCtx, opt, opt.DownloadCookie); err != nil {
+		return err
+	}
+	f.userID = f.srv.credentials[0].UserID()
 	adjustedMinSleep := time.Duration(opt.PacerMinSleep)
 	if numClients := len(f.srv.clients); numClients > 1 {
 		adjustedMinSleep /= time.Duration(numClients)
