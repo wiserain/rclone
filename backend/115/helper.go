@@ -377,8 +377,7 @@ func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to decode data: %w", err)
 	}
-	cookies = append(cookies, resp.Cookies()...)         // including uid, cid, and seid
-	cookies = append(cookies, resp.Request.Cookies()...) // including access key value pari with Max-Age=900
+	cookies = append(cookies, resp.Cookies()...) // including access key value pair with Max-Age=900
 	return
 }
 
@@ -397,7 +396,6 @@ func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.Dow
 	for _, downInfo := range downData {
 		durl = &downInfo.URL
 		durl.Cookies = cookies
-		durl.CreateTime = time.Now()
 		return
 	}
 	return nil, fs.ErrorObjectNotFound
@@ -683,6 +681,5 @@ func (f *Fs) getDownloadURLFromShare(ctx context.Context, fid string) (durl *api
 
 	durl = &downInfo.URL
 	durl.Cookies = cookies
-	durl.CreateTime = time.Now()
 	return
 }

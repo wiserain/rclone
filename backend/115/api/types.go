@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -270,18 +271,42 @@ type SizeInfo struct {
 // ------------------------------------------------------------
 
 type DownloadURL struct {
-	URL        string `json:"url"`
-	Client     Int    `json:"client"`
-	Desc       string `json:"desc"`
-	OssID      string `json:"oss_id"`
-	Cookies    []*http.Cookie
-	CreateTime time.Time
+	URL     string `json:"url"`
+	Client  Int    `json:"client"`
+	Desc    string `json:"desc"`
+	OssID   string `json:"oss_id"`
+	Cookies []*http.Cookie
+}
+
+// expiry parses expiry from URL parameter t
+func (u *DownloadURL) expiry() time.Time {
+	if p, err := url.Parse(u.URL); err == nil {
+		if q, err := url.ParseQuery(p.RawQuery); err == nil {
+			if t := q.Get("t"); t != "" {
+				if i, err := strconv.ParseInt(t, 10, 64); err == nil {
+					return time.Unix(i, 0)
+				}
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// expired reports whether the token is expired.
+// u must be non-nil.
+func (u *DownloadURL) expired() bool {
+	expiry := u.expiry()
+	if expiry.IsZero() {
+		return false
+	}
+
+	expiryDelta := time.Duration(10) * time.Second
+	return expiry.Round(0).Add(-expiryDelta).Before(time.Now())
 }
 
 // Valid reports whether u is non-nil, has an URL, and is not expired.
 func (u *DownloadURL) Valid() bool {
-	return u != nil && u.URL != "" && time.Since(u.CreateTime) < 100*time.Second
-	// TODO: how sure for 100s expiry
+	return u != nil && u.URL != "" && !u.expired()
 }
 
 func (u *DownloadURL) Cookie() string {
