@@ -1602,6 +1602,7 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
 	o.modTime = info.ModTime()
+	o.durl = (&api.DownloadURL{}).SetURL(info.U)
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -127,6 +128,7 @@ type File struct {
 	CheckCode int         `json:"check_code,omitempty"`
 	CheckMsg  string      `json:"check_msg,omitempty"`
 	Score     int         `json:"score,omitempty"`
+	U         string      `json:"u,omitempty"`
 	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
 }
 
@@ -317,6 +319,17 @@ func (u *DownloadURL) Cookie() string {
 	return cookie
 }
 
+func (u *DownloadURL) SetURL(downURL string) *DownloadURL {
+	if strings.HasPrefix(downURL, "http://thumb.115.com") || strings.HasPrefix(downURL, "https://thumb.115.com") {
+		if up, err := url.Parse(downURL); err == nil {
+			if sha1, _, found := strings.Cut(path.Base(up.Path), "_"); found {
+				u.URL = fmt.Sprintf("https://imgjump.115.com/?sha1=%s&%s&size=0", sha1, up.RawQuery)
+			}
+		}
+	}
+	return u
+}
+
 type DownloadInfo struct {
 	FileName string      `json:"file_name"`
 	FileSize Int64       `json:"file_size"`
@@ -398,7 +411,7 @@ type CallbackData struct {
 	IsVideo  int    `json:"is_video,omitempty"`
 	PickCode string `json:"pick_code,omitempty"`
 	Sha      string `json:"sha1,omitempty"`
-	ThumbURL string `json:"thumb_url,omitempty"`
+	ThumbURL string `json:"thumb_url,omitempty"` // useless as empty
 }
 
 type OSSToken struct {
