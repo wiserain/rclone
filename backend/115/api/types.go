@@ -270,6 +270,21 @@ type SizeInfo struct {
 	SizeFormat string  `json:"size_format"`
 }
 
+type Image struct {
+	URL       string   `json:"url,omitempty"`
+	AllURL    []string `json:"all_url,omitempty"`    // all resized versions
+	OriginURL string   `json:"origin_url,omitempty"` // original, untouched
+	SourceURL string   `json:"source_url,omitempty"` // cdn url expires in 900s
+	FileName  string   `json:"file_name,omitempty"`
+	FileSha1  string   `json:"file_sha1,omitempty"`
+	PickCode  string   `json:"pick_code,omitempty"`
+}
+
+type ImageInfo struct {
+	State bool   `json:"state,omitempty"`
+	Data  *Image `json:"data,omitempty"`
+}
+
 // ------------------------------------------------------------
 
 type DownloadURL struct {

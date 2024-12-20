@@ -310,6 +310,7 @@ type Object struct {
 	size        int64
 	sha1sum     string
 	pickCode    string
+	class       string
 	modTime     time.Time        // modification time of the object
 	durl        *api.DownloadURL // link to download the object
 	durlMu      *sync.Mutex
@@ -1601,6 +1602,7 @@ func (o *Object) setMetaData(info *api.File) error {
 	o.size = int64(info.Size)
 	o.sha1sum = strings.ToLower(info.Sha)
 	o.pickCode = info.PickCode
+	o.class = info.Class
 	o.modTime = info.ModTime()
 	o.durl = (&api.DownloadURL{}).SetURL(info.U)
 	return nil
@@ -1628,7 +1630,16 @@ func (o *Object) setDownloadURL(ctx context.Context) (err error) {
 	if o.fs.isShare {
 		o.durl, err = o.fs.getDownloadURLFromShare(ctx, o.id)
 	} else {
-		o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+		switch o.class {
+		case "PIC", "JG_PIC":
+			img, err := o.fs.getImage(ctx, o.pickCode)
+			if err != nil {
+				return err
+			}
+			o.durl = (&api.DownloadURL{}).SetURL(img.URL)
+		default:
+			o.durl, err = o.fs.getDownloadURL(ctx, o.pickCode)
+		}
 	}
 	return
 }

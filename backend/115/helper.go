@@ -503,6 +503,30 @@ func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err
 	return
 }
 
+func (f *Fs) getImage(ctx context.Context, pickCode string) (img *api.Image, err error) {
+	params := url.Values{}
+	params.Set("pickcode", pickCode)
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/files/image",
+		Parameters: params,
+	}
+
+	var info *api.ImageInfo
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	} else if !info.State {
+		// return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
+		return nil, fmt.Errorf("API Error: ")
+	}
+	return info.Data, nil
+}
+
 // ------------------------------------------------------------
 
 // add offline download task for multiple urls
