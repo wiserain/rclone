@@ -278,6 +278,21 @@ type DownloadURL struct {
 	Cookies []*http.Cookie
 }
 
+func (u *DownloadURL) UnmarshalJSON(data []byte) error {
+	if string(data) == "false" {
+		*u = DownloadURL{}
+		return nil
+	}
+
+	type Alias DownloadURL // Use type alias to avoid recursion
+	aux := Alias{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*u = DownloadURL(aux)
+	return nil
+}
+
 // expiry parses expiry from URL parameter t
 func (u *DownloadURL) expiry() time.Time {
 	if p, err := url.Parse(u.URL); err == nil {
@@ -304,9 +319,9 @@ func (u *DownloadURL) expired() bool {
 	return expiry.Round(0).Add(-expiryDelta).Before(time.Now())
 }
 
-// Valid reports whether u is non-nil, has an URL, and is not expired.
+// Valid reports whether u is non-nil and is not expired.
 func (u *DownloadURL) Valid() bool {
-	return u != nil && u.URL != "" && !u.expired()
+	return u != nil && !u.expired()
 }
 
 func (u *DownloadURL) Cookie() string {

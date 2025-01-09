@@ -1550,7 +1550,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, fmt.Errorf("can't download: %w", err)
 	}
 	if o.durl.URL == "" {
-		return nil, errors.New("can't download: no url")
+		return nil, fserrors.NoRetryError(errors.New("can't download: no url"))
 	}
 	return o.open(ctx, options...)
 }
