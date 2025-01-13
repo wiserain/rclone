@@ -313,6 +313,19 @@ Properties:
 - Type:        string
 - Required:    false
 
+#### --gphotos-client-credentials
+
+Use client credentials OAuth flow.
+
+This will use the OAUTH2 client Credentials Flow as described in RFC 6749.
+
+Properties:
+
+- Config:      client_credentials
+- Env Var:     RCLONE_GPHOTOS_CLIENT_CREDENTIALS
+- Type:        bool
+- Default:     false
+
 #### --gphotos-read-size
 
 Set to read the size of media items.
@@ -363,6 +376,40 @@ Properties:
 - Env Var:     RCLONE_GPHOTOS_INCLUDE_ARCHIVED
 - Type:        bool
 - Default:     false
+
+#### --gphotos-proxy
+
+Use the gphotosdl proxy for downloading the full resolution images
+
+The Google API will deliver images and video which aren't full
+resolution, and/or have EXIF data missing.
+
+However if you ue the gphotosdl proxy tnen you can download original,
+unchanged images.
+
+This runs a headless browser in the background.
+
+Download the software from [gphotosdl](https://github.com/rclone/gphotosdl)
+
+First run with
+
+    gphotosdl -login
+
+Then once you have logged into google photos close the browser window
+and run
+
+    gphotosdl
+
+Then supply the parameter `--gphotos-proxy "http://localhost:8282"` to make
+rclone use the proxy.
+
+
+Properties:
+
+- Config:      proxy
+- Env Var:     RCLONE_GPHOTOS_PROXY
+- Type:        string
+- Required:    false
 
 #### --gphotos-encoding
 
@@ -502,11 +549,17 @@ is covered by [bug #112096115](https://issuetracker.google.com/issues/112096115)
 
 **The current google API does not allow photos to be downloaded at original resolution.  This is very important if you are, for example, relying on "Google Photos" as a backup of your photos.  You will not be able to use rclone to redownload original images.  You could use 'google takeout' to recover the original photos as a last resort**
 
+**NB** you **can** use the [--gphotos-proxy](#gphotos-proxy) flag to use a
+headless browser to download images in full resolution.
+
 ### Downloading Videos
 
 When videos are downloaded they are downloaded in a really compressed
 version of the video compared to downloading it via the Google Photos
 web interface. This is covered by [bug #113672044](https://issuetracker.google.com/issues/113672044).
+
+**NB** you **can** use the [--gphotos-proxy](#gphotos-proxy) flag to use a
+headless browser to download images in full resolution.
 
 ### Duplicates
 

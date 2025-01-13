@@ -83,9 +83,10 @@ const (
 // Globals
 var (
 	// Description of how to auth for this app
-	driveConfig = &oauth2.Config{
+	driveConfig = &oauthutil.Config{
 		Scopes:       []string{scopePrefix + "drive"},
-		Endpoint:     google.Endpoint,
+		AuthURL:      google.Endpoint.AuthURL,
+		TokenURL:     google.Endpoint.TokenURL,
 		ClientID:     rcloneClientID,
 		ClientSecret: obscure.MustReveal(rcloneEncryptedClientSecret),
 		RedirectURL:  oauthutil.RedirectURL,
@@ -123,6 +124,7 @@ var (
 		"text/html":                 ".html",
 		"text/plain":                ".txt",
 		"text/tab-separated-values": ".tsv",
+		"text/markdown":             ".md",
 	}
 	_mimeTypeToExtensionLinks = map[string]string{
 		"application/x-link-desktop": ".desktop",
@@ -3741,7 +3743,8 @@ func (f *Fs) copyID(ctx context.Context, id, dest string) (err error) {
 	return nil
 }
 
-func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, err error) {
+// Run the drive query calling fn on each entry found
+func (f *Fs) queryFn(ctx context.Context, query string, fn func(*drive.File)) (err error) {
 	list := f.svc.Files.List()
 	if f.gdsSvc != nil { // mod
 		list = f.gdsSvc.Files.List()
@@ -3763,10 +3766,7 @@ func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, er
 	if f.rootFolderID == "appDataFolder" {
 		list.Spaces("appDataFolder")
 	}
-
 	fields := fmt.Sprintf("files(%s),nextPageToken,incompleteSearch", f.getFileFields(ctx))
-
-	var results []*drive.File
 	for {
 		var files *drive.FileList
 		err = f.pacer.Call(func() (bool, error) {
@@ -3774,18 +3774,64 @@ func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, er
 			return f.shouldRetry(ctx, err)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute query: %w", err)
+			return fmt.Errorf("failed to execute query: %w", err)
 		}
 		if files.IncompleteSearch {
 			fs.Errorf(f, "search result INCOMPLETE")
 		}
-		results = append(results, files.Files...)
+		for _, item := range files.Files {
+			fn(item)
+		}
 		if files.NextPageToken == "" {
 			break
 		}
 		list.PageToken(files.NextPageToken)
 	}
+	return nil
+}
+
+// Run the drive query returning the entries found
+func (f *Fs) query(ctx context.Context, query string) (entries []*drive.File, err error) {
+	var results []*drive.File
+	err = f.queryFn(ctx, query, func(item *drive.File) {
+		results = append(results, item)
+	})
+	if err != nil {
+		return nil, err
+	}
 	return results, nil
+}
+
+// Rescue, list or delete orphaned files
+func (f *Fs) rescue(ctx context.Context, dirID string, delete bool) (err error) {
+	return f.queryFn(ctx, "'me' in owners and trashed=false", func(item *drive.File) {
+		if len(item.Parents) != 0 {
+			return
+		}
+		// Have found an orphaned entry
+		if delete {
+			fs.Infof(item.Name, "Deleting orphan %q into trash", item.Id)
+			err = f.delete(ctx, item.Id, true)
+			if err != nil {
+				fs.Errorf(item.Name, "Failed to delete orphan %q: %v", item.Id, err)
+			}
+		} else if dirID == "" {
+			operations.SyncPrintf("%q, %q\n", item.Name, item.Id)
+		} else {
+			fs.Infof(item.Name, "Rescuing orphan %q", item.Id)
+			err = f.pacer.Call(func() (bool, error) {
+				_, err = f.svc.Files.Update(item.Id, nil).
+					AddParents(dirID).
+					Fields(f.getFileFields(ctx)).
+					SupportsAllDrives(true).
+					Context(ctx).Do()
+				return f.shouldRetry(ctx, err)
+			})
+			if err != nil {
+				fs.Errorf(item.Name, "Failed to rescue orphan %q: %v", item.Id, err)
+			}
+		}
+	})
 }
 
 var commandHelp = []fs.CommandHelp{{
@@ -4021,6 +4067,37 @@ The result is a JSON array of matches, for example:
 		"webViewLink": "https://drive.google.com/file/d/0AxBe_CDEF4zkGHI4d0FjYko2QkD/view?usp=drivesdk\u0026resourcekey=0-ABCDEFGHIXJQpIGqBJq3MC"
 	}
     ]`,
+}, {
+	Name:  "rescue",
+	Short: "Rescue or delete any orphaned files",
+	Long: `This command rescues or deletes any orphaned files or directories.
+
+Sometimes files can get orphaned in Google Drive. This means that they
+are no longer in any folder in Google Drive.
+
+This command finds those files and either rescues them to a directory
+you specify or deletes them.
+
+Usage:
+
+This can be used in 3 ways.
+
+First, list all orphaned files
+
+    rclone backend rescue drive:
+
+Second rescue all orphaned files to the directory indicated
+
+    rclone backend rescue drive: "relative/path/to/rescue/directory"
+
+e.g. To rescue all orphans to a directory called "Orphans" in the top level
+
+    rclone backend rescue drive: Orphans
+
+Third delete all orphaned files to the trash
+
+    rclone backend rescue drive: -o delete
+`,
 }}
 
 // Command the backend to run a named command
@@ -4194,6 +4271,22 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		} else {
 			return nil, errors.New("need a query argument")
 		}
+	case "rescue":
+		dirID := ""
+		_, delete := opt["delete"]
+		if len(arg) == 0 {
+			// no arguments - list only
+		} else if !delete && len(arg) == 1 {
+			dir := arg[0]
+			dirID, err = f.dirCache.FindDir(ctx, dir, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find or create rescue directory %q: %w", dir, err)
+			}
+			fs.Infof(f, "Rescuing orphans into %q", dir)
+		} else {
+			return nil, errors.New("syntax error: need 0 or 1 args or -o delete")
+		}
+		return nil, f.rescue(ctx, dirID, delete)
 	default:
 		return nil, fs.ErrorCommandNotFound
 	}

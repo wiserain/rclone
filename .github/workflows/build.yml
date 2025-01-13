@@ -17,7 +17,6 @@ on:
       manual:
         description: Manual run (bypass default conditions)
         type: boolean
-        required: true
         default: true
 
 jobs:
@@ -66,7 +65,7 @@ jobs:
   build:
     needs:
       - create-release
-    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
+    if: inputs.manual || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -169,7 +168,8 @@ jobs:
           sudo modprobe fuse
           sudo chmod 666 /dev/fuse
           sudo chown root:$USER /etc/fuse.conf
-          sudo apt-get install fuse3 libfuse-dev rpm pkg-config git-annex git-annex-remote-rclone nfs-common
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse-dev rpm pkg-config git-annex git-annex-remote-rclone nfs-common
         if: matrix.os == 'ubuntu-latest'
 
       - name: Install Libraries on macOS
@@ -267,7 +267,7 @@ jobs:
           asset_path: 'build/*'
 
   lint:
-    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
+    if: inputs.manual || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 30
     name: "lint"
     runs-on: ubuntu-latest
@@ -346,7 +346,7 @@ jobs:
         run: govulncheck ./...
 
   android:
-    if: ${{ github.event.inputs.manual == 'true' || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)) }}
+    if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 30
     name: "android-all"
     runs-on: ubuntu-latest

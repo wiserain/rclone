@@ -177,6 +177,19 @@ Properties:
 - Type:        bool
 - Default:     false
 
+#### --pikpak-no-media-link
+
+Use original file links instead of media links.
+
+This avoids issues caused by invalid media links, but may reduce download speeds.
+
+Properties:
+
+- Config:      no_media_link
+- Env Var:     RCLONE_PIKPAK_NO_MEDIA_LINK
+- Type:        bool
+- Default:     false
+
 #### --pikpak-hash-memory-limit
 
 Files bigger than this will be cached on disk to calculate hash if required.

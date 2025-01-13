@@ -41,7 +41,7 @@ var (
 	//
 	// This is a function pointer to decouple the config
 	// implementation from the fs
-	CountError = func(err error) error { return err }
+	CountError = func(ctx context.Context, err error) error { return err }
 
 	// ConfigProvider is the config key used for provider options
 	ConfigProvider = "provider"
@@ -105,6 +105,12 @@ var ConfigOptionsInfo = Options{{
 	Default:  false,
 	Help:     "Enable interactive mode",
 	Groups:   "Config,Important",
+}, {
+	Name:     "links",
+	Help:     "Translate symlinks to/from regular files with a '" + LinkSuffix + "' extension.",
+	Default:  false,
+	ShortOpt: "l",
+	Groups:   "Copy",
 }, {
 	Name:    "contimeout",
 	Default: 60 * time.Second,
@@ -537,6 +543,7 @@ type ConfigInfo struct {
 	UseJSONLog                 bool              `config:"use_json_log"`
 	DryRun                     bool              `config:"dry_run"`
 	Interactive                bool              `config:"interactive"`
+	Links                      bool              `config:"links"`
 	CheckSum                   bool              `config:"checksum"`
 	SizeOnly                   bool              `config:"size_only"`
 	IgnoreTimes                bool              `config:"ignore_times"`

@@ -82,13 +82,11 @@ const (
 // Globals
 var (
 	// Description of how to auth for this app
-	oauthConfig = &oauth2.Config{
-		Scopes: nil,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:   "https://user.mypikpak.com/v1/auth/signin",
-			TokenURL:  "https://user.mypikpak.com/v1/auth/token",
-			AuthStyle: oauth2.AuthStyleInParams,
-		},
+	oauthConfig = &oauthutil.Config{
+		Scopes:      nil,
+		AuthURL:     "https://user.mypikpak.com/v1/auth/signin",
+		TokenURL:    "https://user.mypikpak.com/v1/auth/token",
+		AuthStyle:   oauth2.AuthStyleInParams,
 		ClientID:    clientID,
 		RedirectURL: oauthutil.RedirectURL,
 	}
@@ -561,13 +559,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		CanHaveEmptyDirectories: true, // can have empty directories
 		NoMultiThreading:        true, // can't have multiple threads downloading
 	}).Fill(ctx, f)
-
-	// new device id if necessary
-	if len(f.opt.DeviceID) != 32 {
-		f.opt.DeviceID = genDeviceID()
-		m.Set("device_id", f.opt.DeviceID)
-		fs.Infof(nil, "Using new device id %q", f.opt.DeviceID)
-	}
 
 	// new device id if necessary
 	if len(f.opt.DeviceID) != 32 {
