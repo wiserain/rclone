@@ -257,15 +257,28 @@ func (w *ossChunkWriter) shouldRetry(ctx context.Context, err error) (bool, erro
 			// These errors cannot be handled once token is expired. Should update token proactively.
 			return false, fserrors.FatalError(err)
 		}
+		if ossErr.StatusCode == 409 && ossErr.Code == "PartAlreadyExist" && w.con == 1 {
+			// ErrorMessage="For sequential multipart upload, you can't overwrite uploaded parts."
+			return false, nil
+		}
 	}
 	return false, err
 }
 
 // add a part number and etag to the completed parts
-func (w *ossChunkWriter) addCompletedPart(part oss.UploadPart) {
+func (w *ossChunkWriter) addCompletedPart(partNum int32, eTag *string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.uploadedParts = append(w.uploadedParts, part)
+	// Check if the part already exists
+	for _, part := range w.uploadedParts {
+		if part.PartNumber == partNum {
+			return
+		}
+	}
+	w.uploadedParts = append(w.uploadedParts, oss.UploadPart{
+		PartNumber: partNum,
+		ETag:       eTag,
+	})
 }
 
 // WriteChunk will write chunk number with reader bytes, where chunk number >= 0
@@ -275,7 +288,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 		return -1, err
 	}
 
-	ossPartNumber := chunkNumber + 1
+	ossPartNumber := int32(chunkNumber + 1)
 	var res *oss.UploadPartResult
 	err = w.f.pacer.Call(func() (bool, error) {
 		// Discover the size by seeking to the end
@@ -308,10 +321,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 		return -1, fmt.Errorf("failed to upload chunk %d with %v bytes: %w", ossPartNumber, currentChunkSize, err)
 	}
 
-	w.addCompletedPart(oss.UploadPart{
-		PartNumber: ossPartNumber,
-		ETag:       res.ETag,
-	})
+	w.addCompletedPart(ossPartNumber, res.ETag)
 
 	fs.Debugf(w.o, "multipart upload: wrote chunk %d with %v bytes", ossPartNumber, currentChunkSize)
 	return currentChunkSize, err
