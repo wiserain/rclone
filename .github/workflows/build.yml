@@ -44,23 +44,11 @@ jobs:
           draft: true
           prerelease: false
       - 
-        name: Create Beta
-        if: ${{ ! contains(github.ref, 'refs/tags/') }}
-        id: new_beta
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ github.ref }}
-          name: rclone mod - beta
-          draft: true
-          prerelease: false
-      -
         name: Set Upload URL
         id: set_upload_url
         run: |
           if [ "${{ contains(github.ref, 'refs/tags/') }}" = "true" ]; then
             echo "upload_url=${{ steps.new_release.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "upload_url=${{ steps.new_beta.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
           fi
   build:
     needs:
@@ -260,11 +248,22 @@ jobs:
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
+        if: ${{ contains(github.ref, 'refs/tags/') }}
         name: Upload Assets to Release
         uses: shogo82148/actions-upload-release-asset@v1
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
           asset_path: 'build/*'
+      - 
+        if: ${{ ! contains(github.ref, 'refs/tags/') }}
+        name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.job_name }}
+          if-no-files-found: ignore
+          path: |
+            build/*amd64.zip
+            build/*arm64.zip
 
   lint:
     if: inputs.manual || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
@@ -511,6 +510,7 @@ jobs:
           cd ../output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - 
+        if: ${{ contains(github.ref, 'refs/tags/') }}
         name: Upload Assets to Release
         shell: bash
         run: |
