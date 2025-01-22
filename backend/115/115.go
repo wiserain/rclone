@@ -20,10 +20,12 @@ package _115
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"reflect"
 	"regexp"
@@ -33,6 +35,7 @@ import (
 
 	"github.com/pierrec/lz4/v4"
 	"github.com/rclone/rclone/backend/115/api"
+	"github.com/rclone/rclone/backend/115/crypto"
 	"github.com/rclone/rclone/backend/115/dircache"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
@@ -469,6 +472,40 @@ func (p *poolClient) client() *rest.Client {
 
 func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
 	return p.client().CallJSON(ctx, opts, request, response)
+}
+
+func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
+	// Encode request data
+	input, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	key := crypto.GenerateKey()
+	opts.MultipartParams = url.Values{"data": {crypto.Encode(input, key)}}
+
+	// Perform API call
+	var info *api.Base
+	resp, err = p.client().CallJSON(ctx, opts, request, &info)
+	if err != nil {
+		return
+	}
+
+	// Handle API errors
+	if !info.State {
+		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+	} else if info.Data.EncodedData == "" {
+		return nil, errors.New("no data")
+	}
+
+	// Decode and unmarshal response
+	output, err := crypto.Decode(info.Data.EncodedData, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode data: %w", err)
+	}
+	if err := json.Unmarshal(output, response); err != nil {
+		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
+	}
+	return resp, nil
 }
 
 func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Response, err error) {

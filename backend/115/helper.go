@@ -2,7 +2,6 @@ package _115
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rclone/rclone/backend/115/api"
-	"github.com/rclone/rclone/backend/115/crypto"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/lib/rest"
 )
@@ -342,60 +340,38 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	return
 }
 
-func (f *Fs) _getDownloadURL(ctx context.Context, input []byte) (output []byte, cookies []*http.Cookie, err error) {
+func (f *Fs) _getDownloadURL(ctx context.Context, request interface{}, response interface{}) (resp *http.Response, err error) {
 	rootURL := "https://proapi.115.com/app/chrome/downurl"
 	if f.isShare {
 		rootURL = "https://proapi.115.com/app/share/downurl"
 	}
-	key := crypto.GenerateKey()
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
-		Method:          "POST",
-		RootURL:         rootURL,
-		Parameters:      url.Values{"t": {t}},
-		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
+		Method:     "POST",
+		RootURL:    rootURL,
+		Parameters: url.Values{"t": {t}},
 	}
-	var info *api.Base
-	var resp *http.Response
 	srv := f.srv
 	if f.dsrv != nil {
 		srv = f.dsrv
 	}
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
+		resp, err = srv.CallDATA(ctx, &opts, request, response)
+		return shouldRetry(ctx, resp, response, err)
 	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return nil, nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	if info.Data.EncodedData == "" {
-		return nil, nil, errors.New("no data")
-	}
-	output, err = crypto.Decode(info.Data.EncodedData, key)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode data: %w", err)
-	}
-	cookies = append(cookies, resp.Cookies()...) // including access key value pair with Max-Age=900
 	return
 }
 
 func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
-	// pickCode -> data -> reqData
-	input, _ := json.Marshal(map[string]string{"pickcode": pickCode})
-	output, cookies, err := f._getDownloadURL(ctx, input)
+	req := map[string]string{"pickcode": pickCode}
+	downData := api.DownloadData{}
+	resp, err := f._getDownloadURL(ctx, req, &downData)
 	if err != nil {
 		return
 	}
-	downData := api.DownloadData{}
-	if err := json.Unmarshal(output, &downData); err != nil {
-		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
-	}
-
 	for _, downInfo := range downData {
 		durl = &downInfo.URL
-		durl.Cookies = cookies
+		durl.Cookies = resp.Cookies()
 		return
 	}
 	return nil, fs.ErrorObjectNotFound
@@ -506,34 +482,6 @@ func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err
 // ------------------------------------------------------------
 
 // add offline download task for multiple urls
-func (f *Fs) _addURLs(ctx context.Context, input []byte) (output []byte, err error) {
-	key := crypto.GenerateKey()
-	opts := rest.Opts{
-		Method:          "POST",
-		RootURL:         "https://lixian.115.com/lixianssp/",
-		Parameters:      url.Values{"ac": {"add_task_urls"}},
-		MultipartParams: url.Values{"data": {crypto.Encode(input, key)}},
-	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	if info.Data.EncodedData == "" {
-		return nil, errors.New("no data")
-	}
-	output, err = crypto.Decode(info.Data.EncodedData, key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode data: %w", err)
-	}
-	return
-}
-
-// add offline download task for multiple urls
 func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.NewURL, err error) {
 	parentID, _ := f.dirCache.FindDir(ctx, dir, false)
 	payload := map[string]string{
@@ -545,14 +493,18 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 	for ind, url := range urls {
 		payload[fmt.Sprintf("url[%d]", ind)] = url
 	}
-	input, _ := json.Marshal(payload)
-	output, err := f._addURLs(ctx, input)
-	if err != nil {
-		return
+
+	opts := rest.Opts{
+		Method:     "POST",
+		RootURL:    "https://lixian.115.com/lixianssp/",
+		Parameters: url.Values{"ac": {"add_task_urls"}},
 	}
-	if err = json.Unmarshal(output, &info); err != nil {
-		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
-	}
+
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, payload, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
 	return
 }
 
@@ -664,22 +616,17 @@ func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (e
 }
 
 func (f *Fs) getDownloadURLFromShare(ctx context.Context, fid string) (durl *api.DownloadURL, err error) {
-	// file_id -> data -> reqData
-	input, _ := json.Marshal(map[string]string{
+	req := map[string]string{
 		"share_code":   f.opt.ShareCode,
 		"receive_code": f.opt.ReceiveCode,
 		"file_id":      fid,
-	})
-	output, cookies, err := f._getDownloadURL(ctx, input)
+	}
+	downInfo := api.ShareDownloadInfo{}
+	resp, err := f._getDownloadURL(ctx, req, &downInfo)
 	if err != nil {
 		return
 	}
-	downInfo := api.ShareDownloadInfo{}
-	if err := json.Unmarshal(output, &downInfo); err != nil {
-		return nil, fmt.Errorf("failed to json.Unmarshal %q", string(output))
-	}
-
 	durl = &downInfo.URL
-	durl.Cookies = cookies
+	durl.Cookies = resp.Cookies()
 	return
 }
