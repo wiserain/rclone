@@ -64,8 +64,11 @@ const (
 
 	maxUploadSize       = 123480309760                   // 115 GiB from https://proapi.115.com/app/uploadinfo
 	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
-	minChunkSize        = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
+	defaultChunkSize    = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
+	minChunkSize        = 100 * fs.Kibi
+	maxChunkSize        = 100 * fs.Gibi
 	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
+	maxUploadCutoff     = 20 * fs.Gibi // maximum allowed size for singlepart uploads
 )
 
 // Register with Fs
@@ -199,7 +202,7 @@ it's buffered by the OSS SDK, when in fact it may still be uploading.
 A bigger chunk size means a bigger OSS SDK buffer and progress
 reporting more deviating from the truth.
 `,
-			Default:  minChunkSize,
+			Default:  defaultChunkSize,
 			Advanced: true,
 		}, {
 			Name: "max_upload_parts",
@@ -628,7 +631,33 @@ func checkUploadChunkSize(cs fs.SizeSuffix) error {
 	if cs < minChunkSize {
 		return fmt.Errorf("%s is less than %s", cs, minChunkSize)
 	}
+	if cs > maxChunkSize {
+		return fmt.Errorf("%s is greater than %s", cs, maxChunkSize)
+	}
 	return nil
+}
+
+func (f *Fs) setUploadChunkSize(cs fs.SizeSuffix) (old fs.SizeSuffix, err error) {
+	err = checkUploadChunkSize(cs)
+	if err == nil {
+		old, f.opt.ChunkSize = f.opt.ChunkSize, cs
+	}
+	return
+}
+
+func checkUploadCutoff(cs fs.SizeSuffix) error {
+	if cs > maxUploadCutoff {
+		return fmt.Errorf("%s is greater than %s", cs, maxUploadCutoff)
+	}
+	return nil
+}
+
+func (f *Fs) setUploadCutoff(cs fs.SizeSuffix) (old fs.SizeSuffix, err error) {
+	err = checkUploadCutoff(cs)
+	if err == nil {
+		old, f.opt.UploadCutoff = f.opt.UploadCutoff, cs
+	}
+	return
 }
 
 // newFs partially constructs Fs from the path
@@ -645,6 +674,10 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	err = checkUploadChunkSize(opt.ChunkSize)
 	if err != nil {
 		return nil, fmt.Errorf("115: chunk size: %w", err)
+	}
+	err = checkUploadCutoff(opt.UploadCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("115: upload cutoff: %w", err)
 	}
 
 	// mod - override rootID from path remote:{ID}
