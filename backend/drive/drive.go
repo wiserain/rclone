@@ -50,6 +50,7 @@ import (
 	"golang.org/x/oauth2/google"
 	drive_v2 "google.golang.org/api/drive/v2"
 	drive "google.golang.org/api/drive/v3"
+	"google.golang.org/api/driveactivity/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
@@ -545,6 +546,15 @@ date is used.`,
 			Default:  "default",
 			Help:     `api mode for custom google drive authentication server.`,
 			Advanced: true,
+		}, { // mod
+			Name:     "activity_targets",
+			Help:     `Comma-separated list of folder IDs to monitor for file/directory changes using Drive Activity API.`,
+			Advanced: true,
+		}, { // mod
+			Name:     "activity_sleep",
+			Default:  fs.Duration(1 * time.Second),
+			Help:     `Sleep duration between Drive Activity requests (per target).`,
+			Advanced: true,
 		}, {
 			Name:    "alternate_export",
 			Default: false,
@@ -860,6 +870,8 @@ type Options struct {
 	GdsApikey                 string               `config:"gds_apikey"`       // mod
 	GdsEndpoint               string               `config:"gds_endpoint"`     // mod
 	GdsMode                   string               `config:"gds_mode"`         // mod
+	ActivityTargets           fs.CommaSepList      `config:"activity_targets"` // mod
+	ActivitySleep             fs.Duration          `config:"activity_sleep"`   // mod
 	UploadCutoff              fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize                 fs.SizeSuffix        `config:"chunk_size"`
 	AcknowledgeAbuse          bool                 `config:"acknowledge_abuse"`
@@ -910,6 +922,7 @@ type Fs struct {
 	changeSAtime     time.Time                    // mod
 	fileObj          *fs.Object                   // mod
 	gdsSvc           *drive.Service               // mod
+	actSvc           *driveactivity.Service       // mod
 	dirResourceKeys  *sync.Map                    // map directory ID to resource key
 	permissionsMu    *sync.Mutex                  // protect the below
 	permissions      map[string]*drive.Permission // map permission IDs to Permissions
@@ -1464,6 +1477,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 	// mod
 	var gdsSvc *drive.Service
+	var actSvc *driveactivity.Service
 	if gds, ok, err := newGdsClient(ctx, opt); err != nil {
 		return nil, err
 	} else if ok {
@@ -1479,6 +1493,12 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 			gdsSvc, err = drive.NewService(context.Background(), option.WithHTTPClient(cli))
 			if err != nil {
 				return nil, fmt.Errorf("gds: couldn't create Drive client: %w", err)
+			}
+			if len(opt.ActivityTargets) > 0 {
+				actSvc, err = driveactivity.NewService(context.Background(), option.WithHTTPClient(cli))
+				if err != nil {
+					return nil, fmt.Errorf("gds: couldn't create Drive Activity client: %w", err)
+				}
 			}
 		}
 		opt.Scope = gdsRemote.Scope
@@ -1539,12 +1559,19 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		fs.Infof(nil, "Changing service account is enabled")
 	}
 	f.gdsSvc = gdsSvc
+	f.actSvc = actSvc
 
 	// Create a new authorized Drive client.
 	f.client = oAuthClient
 	f.svc, err = drive.NewService(context.Background(), option.WithHTTPClient(f.client))
 	if err != nil {
 		return nil, fmt.Errorf("couldn't create Drive client: %w", err)
+	}
+	if f.actSvc == nil && len(f.opt.ActivityTargets) > 0 { // mod
+		f.actSvc, err = driveactivity.NewService(context.Background(), option.WithHTTPClient(f.client))
+		if err != nil {
+			return nil, fmt.Errorf("couldn't create Drive Activity client: %w", err)
+		}
 	}
 
 	if f.opt.V2DownloadMinSize >= 0 {
@@ -3328,6 +3355,9 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // Close the returned channel to stop being notified.
 func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryType), pollIntervalChan <-chan time.Duration) {
+	if f.actSvc != nil {
+		f.activityNotify(ctx, notifyFunc, pollIntervalChan)
+	}
 	go func() {
 		// get the StartPageToken early so all changes from now on get processed
 		startPageToken, err := f.changeNotifyStartPageToken(ctx)
