@@ -288,7 +288,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 		return -1, err
 	}
 
-	ossPartNumber := int32(chunkNumber + 1)
+	ossPartNumber := chunkNumber + 1
 	var res *oss.UploadPartResult
 	err = w.f.pacer.Call(func() (bool, error) {
 		// Discover the size by seeking to the end
