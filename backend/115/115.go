@@ -229,6 +229,11 @@ this may help to speed up the transfers.`,
 			Default:  1,
 			Advanced: true,
 		}, {
+			Name:     "internal",
+			Help:     `Use the internal endpoint for uploads.`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
@@ -282,6 +287,7 @@ type Options struct {
 	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
 	MaxUploadParts      int                  `config:"max_upload_parts"`
 	UploadConcurrency   int                  `config:"upload_concurrency"`
+	Internal            bool                 `config:"internal"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`

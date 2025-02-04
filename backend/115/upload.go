@@ -264,7 +264,8 @@ func (f *Fs) newOSSClient() (client *oss.Client) {
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(provider).
 		WithRegion(OSSRegion).
-		WithUserAgent(OSSUserAgent)
+		WithUserAgent(OSSUserAgent).
+		WithUseInternalEndpoint(f.opt.Internal)
 
 	return oss.NewClient(cfg)
 }
