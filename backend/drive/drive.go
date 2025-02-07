@@ -3355,7 +3355,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 //
 // Close the returned channel to stop being notified.
 func (f *Fs) ChangeNotify(ctx context.Context, notifyFunc func(string, fs.EntryType), pollIntervalChan <-chan time.Duration) {
-	if f.actSvc != nil {
+	if f.actSvc != nil { // mod
 		f.activityNotify(ctx, notifyFunc, pollIntervalChan)
 	}
 	go func() {

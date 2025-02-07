@@ -416,7 +416,6 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 				if startTime == "" {
 					startTime = strconv.FormatInt(time.Now().UnixMilli(), 10)
 				}
-				fs.Debugf(f, "Checking for activities on remote")
 				startTime, err = f.activityNotifyRunner(ctx, notifyFunc, startTime)
 				if err != nil {
 					fs.Infof(f, "Activity notify listener failure: %s", err)
@@ -426,26 +425,72 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 	}()
 }
 
+// parseTarget extracts file/directory information from driveactivity.Target and driveactivity.TargetReference
+func parseTarget(target interface{}) (id, name, mimeType string, isDir bool) {
+	switch item := target.(type) {
+	case *driveactivity.TargetReference:
+		if item.DriveItem != nil {
+			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
+			name = item.DriveItem.Title
+			isDir = item.DriveItem.DriveFile != nil
+			return
+		}
+		itemJson, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJson))
+	case *driveactivity.Target:
+		if item.DriveItem != nil {
+			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
+			name = item.DriveItem.Title
+			isDir = item.DriveItem.DriveFile != nil
+			mimeType = item.DriveItem.MimeType
+			return
+		}
+		itemJson, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJson))
+	}
+	return
+}
+
 // parseActivity extracts file/directory change information from a Drive activity record.
 func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveActivity) (actionType, oldPath, newPath string, isDir bool) {
 	// parse action detail
-	var oldParent, newParent, oldName, newName string
 	actDetail := activity.PrimaryActionDetail
+	if actDetail == nil {
+		return
+	}
+
+	var (
+		oldName, newName       string
+		oldParents, newParents []string
+	)
+
 	switch {
 	case actDetail.Create != nil: // new, upload, copy
 		actionType = "CREATE"
 		// can obtain parent info from a list of action
 		for _, act := range activity.Actions {
 			if act.Detail.Move != nil {
-				newParent = strings.TrimPrefix(act.Detail.Move.AddedParents[0].DriveItem.Name, "items/")
+				for _, ref := range act.Detail.Move.AddedParents {
+					if parentId, _, _, _ := parseTarget(ref); parentId != "" {
+						newParents = append(newParents, parentId)
+					}
+				}
 			}
 		}
 	case actDetail.Edit != nil:
 		actionType = "EDIT"
 	case actDetail.Move != nil:
 		actionType = "MOVE"
-		oldParent = strings.TrimPrefix(actDetail.Move.RemovedParents[0].DriveItem.Name, "items/")
-		newParent = strings.TrimPrefix(actDetail.Move.AddedParents[0].DriveItem.Name, "items/")
+		for _, ref := range actDetail.Move.RemovedParents {
+			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
+				oldParents = append(oldParents, parentId)
+			}
+		}
+		for _, ref := range actDetail.Move.AddedParents {
+			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
+				newParents = append(newParents, parentId)
+			}
+		}
 	case actDetail.Rename != nil:
 		actionType = "RENAME"
 		oldName = f.opt.Enc.ToStandardName(actDetail.Rename.OldTitle)
@@ -461,41 +506,37 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		// reference
 		// settingsChange
 		// appliedLabelChange
-		// continue
 		return
 	}
 
 	// parse target info assuming a single driveItem
 	if len(activity.Targets) != 1 {
-		fs.Infof(f, "more than one activity targets")
+		actJson, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJson)
 		return
 	}
-	target := activity.Targets[0]
-	var fileId string
-	switch {
-	case target.DriveItem != nil:
-		fileId = strings.TrimPrefix(target.DriveItem.Name, "items/")
-		isDir = target.DriveItem.MimeType == driveFolderType
-		fileName := f.opt.Enc.ToStandardName(target.DriveItem.Title)
-		if oldName == "" {
-			oldName = fileName
-		}
-		if newName == "" {
-			newName = fileName
-		}
-	default:
-		fs.Infof(f, "activity target is NOT a driveItem")
+	fileId, fileName, _, isDir := parseTarget(activity.Targets[0])
+	if fileId == "" || fileName == "" {
+		actJson, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJson)
 		return
+	}
+	if oldName == "" {
+		oldName = f.opt.Enc.ToStandardName(fileName)
+	}
+	if newName == "" {
+		newName = f.opt.Enc.ToStandardName(fileName)
 	}
 
 	// find the old path to clear that is already on existing file/dir tree
 	if dirPath, ok := f.dirCache.GetInv(fileId); ok {
 		// this will cover (move,rename,delete) of existing dirs
 		oldPath = dirPath
-	} else if oldParent != "" {
-		// covers move of existing files/dirs
-		if parentPath, ok := f.dirCache.GetInv(oldParent); ok {
-			oldPath = path.Join(parentPath, oldName)
+	} else {
+		for _, parent := range oldParents {
+			if parentPath, ok := f.dirCache.GetInv(parent); ok {
+				oldPath = path.Join(parentPath, oldName)
+			}
 		}
 	}
 	if oldPath != "" {
@@ -517,22 +558,19 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		parentPath, _ := dircache.SplitPath(oldPath)
 		newPath = path.Join(parentPath, newName)
 	} else {
-		var parents []string
-		if newParent != "" {
-			parents = append(parents, newParent)
-		} else {
+		if len(newParents) == 0 {
 			// (create,restore) dirs
 			// (edit,rename,delete,restore) files
 			file, err := f.getFile(ctx, fileId, "parents")
 			if err != nil {
-				fs.Infof(nil, "failed to getting file info: %v", err)
+				fs.Infof(nil, "driveactivity: failed to get file info: %v", err)
 			} else {
-				parents = append(parents, file.Parents...)
+				newParents = append(newParents, file.Parents...)
 			}
 		}
 		// translate the parent dir of this object
-		if len(parents) > 0 {
-			for _, parent := range parents {
+		if len(newParents) > 0 {
+			for _, parent := range newParents {
 				if parentPath, ok := f.dirCache.GetInv(parent); ok {
 					// and append the drive file name to compute the full file name
 					newPath = path.Join(parentPath, newName)
@@ -572,7 +610,7 @@ func (f *Fs) _activityNotifyRunner(ctx context.Context, notifyFunc func(string, 
 		var pathsToClear []entryToClear
 		for _, activity := range info.Activities {
 			actType, oldPath, newPath, isDir := f.parseActivity(ctx, activity)
-			fs.Debugf(f, "driveactivity %s: %q -> %q", actType, oldPath, newPath)
+			fs.Infof(nil, "driveactivity %s: %q -> %q", actType, oldPath, newPath)
 			entryType := fs.EntryDirectory
 			if !isDir {
 				entryType = fs.EntryObject
@@ -614,6 +652,7 @@ func (f *Fs) activityNotifyRunner(ctx context.Context, notifyFunc func(string, f
 			time.Sleep(time.Duration(f.opt.ActivitySleep))
 		}
 		req.AncestorName = "items/" + target
+		fs.Debugf(f, "Checking for activities on %q", req.AncestorName)
 		err = f._activityNotifyRunner(ctx, notifyFunc, req)
 		if err != nil {
 			return
