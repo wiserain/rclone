@@ -502,7 +502,7 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, payload, &info)
+		resp, err = f.srv.CallDATA(ctx, &opts, payload, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
 	return
