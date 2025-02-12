@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pierrec/lz4/v4"
@@ -463,8 +464,7 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 // poolClient wraps a pool of rest.Client for load-balancing requests
 type poolClient struct {
 	clients      []*rest.Client
-	clientMu     *sync.Mutex
-	currentIndex int
+	currentIndex uint32
 	credentials  []*Credential
 }
 
@@ -472,11 +472,8 @@ func (p *poolClient) client() *rest.Client {
 	if len(p.clients) == 1 {
 		return p.clients[0]
 	}
-	p.clientMu.Lock()
-	defer p.clientMu.Unlock()
-	cli := p.clients[p.currentIndex]
-	p.currentIndex = (p.currentIndex + 1) % len(p.clients)
-	return cli
+	index := atomic.AddUint32(&p.currentIndex, 1) - 1
+	return p.clients[index%uint32(len(p.clients))]
 }
 
 func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
@@ -560,7 +557,6 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 	}
 	return &poolClient{
 		clients:     clients,
-		clientMu:    new(sync.Mutex),
 		credentials: creds,
 	}, nil
 }
