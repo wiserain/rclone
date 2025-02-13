@@ -155,7 +155,7 @@ func (f *Fs) getFiles(ctx context.Context, params url.Values) (info *api.FileLis
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, &info, err)
+		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
 		return
@@ -550,11 +550,11 @@ OUTER:
 	for {
 		params.Set("offset", strconv.Itoa(offset))
 
-		var info api.ShareSnap
+		var info *api.ShareSnap
 		var resp *http.Response
 		err = f.pacer.Call(func() (bool, error) {
 			resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-			return shouldRetry(ctx, resp, &info, err)
+			return shouldRetry(ctx, resp, info, err)
 		})
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)

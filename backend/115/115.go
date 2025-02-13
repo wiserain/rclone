@@ -491,7 +491,7 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 
 	// Perform API call
 	var info *api.Base
-	resp, err = p.client().CallJSON(ctx, opts, request, &info)
+	resp, err = p.client().CallJSON(ctx, opts, nil, &info)
 	if err != nil {
 		return
 	}
