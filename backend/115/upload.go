@@ -49,8 +49,9 @@ func (f *Fs) getUploadBasicInfo(ctx context.Context) (err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	userID := info.UserID.String()
 	if userID == "0" {
@@ -223,10 +224,7 @@ func (f *Fs) postUpload(v map[string]any) (*api.CallbackData, error) {
 	if err := json.Unmarshal(callbackJson, &info); err != nil {
 		return nil, err
 	}
-	if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
-	}
-	return info.Data, nil
+	return info.Data, info.Err()
 }
 
 // ------------------------------------------------------------

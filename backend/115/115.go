@@ -347,13 +347,14 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if err == nil {
 		switch apiInfo := info.(type) {
 		case *api.Base:
-			if !apiInfo.State && apiInfo.Errno == 990009 {
-				time.Sleep(time.Second)
-				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
-				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
-			} else if !apiInfo.State && apiInfo.Errno == 50038 {
-				// can't download: API Error:  (50038)
-				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
+			if iErr := apiInfo.Err(); iErr != nil {
+				if apiInfo.ErrCode() == 990009 {
+					// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
+					return true, fserrors.RetryError(iErr)
+				} else if apiInfo.ErrCode() == 50038 {
+					// can't download: API Error:  (50038)
+					return true, fserrors.RetryError(iErr)
+				}
 			}
 		}
 		return false, nil
@@ -490,21 +491,21 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 	opts.MultipartParams = url.Values{"data": {crypto.Encode(input, key)}}
 
 	// Perform API call
-	var info *api.Base
+	var info *api.StringInfo
 	resp, err = p.client().CallJSON(ctx, opts, nil, &info)
 	if err != nil {
 		return
 	}
 
 	// Handle API errors
-	if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	} else if info.Data.EncodedData == "" {
+	if err = info.Err(); err != nil {
+		return nil, err
+	} else if info.Data == "" {
 		return nil, errors.New("no data")
 	}
 
 	// Decode and unmarshal response
-	output, err := crypto.Decode(info.Data.EncodedData, key)
+	output, err := crypto.Decode(info.Data, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode data: %w", err)
 	}

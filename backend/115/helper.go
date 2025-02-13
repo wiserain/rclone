@@ -45,10 +45,8 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
 // Lists the directory required calling the user function on each item found
@@ -159,10 +157,8 @@ func (f *Fs) getFiles(ctx context.Context, params url.Values) (info *api.FileLis
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %q (%d)", info.Error, info.ErrNo)
 	}
-	return
+	return info, info.Err()
 }
 
 // getDirPath returns an absolute path of dirID
@@ -201,11 +197,12 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		if info.Errno == 20004 {
+	}
+	if err = info.Err(); err != nil {
+		if info.ErrCode() == 20004 {
 			return nil, fs.ErrorDirExists
 		}
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+		return nil, err
 	}
 	return
 }
@@ -229,10 +226,8 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
@@ -256,10 +251,8 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
 func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -284,10 +277,8 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
 func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -311,19 +302,17 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
-func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
+func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexData, err error) {
 	opts := rest.Opts{
 		Method: "GET",
 		Path:   "/files/index_info",
 	}
 
-	var info *api.Base
+	var info *api.IndexInfo
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
@@ -331,10 +320,11 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	if data = info.Data.IndexInfo; data == nil {
+	if err = info.Err(); err != nil {
+		return
+	}
+	if data = info.Data; data == nil {
 		return nil, errors.New("no data")
 	}
 	return
@@ -402,8 +392,9 @@ func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return "", fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	cid = info.ID.String()
 	if cid == "0" && dir != "/" {
@@ -438,8 +429,9 @@ func (f *Fs) getFile(ctx context.Context, fid, pc string) (file *api.File, err e
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	if len(info.Data) > 0 {
 		file = info.Data[0]
@@ -558,8 +550,9 @@ OUTER:
 		})
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)
-		} else if !info.State {
-			return found, fmt.Errorf("API Error: %q (%d)", info.Error, info.Errno)
+		}
+		if err = info.Err(); err != nil {
+			return
 		}
 		if len(info.Data.List) == 0 {
 			break
@@ -604,10 +597,8 @@ func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	return
+	return info.Err()
 }
 
 func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (err error) {
