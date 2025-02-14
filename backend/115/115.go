@@ -362,7 +362,6 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if fserrors.ShouldRetry(err) {
 		return true, err
 	}
-	authRetry := false
 
 	switch apiErr := err.(type) {
 	case *api.Error:
@@ -375,7 +374,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 		}
 	}
 
-	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
+	return fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
 
 // ------------------------------------------------------------
