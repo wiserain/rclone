@@ -467,6 +467,7 @@ type poolClient struct {
 	clients      []*rest.Client
 	currentIndex uint32
 	credentials  []*Credential
+	pacer        *fs.Pacer
 }
 
 func (p *poolClient) client() *rest.Client {
@@ -492,7 +493,11 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 
 	// Perform API call
 	var info *api.StringInfo
-	resp, err = p.client().CallJSON(ctx, opts, nil, &info)
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
 	if err != nil {
 		return
 	}
@@ -556,9 +561,15 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 		cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
 		clients = append(clients, cli.SetCookie(cred.Cookie()...))
 	}
+	minSleep := time.Duration(opt.PacerMinSleep)
+	if numClients := len(clients); numClients > 1 {
+		minSleep /= time.Duration(numClients)
+		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
+	}
 	return &poolClient{
 		clients:     clients,
 		credentials: creds,
+		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}, nil
 }
 
@@ -615,6 +626,8 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	if f.srv == nil {
 		return fmt.Errorf("no cookies")
 	}
+	f.pacer = f.srv.pacer // share same pacer
+	f.userID = f.srv.credentials[0].UserID()
 
 	// download-only clients
 	if f.dsrv, err = newPoolClient(newCtx, opt, opt.DownloadCookie); err != nil {
@@ -622,13 +635,6 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	} else if f.dsrv == nil {
 		f.dsrv = f.srv
 	}
-	f.userID = f.srv.credentials[0].UserID()
-	adjustedMinSleep := time.Duration(opt.PacerMinSleep)
-	if numClients := len(f.srv.clients); numClients > 1 {
-		adjustedMinSleep /= time.Duration(numClients)
-		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
-	}
-	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(adjustedMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
 }
 

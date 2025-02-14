@@ -341,11 +341,7 @@ func (f *Fs) _getDownloadURL(ctx context.Context, request interface{}, response 
 		RootURL:    rootURL,
 		Parameters: url.Values{"t": {t}},
 	}
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.dsrv.CallDATA(ctx, &opts, request, response)
-		return shouldRetry(ctx, resp, response, err)
-	})
-	return
+	return f.dsrv.CallDATA(ctx, &opts, request, response)
 }
 
 func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
@@ -488,11 +484,7 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 		Parameters: url.Values{"ac": {"add_task_urls"}},
 	}
 
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallDATA(ctx, &opts, payload, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
+	_, err = f.srv.CallDATA(ctx, &opts, payload, &info)
 	return
 }
 
