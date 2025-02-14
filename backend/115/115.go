@@ -482,6 +482,20 @@ func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request inte
 	return p.client().CallJSON(ctx, opts, request, response)
 }
 
+func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) {
+	client := p.client()
+	var info *api.Base
+	var resp *http.Response
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	}
+	return info.Err()
+}
+
 func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
 	// Encode request data
 	input, err := json.Marshal(request)

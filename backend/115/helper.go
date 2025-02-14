@@ -37,16 +37,7 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 		Path:            "/files/order",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 // Lists the directory required calling the user function on each item found
@@ -218,16 +209,7 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 		Path:            "/files/batch_rename",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
@@ -243,16 +225,7 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 		Path:            "/rb/delete",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -268,17 +241,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 		Path:            "/files/move",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -293,17 +256,7 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 		Path:            "/files/copy",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexData, err error) {
@@ -576,17 +529,7 @@ func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid
 		Path:            "/share/receive",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	}
-	return info.Err()
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (err error) {
