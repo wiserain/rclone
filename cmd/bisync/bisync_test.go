@@ -746,6 +746,16 @@ func (b *bisyncTest) runTestStep(ctx context.Context, line string) (err error) {
 	case "test-func":
 		b.TestFn = testFunc
 		return
+	case "concurrent-func":
+		b.TestFn = func() {
+			src := filepath.Join(b.dataDir, "file7.txt")
+			dst := "file1.txt"
+			err := b.copyFile(ctx, src, b.replaceHex(b.path2), dst)
+			if err != nil {
+				fs.Errorf(src, "error copying file: %v", err)
+			}
+		}
+		return
 	case "fix-names":
 		// in case the local os converted any filenames
 		ci.NoUnicodeNormalization = true
@@ -871,10 +881,9 @@ func (b *bisyncTest) runTestStep(ctx context.Context, line string) (err error) {
 		if !ok || err != nil {
 			fs.Logf(remotePath, "Can't find expected file %s (was it renamed by the os?) %v", args[1], err)
 			return
-		} else {
-			// include hash of filename to make unicode form differences easier to see in logs
-			fs.Debugf(remotePath, "verified file exists at correct path. filename hash: %s", stringToHash(leaf))
 		}
+		// include hash of filename to make unicode form differences easier to see in logs
+		fs.Debugf(remotePath, "verified file exists at correct path. filename hash: %s", stringToHash(leaf))
 		return
 	default:
 		return fmt.Errorf("unknown command: %q", args[0])

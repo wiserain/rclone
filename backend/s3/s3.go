@@ -934,13 +934,19 @@ func init() {
 				Help:  "The default endpoint\nIran",
 			}},
 		}, {
-			// Linode endpoints: https://www.linode.com/docs/products/storage/object-storage/guides/urls/#cluster-url-s3-endpoint
+			// Linode endpoints: https://techdocs.akamai.com/cloud-computing/docs/object-storage-product-limits#supported-endpoint-types-by-region
 			Name:     "endpoint",
 			Help:     "Endpoint for Linode Object Storage API.",
 			Provider: "Linode",
 			Examples: []fs.OptionExample{{
+				Value: "nl-ams-1.linodeobjects.com",
+				Help:  "Amsterdam (Netherlands), nl-ams-1",
+			}, {
 				Value: "us-southeast-1.linodeobjects.com",
 				Help:  "Atlanta, GA (USA), us-southeast-1",
+			}, {
+				Value: "in-maa-1.linodeobjects.com",
+				Help:  "Chennai (India), in-maa-1",
 			}, {
 				Value: "us-ord-1.linodeobjects.com",
 				Help:  "Chicago, IL (USA), us-ord-1",
@@ -948,20 +954,47 @@ func init() {
 				Value: "eu-central-1.linodeobjects.com",
 				Help:  "Frankfurt (Germany), eu-central-1",
 			}, {
+				Value: "id-cgk-1.linodeobjects.com",
+				Help:  "Jakarta (Indonesia), id-cgk-1",
+			}, {
+				Value: "gb-lon-1.linodeobjects.com",
+				Help:  "London 2 (Great Britain), gb-lon-1",
+			}, {
+				Value: "us-lax-1.linodeobjects.com",
+				Help:  "Los Angeles, CA (USA), us-lax-1",
+			}, {
+				Value: "es-mad-1.linodeobjects.com",
+				Help:  "Madrid (Spain), es-mad-1",
+			}, {
+				Value: "au-mel-1.linodeobjects.com",
+				Help:  "Melbourne (Australia), au-mel-1",
+			}, {
+				Value: "us-mia-1.linodeobjects.com",
+				Help:  "Miami, FL (USA), us-mia-1",
+			}, {
 				Value: "it-mil-1.linodeobjects.com",
 				Help:  "Milan (Italy), it-mil-1",
 			}, {
 				Value: "us-east-1.linodeobjects.com",
 				Help:  "Newark, NJ (USA), us-east-1",
 			}, {
+				Value: "jp-osa-1.linodeobjects.com",
+				Help:  "Osaka (Japan), jp-osa-1",
+			}, {
 				Value: "fr-par-1.linodeobjects.com",
 				Help:  "Paris (France), fr-par-1",
+			}, {
+				Value: "br-gru-1.linodeobjects.com",
+				Help:  "São Paulo (Brazil), br-gru-1",
 			}, {
 				Value: "us-sea-1.linodeobjects.com",
 				Help:  "Seattle, WA (USA), us-sea-1",
 			}, {
 				Value: "ap-south-1.linodeobjects.com",
-				Help:  "Singapore ap-south-1",
+				Help:  "Singapore, ap-south-1",
+			}, {
+				Value: "sg-sin-1.linodeobjects.com",
+				Help:  "Singapore 2, sg-sin-1",
 			}, {
 				Value: "se-sto-1.linodeobjects.com",
 				Help:  "Stockholm (Sweden), se-sto-1",
@@ -1343,7 +1376,7 @@ func init() {
 		}, {
 			Name:     "endpoint",
 			Help:     "Endpoint for S3 API.\n\nRequired when using an S3 clone.",
-			Provider: "!AWS,ArvanCloud,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,GCS,Liara,Linode,MagaluCloud,Scaleway,Selectel,StackPath,Storj,Synology,RackCorp,Qiniu,Petabox",
+			Provider: "!AWS,ArvanCloud,IBMCOS,IDrive,IONOS,TencentCOS,HuaweiOBS,Alibaba,ChinaMobile,GCS,Liara,Linode,Magalu,Scaleway,Selectel,StackPath,Storj,Synology,RackCorp,Qiniu,Petabox",
 			Examples: []fs.OptionExample{{
 				Value:    "objects-us-east-1.dream.io",
 				Help:     "Dream Objects endpoint",
@@ -1355,6 +1388,10 @@ func init() {
 			}, {
 				Value:    "sfo3.digitaloceanspaces.com",
 				Help:     "DigitalOcean Spaces San Francisco 3",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "sfo2.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces San Francisco 2",
 				Provider: "DigitalOcean",
 			}, {
 				Value:    "fra1.digitaloceanspaces.com",
@@ -1371,6 +1408,18 @@ func init() {
 			}, {
 				Value:    "sgp1.digitaloceanspaces.com",
 				Help:     "DigitalOcean Spaces Singapore 1",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "lon1.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces London 1",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "tor1.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces Toronto 1",
+				Provider: "DigitalOcean",
+			}, {
+				Value:    "blr1.digitaloceanspaces.com",
+				Help:     "DigitalOcean Spaces Bangalore 1",
 				Provider: "DigitalOcean",
 			}, {
 				Value:    "localhost:8333",
@@ -1476,14 +1525,6 @@ func init() {
 				Value:    "s3.ir-tbz-sh1.arvanstorage.ir",
 				Help:     "ArvanCloud Tabriz Iran (Shahriar) endpoint",
 				Provider: "ArvanCloud",
-			}, {
-				Value:    "br-se1.magaluobjects.com",
-				Help:     "Magalu BR Southeast 1 endpoint",
-				Provider: "Magalu",
-			}, {
-				Value:    "br-ne1.magaluobjects.com",
-				Help:     "Magalu BR Northeast 1 endpoint",
-				Provider: "Magalu",
 			}},
 		}, {
 			Name:     "location_constraint",
@@ -2122,13 +2163,16 @@ If you leave it blank, this is calculated automatically from the sse_customer_ke
 				Help:  "Standard storage class",
 			}},
 		}, {
-			// Mapping from here: #todo
+			// Mapping from here: https://docs.magalu.cloud/docs/storage/object-storage/Classes-de-Armazenamento/standard
 			Name:     "storage_class",
 			Help:     "The storage class to use when storing new objects in Magalu.",
 			Provider: "Magalu",
 			Examples: []fs.OptionExample{{
 				Value: "STANDARD",
 				Help:  "Standard storage class",
+			}, {
+				Value: "GLACIER_IR",
+				Help:  "Glacier Instant Retrieval storage class",
 			}},
 		}, {
 			// Mapping from here: https://intl.cloud.tencent.com/document/product/436/30925
@@ -3344,7 +3388,7 @@ func setQuirks(opt *Options) {
 		listObjectsV2         = true // Always use ListObjectsV2 instead of ListObjects
 		virtualHostStyle      = true // Use bucket.provider.com instead of putting the bucket in the URL
 		urlEncodeListings     = true // URL encode the listings to help with control characters
-		useMultipartEtag      = true // Set if Etags for multpart uploads are compatible with AWS
+		useMultipartEtag      = true // Set if Etags for multipart uploads are compatible with AWS
 		useAcceptEncodingGzip = true // Set Accept-Encoding: gzip
 		mightGzip             = true // assume all providers might use content encoding gzip until proven otherwise
 		useAlreadyExists      = true // Set if provider returns AlreadyOwnedByYou or no error if you try to remake your own bucket
@@ -6057,7 +6101,7 @@ func (f *Fs) OpenChunkWriter(ctx context.Context, remote string, src fs.ObjectIn
 			if mOut == nil {
 				err = fserrors.RetryErrorf("internal error: no info from multipart upload")
 			} else if mOut.UploadId == nil {
-				err = fserrors.RetryErrorf("internal error: no UploadId in multpart upload: %#v", *mOut)
+				err = fserrors.RetryErrorf("internal error: no UploadId in multipart upload: %#v", *mOut)
 			}
 		}
 		return f.shouldRetry(ctx, err)
