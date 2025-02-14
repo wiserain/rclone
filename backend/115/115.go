@@ -349,6 +349,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 		case *api.Base:
 			if apiInfo.ErrCode() == 990009 {
 				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
+				time.Sleep(time.Second)
 				return true, fserrors.RetryError(apiInfo.Err())
 			}
 		case *api.StringInfo:
