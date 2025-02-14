@@ -347,14 +347,14 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if err == nil && info != nil {
 		switch apiInfo := info.(type) {
 		case *api.Base:
-			if iErr := apiInfo.Err(); iErr != nil {
-				if apiInfo.ErrCode() == 990009 {
-					// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
-					return true, fserrors.RetryError(iErr)
-				} else if apiInfo.ErrCode() == 50038 {
-					// can't download: API Error:  (50038)
-					return true, fserrors.RetryError(iErr)
-				}
+			if apiInfo.ErrCode() == 990009 {
+				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
+				return true, fserrors.RetryError(apiInfo.Err())
+			}
+		case *api.StringInfo:
+			if apiInfo.ErrCode() == 50038 {
+				// can't download: API Error:  (50038)
+				return true, fserrors.RetryError(apiInfo.Err())
 			}
 		}
 		return false, nil
