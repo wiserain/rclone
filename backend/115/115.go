@@ -521,7 +521,12 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 }
 
 func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Response, err error) {
-	return p.client().Call(ctx, opts)
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.Call(ctx, opts)
+		return shouldRetry(ctx, resp, nil, err)
+	})
+	return
 }
 
 func (p *poolClient) Do(req *http.Request) (*http.Response, error) {

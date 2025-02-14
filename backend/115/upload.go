@@ -184,11 +184,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		Parameters:  url.Values{"k_ec": {encodedToken}},
 		Body:        bytes.NewReader(encrypted),
 	}
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.Call(ctx, &opts)
-		return shouldRetry(ctx, resp, nil, err)
-	})
+	resp, err := f.srv.Call(ctx, &opts)
 	if err != nil {
 		return
 	}
