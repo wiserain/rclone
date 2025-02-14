@@ -341,12 +341,8 @@ func (f *Fs) _getDownloadURL(ctx context.Context, request interface{}, response 
 		RootURL:    rootURL,
 		Parameters: url.Values{"t": {t}},
 	}
-	srv := f.srv
-	if f.dsrv != nil {
-		srv = f.dsrv
-	}
 	err = f.pacer.Call(func() (bool, error) {
-		resp, err = srv.CallDATA(ctx, &opts, request, response)
+		resp, err = f.dsrv.CallDATA(ctx, &opts, request, response)
 		return shouldRetry(ctx, resp, response, err)
 	})
 	return

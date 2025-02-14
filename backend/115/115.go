@@ -619,6 +619,8 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	// download-only clients
 	if f.dsrv, err = newPoolClient(newCtx, opt, opt.DownloadCookie); err != nil {
 		return err
+	} else if f.dsrv == nil {
+		f.dsrv = f.srv
 	}
 	f.userID = f.srv.credentials[0].UserID()
 	adjustedMinSleep := time.Duration(opt.PacerMinSleep)
@@ -1596,12 +1598,8 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		delete(req.Header, "Range")
 	}
 	var res *http.Response
-	srv := o.fs.srv
-	if o.fs.dsrv != nil {
-		srv = o.fs.dsrv
-	}
 	err = o.fs.pacer.Call(func() (bool, error) {
-		res, err = srv.Do(req)
+		res, err = o.fs.dsrv.Do(req)
 		return shouldRetry(ctx, res, nil, err)
 	})
 	if err != nil {
