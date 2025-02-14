@@ -120,7 +120,7 @@ func (w *ossChunkWriter) Upload(ctx context.Context) (err error) {
 		g.Go(func() (err error) {
 			defer free()
 			fs.Debugf(w.o, "multipart upload: starting chunk %d size %v offset %v/%v", partNum, fs.SizeSuffix(n), fs.SizeSuffix(partOff), fs.SizeSuffix(size))
-			_, err = w.WriteChunk(gCtx, int(partNum), rw)
+			_, err = w.WriteChunk(gCtx, int32(partNum), rw)
 			return err
 		})
 	}
@@ -239,6 +239,12 @@ func (w *ossChunkWriter) shouldRetry(ctx context.Context, err error) (bool, erro
 		return true, err
 	}
 
+	// Since alibabacloud-oss-go-sdk-v2, oss.ServiceError is wrapped by oss.OperationError
+	// so we need to unwrap
+	if opErr, ok := err.(*oss.OperationError); ok {
+		err = opErr.Unwrap()
+	}
+
 	switch ossErr := err.(type) {
 	case *oss.ServiceError:
 		if ossErr.StatusCode == 403 && (ossErr.Code == "InvalidAccessKeyId" || ossErr.Code == "SecurityTokenExpired") {
@@ -263,7 +269,7 @@ func (w *ossChunkWriter) addCompletedPart(part oss.UploadPart) {
 }
 
 // WriteChunk will write chunk number with reader bytes, where chunk number >= 0
-func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader io.ReadSeeker) (currentChunkSize int64, err error) {
+func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, reader io.ReadSeeker) (currentChunkSize int64, err error) {
 	if chunkNumber < 0 {
 		err := fmt.Errorf("invalid chunk number provided: %v", chunkNumber)
 		return -1, err
@@ -286,7 +292,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 			Bucket:     w.imur.Bucket,
 			Key:        w.imur.Key,
 			UploadId:   w.imur.UploadId,
-			PartNumber: int32(ossPartNumber),
+			PartNumber: ossPartNumber,
 			Body:       reader,
 		})
 		if err != nil {
@@ -303,7 +309,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int, reader
 	}
 
 	w.addCompletedPart(oss.UploadPart{
-		PartNumber: int32(ossPartNumber),
+		PartNumber: ossPartNumber,
 		ETag:       res.ETag,
 	})
 
