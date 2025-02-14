@@ -529,8 +529,13 @@ func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Resp
 	return
 }
 
-func (p *poolClient) Do(req *http.Request) (*http.Response, error) {
-	return p.client().Do(req)
+func (p *poolClient) Do(ctx context.Context, req *http.Request) (resp *http.Response, err error) {
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.Do(req)
+		return shouldRetry(ctx, resp, nil, err)
+	})
+	return
 }
 
 func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (pc *poolClient, err error) {
@@ -1608,11 +1613,7 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		// Don't supply range requests for 0 length objects as they always fail
 		delete(req.Header, "Range")
 	}
-	var res *http.Response
-	err = o.fs.pacer.Call(func() (bool, error) {
-		res, err = o.fs.dsrv.Do(req)
-		return shouldRetry(ctx, res, nil, err)
-	})
+	res, err := o.fs.dsrv.Do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("open file failed: %w", err)
 	}
