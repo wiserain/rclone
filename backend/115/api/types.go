@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -33,24 +34,6 @@ func (t *Time) UnmarshalJSON(data []byte) error {
 	newT := time.Unix(i, 0)
 	*t = Time(newT)
 	return nil
-}
-
-type Data struct {
-	IndexInfo   *IndexInfo
-	EncodedData string
-}
-
-func (d *Data) UnmarshalJSON(in []byte) (err error) {
-	idx, str := IndexInfo{}, ""
-	if err = json.Unmarshal(in, &idx); err == nil {
-		d.IndexInfo = &idx
-		return
-	}
-	if err = json.Unmarshal(in, &str); err == nil {
-		d.EncodedData = str
-		return
-	}
-	return
 }
 
 type Int int
@@ -100,11 +83,45 @@ var _ error = (*Error)(nil)
 // ------------------------------------------------------------
 
 type Base struct {
-	Msg   string `json:"msg,omitempty"`
-	Errno Int    `json:"errno,omitempty"`
-	Error string `json:"error,omitempty"`
-	State bool   `json:"state,omitempty"`
-	Data  Data   `json:"data,omitempty"`
+	Msg     string `json:"msg,omitempty"`
+	Errno   Int    `json:"errno,omitempty"`   // Base, NewDir, DirID, UploadBasicInfo, ShareSnap
+	ErrNo   Int    `json:"errNo,omitempty"`   // FileList
+	Code    Int    `json:"code,omitempty"`    // FileInfo, CallbackInfo
+	Error   string `json:"error,omitempty"`   // Base, FileList, NewDir, DirID, UploadBasicInfo, ShareSnap
+	Message string `json:"message,omitempty"` // FileInfo, CallbackInfo
+	State   bool   `json:"state,omitempty"`
+}
+
+func (b *Base) ErrCode() Int {
+	if b.Errno != 0 {
+		return b.Errno
+	}
+	if b.ErrNo != 0 {
+		return b.ErrNo
+	}
+	return b.Code
+}
+
+func (b *Base) ErrMsg() string {
+	if b.Error != "" {
+		return b.Error
+	}
+	if b.Message != "" {
+		return b.Message
+	}
+	return b.Msg
+}
+
+// Returnes Error or Nil
+func (b *Base) Err() error {
+	if b.State {
+		return nil
+	}
+	out := fmt.Sprintf("API Error(%d)", b.ErrCode())
+	if msg := b.ErrMsg(); msg != "" {
+		out += fmt.Sprintf(": %q", msg)
+	}
+	return errors.New(out)
 }
 
 type File struct {
@@ -175,6 +192,7 @@ type FilePath struct {
 }
 
 type FileList struct {
+	Base
 	Files          []*File     `json:"data,omitempty"`
 	Count          int         `json:"count,omitempty"`
 	DataSource     string      `json:"data_source,omitempty"`
@@ -204,22 +222,15 @@ type FileList struct {
 	Offset         int         `json:"offset,omitempty"`
 	Limit          int         `json:"limit,omitempty"`
 	Suffix         string      `json:"suffix,omitempty"`
-	State          bool        `json:"state,omitempty"`
-	Error          string      `json:"error,omitempty"`
-	ErrNo          int         `json:"errNo,omitempty"`
 }
 
 type FileInfo struct {
-	State   bool    `json:"state,omitempty"`
-	Code    Int     `json:"code,omitempty"`
-	Message string  `json:"message,omitempty"`
-	Data    []*File `json:"data,omitempty"`
+	Base
+	Data []*File `json:"data,omitempty"`
 }
 
 type NewDir struct {
-	State    bool   `json:"state,omitempty"`
-	Error    string `json:"error,omitempty"`
-	Errno    Int    `json:"errno,omitempty"`
+	Base
 	AID      int    `json:"aid,omitempty"`
 	CID      string `json:"cid,omitempty"`
 	Cname    string `json:"cname,omitempty"`
@@ -228,9 +239,7 @@ type NewDir struct {
 }
 
 type DirID struct {
-	State     bool        `json:"state,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	Errno     Int         `json:"errno,omitempty"`
+	Base
 	ID        json.Number `json:"id,omitempty"`
 	IsPrivate json.Number `json:"is_private,omitempty"`
 }
@@ -259,8 +268,18 @@ type FileStats struct {
 	} `json:"paths,omitempty"`
 }
 
+type StringInfo struct {
+	Base
+	Data string `json:"data,omitempty"`
+}
+
 type IndexInfo struct {
-	SpaceInfo map[string]SizeInfo `json:"space_info"`
+	Base
+	Data *IndexData `json:"data,omitempty"`
+}
+
+type IndexData struct {
+	SpaceInfo map[string]*SizeInfo `json:"space_info"`
 }
 
 type SizeInfo struct {
@@ -344,6 +363,7 @@ type DownloadData map[string]*DownloadInfo
 // ------------------------------------------------------------
 
 type UploadBasicInfo struct {
+	Base
 	Uploadinfo       string      `json:"uploadinfo,omitempty"`
 	UserID           json.Number `json:"user_id,omitempty"`
 	AppVersion       int         `json:"app_version,omitempty"`
@@ -357,9 +377,6 @@ type UploadBasicInfo struct {
 	MaxFileNumYun    int64       `json:"max_file_num_yun,omitempty"`
 	UploadAllowed    bool        `json:"upload_allowed,omitempty"`
 	UploadAllowedMsg string      `json:"upload_allowed_msg,omitempty"`
-	State            bool        `json:"state,omitempty"`
-	Error            string      `json:"error,omitempty"`
-	Errno            Int         `json:"errno,omitempty"`
 }
 
 type UploadInitInfo struct {
@@ -398,10 +415,8 @@ func (ui *UploadInitInfo) GetCallbackVar() string {
 }
 
 type CallbackInfo struct {
-	Code    Int           `json:"code,omitempty"`
-	Data    *CallbackData `json:"data,omitempty"`
-	Message string        `json:"message,omitempty"`
-	State   bool          `json:"state,omitempty"`
+	Base
+	Data *CallbackData `json:"data,omitempty"`
 }
 
 type CallbackData struct {
@@ -460,10 +475,8 @@ type NewURL struct {
 }
 
 type ShareSnap struct {
-	State bool           `json:"state,omitempty"`
-	Error string         `json:"error,omitempty"`
-	Errno Int            `json:"errno,omitempty"`
-	Data  *ShareSnapData `json:"data,omitempty"`
+	Base
+	Data *ShareSnapData `json:"data,omitempty"`
 }
 
 type ShareSnapData struct {

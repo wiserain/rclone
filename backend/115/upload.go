@@ -49,8 +49,9 @@ func (f *Fs) getUploadBasicInfo(ctx context.Context) (err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	userID := info.UserID.String()
 	if userID == "0" {
@@ -183,11 +184,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		Parameters:  url.Values{"k_ec": {encodedToken}},
 		Body:        bytes.NewReader(encrypted),
 	}
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.Call(ctx, &opts)
-		return shouldRetry(ctx, resp, nil, err)
-	})
+	resp, err := f.srv.Call(ctx, &opts)
 	if err != nil {
 		return
 	}
@@ -223,10 +220,7 @@ func (f *Fs) postUpload(v map[string]any) (*api.CallbackData, error) {
 	if err := json.Unmarshal(callbackJson, &info); err != nil {
 		return nil, err
 	}
-	if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
-	}
-	return info.Data, nil
+	return info.Data, info.Err()
 }
 
 // ------------------------------------------------------------

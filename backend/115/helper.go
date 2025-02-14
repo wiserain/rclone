@@ -37,18 +37,7 @@ func (f *Fs) listOrder(ctx context.Context, cid, order, asc string) (err error) 
 		Path:            "/files/order",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 // Lists the directory required calling the user function on each item found
@@ -159,10 +148,8 @@ func (f *Fs) getFiles(ctx context.Context, params url.Values) (info *api.FileLis
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %q (%d)", info.Error, info.ErrNo)
 	}
-	return
+	return info, info.Err()
 }
 
 // getDirPath returns an absolute path of dirID
@@ -201,11 +188,12 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		if info.Errno == 20004 {
+	}
+	if err = info.Err(); err != nil {
+		if info.ErrCode() == 20004 {
 			return nil, fs.ErrorDirExists
 		}
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+		return nil, err
 	}
 	return
 }
@@ -221,18 +209,7 @@ func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
 		Path:            "/files/batch_rename",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
@@ -248,18 +225,7 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 		Path:            "/rb/delete",
 		MultipartParams: form,
 	}
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -275,19 +241,7 @@ func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err erro
 		Path:            "/files/move",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err error) {
@@ -302,28 +256,16 @@ func (f *Fs) copyFiles(ctx context.Context, fids []string, pid string) (err erro
 		Path:            "/files/copy",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
-func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
+func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexData, err error) {
 	opts := rest.Opts{
 		Method: "GET",
 		Path:   "/files/index_info",
 	}
 
-	var info *api.Base
+	var info *api.IndexInfo
 	var resp *http.Response
 	err = f.pacer.Call(func() (bool, error) {
 		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
@@ -331,10 +273,11 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexInfo, err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
 	}
-	if data = info.Data.IndexInfo; data == nil {
+	if err = info.Err(); err != nil {
+		return
+	}
+	if data = info.Data; data == nil {
 		return nil, errors.New("no data")
 	}
 	return
@@ -351,15 +294,7 @@ func (f *Fs) _getDownloadURL(ctx context.Context, request interface{}, response 
 		RootURL:    rootURL,
 		Parameters: url.Values{"t": {t}},
 	}
-	srv := f.srv
-	if f.dsrv != nil {
-		srv = f.dsrv
-	}
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = srv.CallDATA(ctx, &opts, request, response)
-		return shouldRetry(ctx, resp, response, err)
-	})
-	return
+	return f.dsrv.CallDATA(ctx, &opts, request, response)
 }
 
 func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
@@ -402,8 +337,9 @@ func (f *Fs) getDirID(ctx context.Context, dir string) (cid string, err error) {
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return "", fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	cid = info.ID.String()
 	if cid == "0" && dir != "/" {
@@ -438,8 +374,9 @@ func (f *Fs) getFile(ctx context.Context, fid, pc string) (file *api.File, err e
 	})
 	if err != nil {
 		return
-	} else if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Message, info.Code)
+	}
+	if err = info.Err(); err != nil {
+		return
 	}
 	if len(info.Data) > 0 {
 		file = info.Data[0]
@@ -500,11 +437,7 @@ func (f *Fs) addURLs(ctx context.Context, dir string, urls []string) (info *api.
 		Parameters: url.Values{"ac": {"add_task_urls"}},
 	}
 
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallDATA(ctx, &opts, payload, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
+	_, err = f.srv.CallDATA(ctx, &opts, payload, &info)
 	return
 }
 
@@ -558,8 +491,9 @@ OUTER:
 		})
 		if err != nil {
 			return found, fmt.Errorf("couldn't list files: %w", err)
-		} else if !info.State {
-			return found, fmt.Errorf("API Error: %q (%d)", info.Error, info.Errno)
+		}
+		if err = info.Err(); err != nil {
+			return
 		}
 		if len(info.Data.List) == 0 {
 			break
@@ -595,19 +529,7 @@ func (f *Fs) copyFromShare(ctx context.Context, shareCode, receiveCode, fid, cid
 		Path:            "/share/receive",
 		MultipartParams: form,
 	}
-
-	var info *api.Base
-	var resp *http.Response
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
-		return shouldRetry(ctx, resp, info, err)
-	})
-	if err != nil {
-		return
-	} else if !info.State {
-		return fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	}
-	return
+	return f.srv.CallBASE(ctx, &opts)
 }
 
 func (f *Fs) copyFromShareSrc(ctx context.Context, src fs.Object, cid string) (err error) {

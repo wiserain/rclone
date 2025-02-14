@@ -344,16 +344,18 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
-	if err == nil {
+	if err == nil && info != nil {
 		switch apiInfo := info.(type) {
 		case *api.Base:
-			if !apiInfo.State && apiInfo.Errno == 990009 {
-				time.Sleep(time.Second)
+			if apiInfo.ErrCode() == 990009 {
 				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
-				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
-			} else if !apiInfo.State && apiInfo.Errno == 50038 {
+				time.Sleep(time.Second)
+				return true, fserrors.RetryError(apiInfo.Err())
+			}
+		case *api.StringInfo:
+			if apiInfo.ErrCode() == 50038 {
 				// can't download: API Error:  (50038)
-				return true, fserrors.RetryErrorf("API Error: %s (%d)", apiInfo.Error, apiInfo.Errno)
+				return true, fserrors.RetryError(apiInfo.Err())
 			}
 		}
 		return false, nil
@@ -361,7 +363,6 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if fserrors.ShouldRetry(err) {
 		return true, err
 	}
-	authRetry := false
 
 	switch apiErr := err.(type) {
 	case *api.Error:
@@ -374,7 +375,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 		}
 	}
 
-	return authRetry || fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
+	return fserrors.ShouldRetryHTTP(resp, retryErrorCodes), err
 }
 
 // ------------------------------------------------------------
@@ -466,6 +467,7 @@ type poolClient struct {
 	clients      []*rest.Client
 	currentIndex uint32
 	credentials  []*Credential
+	pacer        *fs.Pacer
 }
 
 func (p *poolClient) client() *rest.Client {
@@ -480,6 +482,20 @@ func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request inte
 	return p.client().CallJSON(ctx, opts, request, response)
 }
 
+func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) {
+	client := p.client()
+	var info *api.Base
+	var resp *http.Response
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return
+	}
+	return info.Err()
+}
+
 func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
 	// Encode request data
 	input, err := json.Marshal(request)
@@ -490,21 +506,25 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 	opts.MultipartParams = url.Values{"data": {crypto.Encode(input, key)}}
 
 	// Perform API call
-	var info *api.Base
-	resp, err = p.client().CallJSON(ctx, opts, nil, &info)
+	var info *api.StringInfo
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
 	if err != nil {
 		return
 	}
 
 	// Handle API errors
-	if !info.State {
-		return nil, fmt.Errorf("API Error: %s (%d)", info.Error, info.Errno)
-	} else if info.Data.EncodedData == "" {
+	if err = info.Err(); err != nil {
+		return nil, err
+	} else if info.Data == "" {
 		return nil, errors.New("no data")
 	}
 
 	// Decode and unmarshal response
-	output, err := crypto.Decode(info.Data.EncodedData, key)
+	output, err := crypto.Decode(info.Data, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode data: %w", err)
 	}
@@ -515,11 +535,21 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request inte
 }
 
 func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Response, err error) {
-	return p.client().Call(ctx, opts)
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.Call(ctx, opts)
+		return shouldRetry(ctx, resp, nil, err)
+	})
+	return
 }
 
-func (p *poolClient) Do(req *http.Request) (*http.Response, error) {
-	return p.client().Do(req)
+func (p *poolClient) Do(ctx context.Context, req *http.Request) (resp *http.Response, err error) {
+	client := p.client()
+	err = p.pacer.Call(func() (bool, error) {
+		resp, err = client.Do(req)
+		return shouldRetry(ctx, resp, nil, err)
+	})
+	return
 }
 
 func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (pc *poolClient, err error) {
@@ -555,9 +585,15 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 		cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
 		clients = append(clients, cli.SetCookie(cred.Cookie()...))
 	}
+	minSleep := time.Duration(opt.PacerMinSleep)
+	if numClients := len(clients); numClients > 1 {
+		minSleep /= time.Duration(numClients)
+		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
+	}
 	return &poolClient{
 		clients:     clients,
 		credentials: creds,
+		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 	}, nil
 }
 
@@ -614,18 +650,15 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	if f.srv == nil {
 		return fmt.Errorf("no cookies")
 	}
+	f.pacer = f.srv.pacer // share same pacer
+	f.userID = f.srv.credentials[0].UserID()
 
 	// download-only clients
 	if f.dsrv, err = newPoolClient(newCtx, opt, opt.DownloadCookie); err != nil {
 		return err
+	} else if f.dsrv == nil {
+		f.dsrv = f.srv
 	}
-	f.userID = f.srv.credentials[0].UserID()
-	adjustedMinSleep := time.Duration(opt.PacerMinSleep)
-	if numClients := len(f.srv.clients); numClients > 1 {
-		adjustedMinSleep /= time.Duration(numClients)
-		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
-	}
-	f.pacer = fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(adjustedMinSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant)))
 	return nil
 }
 
@@ -1594,15 +1627,7 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		// Don't supply range requests for 0 length objects as they always fail
 		delete(req.Header, "Range")
 	}
-	var res *http.Response
-	srv := o.fs.srv
-	if o.fs.dsrv != nil {
-		srv = o.fs.dsrv
-	}
-	err = o.fs.pacer.Call(func() (bool, error) {
-		res, err = srv.Do(req)
-		return shouldRetry(ctx, res, nil, err)
-	})
+	res, err := o.fs.dsrv.Do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("open file failed: %w", err)
 	}
