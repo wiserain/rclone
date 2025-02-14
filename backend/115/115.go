@@ -344,7 +344,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
-	if err == nil {
+	if err == nil && info != nil {
 		switch apiInfo := info.(type) {
 		case *api.Base:
 			if iErr := apiInfo.Err(); iErr != nil {
