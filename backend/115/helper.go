@@ -85,10 +85,14 @@ OUTER:
 			continue // retry with same offset
 		}
 		for _, item := range info.Files {
-			if filesOnly && item.IsDir() {
+			isDir := item.IsDir()
+			if filesOnly && isDir {
 				continue
 			}
-			if dirsOnly && !item.IsDir() {
+			if dirsOnly && !isDir {
+				continue
+			}
+			if !isDir && f.opt.CensoredOnly && item.Censored == 0 {
 				continue
 			}
 			item.Name = f.opt.Enc.ToStandardName(item.Name)

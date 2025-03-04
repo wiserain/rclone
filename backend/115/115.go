@@ -146,6 +146,11 @@ Fill in for rclone to use a non root folder as its starting point.
 			Help:     "Size of listing chunk. Max: 1150",
 			Advanced: true,
 		}, {
+			Name:     "censored_only",
+			Default:  false,
+			Help:     "Only show files that are censored.",
+			Advanced: true,
+		}, {
 			Name:     "pacer_min_sleep",
 			Default:  defaultMinSleep,
 			Help:     "Minimum time to sleep between API calls.",
@@ -279,6 +284,7 @@ type Options struct {
 	UserAgent           string               `config:"user_agent"`
 	RootFolderID        string               `config:"root_folder_id"`
 	ListChunk           int                  `config:"list_chunk"`
+	CensoredOnly        bool                 `config:"censored_only"`
 	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
 	ConTimeout          fs.Duration          `config:"contimeout"`
 	Timeout             fs.Duration          `config:"timeout"`

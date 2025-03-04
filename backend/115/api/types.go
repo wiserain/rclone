@@ -145,6 +145,7 @@ type File struct {
 	CheckMsg  string      `json:"check_msg,omitempty"`
 	Score     int         `json:"score,omitempty"`
 	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
+	Censored  int         `json:"c,omitempty"`
 }
 
 func (f *File) IsDir() bool {
