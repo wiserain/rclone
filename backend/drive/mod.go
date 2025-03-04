@@ -426,7 +426,7 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 }
 
 // parseTarget extracts file/directory information from driveactivity.Target and driveactivity.TargetReference
-func parseTarget(target interface{}) (id, name, mimeType string, isDir bool) {
+func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 	switch item := target.(type) {
 	case *driveactivity.TargetReference:
 		if item.DriveItem != nil {

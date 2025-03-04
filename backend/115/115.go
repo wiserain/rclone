@@ -346,7 +346,7 @@ var retryErrorCodes = []int{
 
 // shouldRetry returns a boolean as to whether this resp and err
 // deserve to be retried.  It returns the err as a convenience
-func shouldRetry(ctx context.Context, resp *http.Response, info interface{}, err error) (bool, error) {
+func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
@@ -484,7 +484,7 @@ func (p *poolClient) client() *rest.Client {
 	return p.clients[index%uint32(len(p.clients))]
 }
 
-func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
+func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request any, response any) (resp *http.Response, err error) {
 	return p.client().CallJSON(ctx, opts, request, response)
 }
 
@@ -502,7 +502,7 @@ func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) 
 	return info.Err()
 }
 
-func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request interface{}, response interface{}) (resp *http.Response, err error) {
+func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request any, response any) (resp *http.Response, err error) {
 	// Encode request data
 	input, err := json.Marshal(request)
 	if err != nil {
@@ -1508,7 +1508,7 @@ If the path doesn't exist, rclone will create it for you.
 // The result should be capable of being JSON encoded
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
-func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	if f.isShare {
 		return nil, errors.New("unsupported for shared filesystem")
 	}

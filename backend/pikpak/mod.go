@@ -89,8 +89,8 @@ type RedeemResult struct {
 			Color    string `json:"color"`
 			DeepLink string `json:"deepLink"`
 		} `json:"button"`
-		SecondaryButton interface{} `json:"secondaryButton"`
-		Icon            interface{} `json:"icon"`
+		SecondaryButton any `json:"secondaryButton"`
+		Icon            any `json:"icon"`
 	} `json:"popup"`
 	Result  string `json:"result"`
 	Updated bool   `json:"updated"`
