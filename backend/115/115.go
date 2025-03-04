@@ -360,6 +360,10 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 			}
 		case *api.StringInfo:
 			if apiInfo.ErrCode() == 50038 {
+				if apiInfo.ErrMsg() != "" {
+					// 下载失败，含违规内容
+					return false, fserrors.FatalError(apiInfo.Err())
+				}
 				// can't download: API Error:  (50038)
 				return true, fserrors.RetryError(apiInfo.Err())
 			}
@@ -530,7 +534,7 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request any,
 	}
 
 	// Decode and unmarshal response
-	output, err := crypto.Decode(info.Data, key)
+	output, err := crypto.Decode(string(info.Data), key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode data: %w", err)
 	}
