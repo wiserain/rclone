@@ -362,7 +362,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 			if apiInfo.ErrCode() == 50038 {
 				if apiInfo.ErrMsg() != "" {
 					// 下载失败，含违规内容
-					return false, fserrors.FatalError(apiInfo.Err())
+					return false, fserrors.NoRetryError(apiInfo.Err())
 				}
 				// can't download: API Error:  (50038)
 				return true, fserrors.RetryError(apiInfo.Err())
