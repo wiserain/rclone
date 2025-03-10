@@ -248,22 +248,34 @@ jobs:
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
-        if: ${{ contains(github.ref, 'refs/tags/') }}
-        name: Upload Assets to Release
-        uses: shogo82148/actions-upload-release-asset@v1
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: 'build/*'
-      - 
-        if: ${{ ! contains(github.ref, 'refs/tags/') }}
         name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.job_name }}
           if-no-files-found: ignore
           path: |
-            build/*amd64.zip
-            build/*arm64.zip
+            build/
+  upload-release:
+    if: ${{ contains(github.ref, 'refs/tags/') }}
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build/
+          merge-multiple: true
+      - name: hash
+        shell: bash
+        run: |
+          cd build/
+          sha256sum rclone-v* > SHA256SUM
+      - 
+        name: Upload Assets to Release
+        uses: shogo82148/actions-upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: 'build/*'
 
   lint:
     if: inputs.manual || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
