@@ -511,28 +511,46 @@ jobs:
           ./run-docker.sh ./build-package.sh -a arm rclone
           cd ../output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+      # - 
+      #   if: ${{ contains(github.ref, 'refs/tags/') }}
+      #   name: Upload Assets to Release
+      #   shell: bash
+      #   run: |
+      #     UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+      #     for FILE in output/*; do
+      #       [ ! -f "$FILE" ] && continue
+      #       echo "Uploading \"$FILE\"..."
+      #       curl -sX POST \
+      #         --output /dev/null \
+      #         -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+      #         -H "Accept: application/vnd.github.v3+json" \
+      #         -H "Content-Type: $(file -b --mime-type ${FILE})" \
+      #         -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+      #         -T "${FILE}" \
+      #         "${UPLOAD_URL}?name=$(basename ${FILE})"
+      #     done
       - 
         if: ${{ contains(github.ref, 'refs/tags/') }}
-        name: Upload Assets to Release
-        shell: bash
-        run: |
-          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
-          for FILE in output/*; do
-            [ ! -f "$FILE" ] && continue
-            echo "Uploading \"$FILE\"..."
-            curl -sX POST \
-              --output /dev/null \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: $(file -b --mime-type ${FILE})" \
-              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
-              -T "${FILE}" \
-              "${UPLOAD_URL}?name=$(basename ${FILE})"
-          done
+        name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux
+          if-no-files-found: ignore
+          path: |
+            build/
+      - 
+        if: ${{ ! contains(github.ref, 'refs/tags/') }}
+        name: Upload Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux
+          if-no-files-found: ignore
+          path: |
+            build/*.zip
 
   upload-release:
     if: ${{ contains(github.ref, 'refs/tags/') }}
-    needs: [create-release, build]
+    needs: [create-release, build, termux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
