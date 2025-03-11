@@ -249,14 +249,16 @@ jobs:
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
       - 
         if: ${{ contains(github.ref, 'refs/tags/') }}
-        name: Upload Assets to Release
-        uses: shogo82148/actions-upload-release-asset@v1
+        name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: 'build/*'
+          name: ${{ matrix.job_name }}
+          if-no-files-found: ignore
+          path: |
+            build/
       - 
         if: ${{ ! contains(github.ref, 'refs/tags/') }}
-        name: Upload Artifact
+        name: Upload Test Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.job_name }}
@@ -509,21 +511,67 @@ jobs:
           ./run-docker.sh ./build-package.sh -a arm rclone
           cd ../output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
+      # - 
+      #   if: ${{ contains(github.ref, 'refs/tags/') }}
+      #   name: Upload Assets to Release
+      #   shell: bash
+      #   run: |
+      #     UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
+      #     for FILE in output/*; do
+      #       [ ! -f "$FILE" ] && continue
+      #       echo "Uploading \"$FILE\"..."
+      #       curl -sX POST \
+      #         --output /dev/null \
+      #         -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+      #         -H "Accept: application/vnd.github.v3+json" \
+      #         -H "Content-Type: $(file -b --mime-type ${FILE})" \
+      #         -H "Content-Length: $(wc -c <${FILE} | xargs)" \
+      #         -T "${FILE}" \
+      #         "${UPLOAD_URL}?name=$(basename ${FILE})"
+      #     done
       - 
         if: ${{ contains(github.ref, 'refs/tags/') }}
-        name: Upload Assets to Release
+        name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux
+          if-no-files-found: ignore
+          path: |
+            output/
+      - 
+        if: ${{ ! contains(github.ref, 'refs/tags/') }}
+        name: Upload Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux
+          if-no-files-found: ignore
+          path: |
+            output/*.zip
+
+  upload-release:
+    if: ${{ contains(github.ref, 'refs/tags/') }}
+    needs: [create-release, build, termux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build/
+          merge-multiple: true
+      - name: Checksums
         shell: bash
         run: |
-          UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
-          for FILE in output/*; do
-            [ ! -f "$FILE" ] && continue
-            echo "Uploading \"$FILE\"..."
-            curl -sX POST \
-              --output /dev/null \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: $(file -b --mime-type ${FILE})" \
-              -H "Content-Length: $(wc -c <${FILE} | xargs)" \
-              -T "${FILE}" \
-              "${UPLOAD_URL}?name=$(basename ${FILE})"
-          done
+          cd build || exit 1
+          md5sum rclone-v* > MD5SUMS
+          sha1sum rclone-v* > SHA1SUMS
+          sha256sum rclone-v* > SHA256SUMS
+      - 
+        name: Upload Assets to Release
+        uses: shogo82148/actions-upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: 'build/*'
