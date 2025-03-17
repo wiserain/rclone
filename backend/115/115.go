@@ -240,6 +240,11 @@ this may help to speed up the transfers.`,
 			Default:  false,
 			Advanced: true,
 		}, {
+			Name:     "dual_stack",
+			Help:     `Upload using a dual-stack endpoint, allowing connections via both IPv4 and IPv6.`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
@@ -295,6 +300,7 @@ type Options struct {
 	MaxUploadParts      int                  `config:"max_upload_parts"`
 	UploadConcurrency   int                  `config:"upload_concurrency"`
 	Internal            bool                 `config:"internal"`
+	DualStack           bool                 `config:"dual_stack"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
