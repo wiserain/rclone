@@ -1,6 +1,6 @@
 module github.com/rclone/rclone
 
-go 1.21
+go 1.23.0
 
 require (
 	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5
@@ -84,12 +84,12 @@ require (
 	github.com/zeebo/blake3 v0.2.3
 	go.etcd.io/bbolt v1.3.10
 	goftp.io/server/v2 v2.0.1
-	golang.org/x/crypto v0.31.0
-	golang.org/x/net v0.33.0
+	golang.org/x/crypto v0.36.0
+	golang.org/x/net v0.38.0
 	golang.org/x/oauth2 v0.24.0
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.28.0
-	golang.org/x/text v0.21.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/sys v0.31.0
+	golang.org/x/text v0.23.0
 	golang.org/x/time v0.8.0
 	google.golang.org/api v0.211.0
 	gopkg.in/validator.v2 v2.0.1
@@ -229,8 +229,8 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/ProtonMail/go-crypto v1.1.3
-	github.com/golang-jwt/jwt/v4 v4.5.1
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/pkg/xattr v0.4.10
 	golang.org/x/mobile v0.0.0-20240716161057-1ad2df20a8b6
-	golang.org/x/term v0.27.0
+	golang.org/x/term v0.30.0
 )
