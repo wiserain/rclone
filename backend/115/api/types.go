@@ -158,6 +158,8 @@ type File struct {
 	Score     int         `json:"score,omitempty"`
 	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
 	Censored  int         `json:"c,omitempty"`
+	// c=1 文件内含违规内容 file contains prohibited content
+	// c=2 系统处理中，暂不支持操作 system processing; operation not supported at this time
 }
 
 func (f *File) IsDir() bool {

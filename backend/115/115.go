@@ -246,7 +246,7 @@ this may help to speed up the transfers.`,
 			Advanced: true,
 		}, {
 			Name:     "check_upload",
-			Help:     `Upload using a dual-stack endpoint, allowing connections via both IPv4 and IPv6.`,
+			Help:     `Verify each file upload by attempting a small download after completion.`,
 			Default:  false,
 			Advanced: true,
 		}, {
@@ -1054,24 +1054,32 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	if !found {
 		return nil, fs.ErrorObjectNotFound
 	}
+	if info.Censored == 1 {
+		return nil, fserrors.NoRetryError(fmt.Errorf("uploaded file %q is censored", info.Name))
+	}
 
-	tempObj := *o // shallow copy
-	if err := tempObj.setMetaData(info); err != nil {
-		return nil, fmt.Errorf("failed to set metadata of uploaded file: %w", err)
-	}
-	rc, err := tempObj.Open(ctx, &fs.RangeOption{Start: 0, End: 0})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open uploaded file: %w", err)
-	}
-	defer func() {
-		if cerr := rc.Close(); cerr != nil {
-			fs.Debugf(o, "error closing reader: %v", cerr)
+	// Check uploaded file integrity based on user preference.
+	// This is necessary because files can occasionally become inaccessible
+	// or corrupted after the upload process completes.
+	if f.opt.CheckUpload {
+		tempObj := *o // shallow copy
+		if err := tempObj.setMetaData(info); err != nil {
+			return nil, fmt.Errorf("failed to set metadata of uploaded file: %w", err)
 		}
-	}()
-	buf := make([]byte, 1)
-	_, err = rc.Read(buf)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read uploaded file: %w", err)
+		rc, err := tempObj.Open(ctx, &fs.RangeOption{Start: 0, End: 0})
+		if err != nil {
+			return nil, fmt.Errorf("failed to open uploaded file: %w", err)
+		}
+		defer func() {
+			if cerr := rc.Close(); cerr != nil {
+				fs.Debugf(o, "error closing reader: %v", cerr)
+			}
+		}()
+		buf := make([]byte, 1)
+		_, err = rc.Read(buf)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("failed to read uploaded file: %w", err)
+		}
 	}
 
 	return o, o.setMetaData(info)
