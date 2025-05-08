@@ -245,6 +245,11 @@ this may help to speed up the transfers.`,
 			Default:  false,
 			Advanced: true,
 		}, {
+			Name:     "check_upload",
+			Help:     `Upload using a dual-stack endpoint, allowing connections via both IPv4 and IPv6.`,
+			Default:  false,
+			Advanced: true,
+		}, {
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
@@ -301,6 +306,7 @@ type Options struct {
 	UploadConcurrency   int                  `config:"upload_concurrency"`
 	Internal            bool                 `config:"internal"`
 	DualStack           bool                 `config:"dual_stack"`
+	CheckUpload         bool                 `config:"check_upload"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
@@ -1030,7 +1036,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	}
 	o := newObj.(*Object)
 
-	if o.hasMetaData {
+	if o.hasMetaData && !f.opt.CheckUpload {
 		return o, nil
 	}
 
@@ -1043,11 +1049,27 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		return false
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to locate updated file: %w", err)
+		return nil, fmt.Errorf("failed to locate uploaded file: %w", err)
 	}
 	if !found {
 		return nil, fs.ErrorObjectNotFound
 	}
+
+	tempObj := *o // shallow copy
+	if err := tempObj.setMetaData(info); err != nil {
+		return nil, fmt.Errorf("failed to set metadata of uploaded file: %w", err)
+	}
+	rc, err := tempObj.Open(ctx, &fs.RangeOption{Start: 0, End: 0})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open uploaded file: %w", err)
+	}
+	defer rc.Close()
+	buf := make([]byte, 1)
+	_, err = rc.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read uploaded file: %w", err)
+	}
+
 	return o, o.setMetaData(info)
 }
 
