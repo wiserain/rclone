@@ -1063,7 +1063,11 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to open uploaded file: %w", err)
 	}
-	defer rc.Close()
+	defer func() {
+		if cerr := rc.Close(); cerr != nil {
+			fs.Debugf(o, "error closing reader: %v", cerr)
+		}
+	}()
 	buf := make([]byte, 1)
 	_, err = rc.Read(buf)
 	if err != nil && err != io.EOF {
