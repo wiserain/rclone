@@ -234,3 +234,5 @@ require (
 	golang.org/x/mobile v0.0.0-20240716161057-1ad2df20a8b6
 	golang.org/x/term v0.30.0
 )
+
+replace github.com/ebitengine/purego => github.com/ebitengine/purego v0.8.3-0.20250507171810-1638563e3615
