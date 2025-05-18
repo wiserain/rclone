@@ -155,7 +155,7 @@ type File struct {
 	Sha       string      `json:"sha,omitempty"`
 	CheckCode int         `json:"check_code,omitempty"`
 	CheckMsg  string      `json:"check_msg,omitempty"`
-	Score     int         `json:"score,omitempty"`
+	Score     Int         `json:"score,omitempty"`
 	PlayLong  float64     `json:"play_long,omitempty"` // playback secs if media
 	Censored  int         `json:"c,omitempty"`
 	// c=1 文件内含违规内容 file contains prohibited content
@@ -274,7 +274,7 @@ type FileStats struct {
 	IsMark       string      `json:"is_mark,omitempty"`
 	Fvs          int         `json:"fvs,omitempty"`
 	OpenTime     int         `json:"open_time,omitempty"` // last opened
-	Score        int         `json:"score,omitempty"`
+	Score        Int         `json:"score,omitempty"`
 	Desc         string      `json:"desc,omitempty"`
 	FileCategory string      `json:"file_category,omitempty"` // "0" if dir
 	Paths        []struct {
