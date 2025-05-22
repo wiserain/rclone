@@ -124,7 +124,7 @@ func (b *Base) ErrMsg() string {
 	return b.Msg
 }
 
-// Returnes Error or Nil
+// Returns Error or Nil
 func (b *Base) Err() error {
 	if b.State {
 		return nil
