@@ -39,6 +39,7 @@ import (
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/readers"
+	"github.com/rclone/rclone/lib/transform"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/text/unicode/norm"
 )
@@ -424,6 +425,8 @@ func MoveTransfer(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string,
 
 // move - see Move for help
 func move(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string, src fs.Object, isTransfer bool) (newDst fs.Object, err error) {
+	origRemote := remote // avoid double-transform on fallback to copy
+	remote = transform.Path(ctx, remote, false)
 	ci := fs.GetConfig(ctx)
 	var tr *accounting.Transfer
 	if isTransfer {
@@ -447,12 +450,14 @@ func move(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string, src fs.
 	if doMove := fdst.Features().Move; doMove != nil && (SameConfig(src.Fs(), fdst) || (SameRemoteType(src.Fs(), fdst) && (fdst.Features().ServerSideAcrossConfigs || ci.ServerSideAcrossConfigs))) {
 		// Delete destination if it exists and is not the same file as src (could be same file while seemingly different if the remote is case insensitive)
 		if dst != nil {
-			remote = dst.Remote()
+			remote = transform.Path(ctx, dst.Remote(), false)
 			if !SameObject(src, dst) {
 				err = DeleteFile(ctx, dst)
 				if err != nil {
 					return newDst, err
 				}
+			} else if src.Remote() == remote {
+				return newDst, nil
 			} else if needsMoveCaseInsensitive(fdst, fdst, remote, src.Remote(), false) {
 				doMove = func(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
 					return MoveCaseInsensitive(ctx, fdst, fdst, remote, src.Remote(), false, src)
@@ -488,7 +493,10 @@ func move(ctx context.Context, fdst fs.Fs, dst fs.Object, remote string, src fs.
 		}
 	}
 	// Move not found or didn't work so copy dst <- src
-	newDst, err = Copy(ctx, fdst, dst, remote, src)
+	if origRemote != remote {
+		dst = nil
+	}
+	newDst, err = Copy(ctx, fdst, dst, origRemote, src)
 	if err != nil {
 		fs.Errorf(src, "Not deleting source as copy failed: %v", err)
 		return newDst, err
@@ -516,24 +524,7 @@ func SuffixName(ctx context.Context, remote string) string {
 		return remote
 	}
 	if ci.SuffixKeepExtension {
-		var (
-			base  = remote
-			exts  = ""
-			first = true
-			ext   = path.Ext(remote)
-		)
-		for ext != "" {
-			// Look second and subsequent extensions in mime types.
-			// If they aren't found then don't keep it as an extension.
-			if !first && mime.TypeByExtension(ext) == "" {
-				break
-			}
-			base = base[:len(base)-len(ext)]
-			exts = ext + exts
-			first = false
-			ext = path.Ext(base)
-		}
-		return base + ci.Suffix + exts
+		return transform.SuffixKeepExtension(remote, ci.Suffix)
 	}
 	return remote + ci.Suffix
 }
@@ -593,7 +584,7 @@ func DeleteFilesWithBackupDir(ctx context.Context, toBeDeleted fs.ObjectsChan, b
 	var errorCount atomic.Int32
 	var fatalErrorCount atomic.Int32
 
-	for i := 0; i < ci.Checkers; i++ {
+	for range ci.Checkers {
 		go func() {
 			defer wg.Done()
 			for dst := range toBeDeleted {
@@ -732,7 +723,7 @@ func SameDir(fdst, fsrc fs.Info) bool {
 }
 
 // Retry runs fn up to maxTries times if it returns a retriable error
-func Retry(ctx context.Context, o interface{}, maxTries int, fn func() error) (err error) {
+func Retry(ctx context.Context, o any, maxTries int, fn func() error) (err error) {
 	for tries := 1; tries <= maxTries; tries++ {
 		// Call the function which might error
 		err = fn()
@@ -777,7 +768,7 @@ var StdoutMutex sync.Mutex
 // This writes to stdout holding the StdoutMutex. If you are going to
 // override it and write to os.Stdout then you should hold the
 // StdoutMutex too.
-var SyncPrintf = func(format string, a ...interface{}) {
+var SyncPrintf = func(format string, a ...any) {
 	StdoutMutex.Lock()
 	defer StdoutMutex.Unlock()
 	fmt.Printf(format, a...)
@@ -788,7 +779,7 @@ var SyncPrintf = func(format string, a ...interface{}) {
 // Ignores errors from Fprintf.
 //
 // Prints to stdout if w is nil
-func SyncFprintf(w io.Writer, format string, a ...interface{}) {
+func SyncFprintf(w io.Writer, format string, a ...any) {
 	if w == nil || w == os.Stdout {
 		SyncPrintf(format, a...)
 	} else {
@@ -1994,12 +1985,12 @@ func MoveCaseInsensitive(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileNam
 }
 
 // moveOrCopyFile moves or copies a single file possibly to a new name
-func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFileName string, cp bool) (err error) {
+func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFileName string, cp bool, allowOverlap bool) (err error) {
 	ci := fs.GetConfig(ctx)
 	logger, usingLogger := GetLogger(ctx)
 	dstFilePath := path.Join(fdst.Root(), dstFileName)
 	srcFilePath := path.Join(fsrc.Root(), srcFileName)
-	if fdst.Name() == fsrc.Name() && dstFilePath == srcFilePath {
+	if fdst.Name() == fsrc.Name() && dstFilePath == srcFilePath && !allowOverlap {
 		fs.Debugf(fdst, "don't need to copy/move %s, it is already at target location", dstFileName)
 		if usingLogger {
 			srcObj, _ := fsrc.NewObject(ctx, srcFileName)
@@ -2106,7 +2097,14 @@ func moveOrCopyFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName str
 //
 // This is treated as a transfer.
 func MoveFile(ctx context.Context, fdst fs.Fs, fsrc fs.Fs, dstFileName string, srcFileName string) (err error) {
-	return moveOrCopyFile(ctx, fdst, fsrc, dstFileName, srcFileName, false)
+	return moveOrCopyFile(ctx, fdst, fsrc, dstFileName, srcFileName, false, false)
+}
+
+// TransformFile transforms a file in place using --name-transform
+//
+// This is treated as a transfer.
+func TransformFile(ctx context.Context, fdst fs.Fs, srcFileName string) (err error) {
+	return moveOrCopyFile(ctx, fdst, fdst, srcFileName, srcFileName, false, true)
 }
 
 // SetTier changes tier of object in remote
@@ -2140,20 +2138,28 @@ func SetTierFile(ctx context.Context, o fs.Object, tier string) error {
 
 // TouchDir touches every file in directory with time t
 func TouchDir(ctx context.Context, f fs.Fs, remote string, t time.Time, recursive bool) error {
-	return walk.ListR(ctx, f, remote, false, ConfigMaxDepth(ctx, recursive), walk.ListObjects, func(entries fs.DirEntries) error {
+	ci := fs.GetConfig(ctx)
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(ci.Transfers)
+	err := walk.ListR(ctx, f, remote, false, ConfigMaxDepth(ctx, recursive), walk.ListObjects, func(entries fs.DirEntries) error {
 		entries.ForObject(func(o fs.Object) {
 			if !SkipDestructive(ctx, o, "touch") {
-				fs.Debugf(f, "Touching %q", o.Remote())
-				err := o.SetModTime(ctx, t)
-				if err != nil {
-					err = fmt.Errorf("failed to touch: %w", err)
-					err = fs.CountError(ctx, err)
-					fs.Errorf(o, "%v", err)
-				}
+				g.Go(func() error {
+					fs.Debugf(f, "Touching %q", o.Remote())
+					err := o.SetModTime(gCtx, t)
+					if err != nil {
+						err = fmt.Errorf("failed to touch: %w", err)
+						err = fs.CountError(gCtx, err)
+						fs.Errorf(o, "%v", err)
+					}
+					return nil
+				})
 			}
 		})
 		return nil
 	})
+	_ = g.Wait()
+	return err
 }
 
 // ListFormat defines files information print format
@@ -2203,50 +2209,10 @@ func (l *ListFormat) SetOutput(output []func(entry *ListJSONItem) string) {
 
 // AddModTime adds file's Mod Time to output
 func (l *ListFormat) AddModTime(timeFormat string) {
-	switch timeFormat {
-	case "":
+	if timeFormat == "" {
 		timeFormat = "2006-01-02 15:04:05"
-	case "Layout":
-		timeFormat = time.Layout
-	case "ANSIC":
-		timeFormat = time.ANSIC
-	case "UnixDate":
-		timeFormat = time.UnixDate
-	case "RubyDate":
-		timeFormat = time.RubyDate
-	case "RFC822":
-		timeFormat = time.RFC822
-	case "RFC822Z":
-		timeFormat = time.RFC822Z
-	case "RFC850":
-		timeFormat = time.RFC850
-	case "RFC1123":
-		timeFormat = time.RFC1123
-	case "RFC1123Z":
-		timeFormat = time.RFC1123Z
-	case "RFC3339":
-		timeFormat = time.RFC3339
-	case "RFC3339Nano":
-		timeFormat = time.RFC3339Nano
-	case "Kitchen":
-		timeFormat = time.Kitchen
-	case "Stamp":
-		timeFormat = time.Stamp
-	case "StampMilli":
-		timeFormat = time.StampMilli
-	case "StampMicro":
-		timeFormat = time.StampMicro
-	case "StampNano":
-		timeFormat = time.StampNano
-	case "DateTime":
-		// timeFormat = time.DateTime // missing in go1.19
-		timeFormat = "2006-01-02 15:04:05"
-	case "DateOnly":
-		// timeFormat = time.DateOnly // missing in go1.19
-		timeFormat = "2006-01-02"
-	case "TimeOnly":
-		// timeFormat = time.TimeOnly // missing in go1.19
-		timeFormat = "15:04:05"
+	} else {
+		timeFormat = transform.TimeFormat(timeFormat)
 	}
 	l.AppendOutput(func(entry *ListJSONItem) string {
 		return entry.ModTime.When.Local().Format(timeFormat)
@@ -2435,7 +2401,7 @@ func DirMove(ctx context.Context, f fs.Fs, srcRemote, dstRemote string) (err err
 	}
 	renames := make(chan rename, ci.Checkers)
 	g, gCtx := errgroup.WithContext(context.Background())
-	for i := 0; i < ci.Checkers; i++ {
+	for range ci.Checkers {
 		g.Go(func() error {
 			for job := range renames {
 				dstOverwritten, _ := f.NewObject(gCtx, job.newPath)
@@ -2543,7 +2509,7 @@ var (
 // skipDestructiveChoose asks the user which action to take
 //
 // Call with interactiveMu held
-func skipDestructiveChoose(ctx context.Context, subject interface{}, action string) (skip bool) {
+func skipDestructiveChoose(ctx context.Context, subject any, action string) (skip bool) {
 	// Lock the StdoutMutex - must not call fs.Log anything
 	// otherwise it will deadlock with --interactive --progress
 	StdoutMutex.Lock()
@@ -2593,7 +2559,7 @@ func skipDestructiveChoose(ctx context.Context, subject interface{}, action stri
 //
 // Together they should make sense in this sentence: "Rclone is about
 // to action subject".
-func SkipDestructive(ctx context.Context, subject interface{}, action string) (skip bool) {
+func SkipDestructive(ctx context.Context, subject any, action string) (skip bool) {
 	var flag string
 	ci := fs.GetConfig(ctx)
 	switch {

@@ -86,7 +86,7 @@ func TestVerifyCopy(t *testing.T) {
 	require.NoError(t, err)
 	src.(*Object).fs.opt.NoCheckUpdated = true
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		go r.WriteFile(src.Remote(), fmt.Sprintf("some new content %d", i), src.ModTime(context.Background()))
 	}
 	_, err = operations.Copy(context.Background(), r.Fremote, nil, filePath+"2", src)
@@ -202,6 +202,23 @@ func TestSymlinkError(t *testing.T) {
 	}
 	_, err := NewFs(context.Background(), "local", "/", m)
 	assert.Equal(t, errLinksAndCopyLinks, err)
+}
+
+func TestHashWithTypeNone(t *testing.T) {
+	ctx := context.Background()
+	r := fstest.NewRun(t)
+	const filePath = "file.txt"
+	r.WriteFile(filePath, "content", time.Now())
+	f := r.Flocal.(*Fs)
+
+	// Get the object
+	o, err := f.NewObject(ctx, filePath)
+	require.NoError(t, err)
+
+	// Test the hash is as we expect
+	h, err := o.Hash(ctx, hash.None)
+	require.Empty(t, h)
+	require.NoError(t, err)
 }
 
 // Test hashes on updating an object

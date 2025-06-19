@@ -393,16 +393,23 @@ func NewServer(ctx context.Context, options ...Option) (*Server, error) {
 
 func (s *Server) initAuth() {
 	s.usingAuth = false
+	altUsernameEnabled := s.auth.HtPasswd == "" && s.auth.BasicUser == ""
 
-	authCertificateUserEnabled := s.tlsConfig != nil && s.tlsConfig.ClientAuth != tls.NoClientCert && s.auth.HtPasswd == "" && s.auth.BasicUser == ""
-	if authCertificateUserEnabled {
+	if altUsernameEnabled {
 		s.usingAuth = true
-		s.mux.Use(MiddlewareAuthCertificateUser())
+		if s.auth.UserFromHeader != "" {
+			s.mux.Use(MiddlewareAuthGetUserFromHeader(s.auth.UserFromHeader))
+		} else if s.tlsConfig != nil && s.tlsConfig.ClientAuth != tls.NoClientCert {
+			s.mux.Use(MiddlewareAuthCertificateUser())
+		} else {
+			s.usingAuth = false
+			altUsernameEnabled = false
+		}
 	}
 
 	if s.auth.CustomAuthFn != nil {
 		s.usingAuth = true
-		s.mux.Use(MiddlewareAuthCustom(s.auth.CustomAuthFn, s.auth.Realm, authCertificateUserEnabled))
+		s.mux.Use(MiddlewareAuthCustom(s.auth.CustomAuthFn, s.auth.Realm, altUsernameEnabled))
 		return
 	}
 
@@ -572,6 +579,14 @@ func (s *Server) URLs() []string {
 		out = append(out, ii.url)
 	}
 	return out
+}
+
+// Addr returns the first configured address
+func (s *Server) Addr() net.Addr {
+	if len(s.instances) == 0 || s.instances[0].listener == nil {
+		return nil
+	}
+	return s.instances[0].listener.Addr()
 }
 
 // UsingAuth returns true if authentication is required

@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,7 +31,8 @@ import (
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
-	"github.com/rclone/rclone/fs/walk"
+	"github.com/rclone/rclone/fs/list"
+	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/lib/bucket"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/multipart"
@@ -588,12 +590,7 @@ func (f *Fs) authorizeAccount(ctx context.Context) error {
 
 // hasPermission returns if the current AuthorizationToken has the selected permission
 func (f *Fs) hasPermission(permission string) bool {
-	for _, capability := range f.info.Allowed.Capabilities {
-		if capability == permission {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.info.Allowed.Capabilities, permission)
 }
 
 // getUploadURL returns the upload info with the UploadURL and the AuthorizationToken
@@ -921,7 +918,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 // of listing recursively that doing a directory traversal.
 func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) (err error) {
 	bucket, directory := f.split(dir)
-	list := walk.NewListRHelper(callback)
+	list := list.NewHelper(callback)
 	listR := func(bucket, directory, prefix string, addBucket bool) error {
 		last := ""
 		return f.list(ctx, bucket, directory, prefix, addBucket, true, 0, f.opt.Versions, false, func(remote string, object *api.File, isDirectory bool) error {
@@ -1274,7 +1271,7 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool, deleteHidden b
 	toBeDeleted := make(chan *api.File, f.ci.Transfers)
 	var wg sync.WaitGroup
 	wg.Add(f.ci.Transfers)
-	for i := 0; i < f.ci.Transfers; i++ {
+	for range f.ci.Transfers {
 		go func() {
 			defer wg.Done()
 			for object := range toBeDeleted {
@@ -1317,16 +1314,22 @@ func (f *Fs) purge(ctx context.Context, dir string, oldOnly bool, deleteHidden b
 				// Check current version of the file
 				if deleteHidden && object.Action == "hide" {
 					fs.Debugf(remote, "Deleting current version (id %q) as it is a hide marker", object.ID)
-					toBeDeleted <- object
+					if !operations.SkipDestructive(ctx, object.Name, "remove hide marker") {
+						toBeDeleted <- object
+					}
 				} else if deleteUnfinished && object.Action == "start" && isUnfinishedUploadStale(object.UploadTimestamp) {
 					fs.Debugf(remote, "Deleting current version (id %q) as it is a start marker (upload started at %s)", object.ID, time.Time(object.UploadTimestamp).Local())
-					toBeDeleted <- object
+					if !operations.SkipDestructive(ctx, object.Name, "remove pending upload") {
+						toBeDeleted <- object
+					}
 				} else {
 					fs.Debugf(remote, "Not deleting current version (id %q) %q dated %v (%v ago)", object.ID, object.Action, time.Time(object.UploadTimestamp).Local(), time.Since(time.Time(object.UploadTimestamp)))
 				}
 			} else {
 				fs.Debugf(remote, "Deleting (id %q)", object.ID)
-				toBeDeleted <- object
+				if !operations.SkipDestructive(ctx, object.Name, "delete") {
+					toBeDeleted <- object
+				}
 			}
 			last = remote
 			tr.Done(ctx, nil)
@@ -1880,8 +1883,13 @@ func (o *Object) getOrHead(ctx context.Context, method string, options []fs.Open
 	// --b2-download-url cloudflare strips the Content-Length
 	// headers (presumably so it can inject stuff) so use the old
 	// length read from the listing.
+	// Additionally, the official examples return S3 headers
+	// instead of native, i.e. no file ID, use ones from listing.
 	if info.Size < 0 {
 		info.Size = o.size
+	}
+	if info.ID == "" {
+		info.ID = o.id
 	}
 	return resp, info, nil
 }
@@ -1932,7 +1940,7 @@ func init() {
 // urlEncode encodes in with % encoding
 func urlEncode(in string) string {
 	var out bytes.Buffer
-	for i := 0; i < len(in); i++ {
+	for i := range len(in) {
 		c := in[i]
 		if noNeedToEncode[c] {
 			_ = out.WriteByte(c)
@@ -2253,7 +2261,7 @@ See: https://www.backblaze.com/docs/cloud-storage-lifecycle-rules
 	},
 }
 
-func (f *Fs) lifecycleCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) lifecycleCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	var newRule api.LifecycleRule
 	if daysStr := opt["daysFromHidingToDeleting"]; daysStr != "" {
 		days, err := strconv.Atoi(daysStr)
@@ -2282,8 +2290,10 @@ func (f *Fs) lifecycleCommand(ctx context.Context, name string, arg []string, op
 
 	}
 
+	skip := operations.SkipDestructive(ctx, name, "update lifecycle rules")
+
 	var bucket *api.Bucket
-	if newRule.DaysFromHidingToDeleting != nil || newRule.DaysFromUploadingToHiding != nil || newRule.DaysFromStartingToCancelingUnfinishedLargeFiles != nil {
+	if !skip && (newRule.DaysFromHidingToDeleting != nil || newRule.DaysFromUploadingToHiding != nil || newRule.DaysFromStartingToCancelingUnfinishedLargeFiles != nil) {
 		bucketID, err := f.getBucketID(ctx, bucketName)
 		if err != nil {
 			return nil, err
@@ -2340,7 +2350,7 @@ Durations are parsed as per the rest of rclone, 2h, 7d, 7w etc.
 	},
 }
 
-func (f *Fs) cleanupCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) cleanupCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	maxAge := defaultMaxAge
 	if opt["max-age"] != "" {
 		maxAge, err = fs.ParseDuration(opt["max-age"])
@@ -2363,7 +2373,7 @@ it would do.
 `,
 }
 
-func (f *Fs) cleanupHiddenCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) cleanupHiddenCommand(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	return nil, f.cleanUp(ctx, true, false, 0)
 }
 
@@ -2382,7 +2392,7 @@ var commandHelp = []fs.CommandHelp{
 // The result should be capable of being JSON encoded
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
-func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	switch name {
 	case "lifecycle":
 		return f.lifecycleCommand(ctx, name, arg, opt)

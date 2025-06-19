@@ -1274,7 +1274,7 @@ func (f *Fs) uploadByForm(ctx context.Context, in io.Reader, name string, size i
 	params := url.Values{}
 	iVal := reflect.ValueOf(&form.MultiParts).Elem()
 	iTyp := iVal.Type()
-	for i := 0; i < iVal.NumField(); i++ {
+	for i := range iVal.NumField() {
 		params.Set(iTyp.Field(i).Tag.Get("json"), iVal.Field(i).String())
 	}
 	formReader, contentType, overhead, err := rest.MultipartUpload(ctx, in, params, "file", name)
@@ -1600,7 +1600,7 @@ will be returned in json-formatted string.
 // The result should be capable of being JSON encoded
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
-func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out interface{}, err error) {
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (out any, err error) {
 	switch name {
 	case "addurl":
 		if len(arg) != 1 {

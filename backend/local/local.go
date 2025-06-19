@@ -1046,7 +1046,7 @@ you can try to change the output.`,
 // The result should be capable of being JSON encoded
 // If it is a string or a []string it will be shown to the user
 // otherwise it will be JSON encoded and shown to the user like that
-func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (interface{}, error) {
+func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[string]string) (any, error) {
 	switch name {
 	case "noop":
 		if txt, ok := opt["error"]; ok {
@@ -1056,7 +1056,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			return nil, errors.New(txt)
 		}
 		if _, ok := opt["echo"]; ok {
-			out := map[string]interface{}{}
+			out := map[string]any{}
 			out["name"] = name
 			out["arg"] = arg
 			out["opt"] = opt
@@ -1090,6 +1090,10 @@ func (o *Object) Remote() string {
 
 // Hash returns the requested hash of a file as a lowercase hex string
 func (o *Object) Hash(ctx context.Context, r hash.Type) (string, error) {
+	if r == hash.None {
+		return "", nil
+	}
+
 	// Check that the underlying file hasn't changed
 	o.fs.objectMetaMu.RLock()
 	oldtime := o.modTime
