@@ -67,7 +67,7 @@ const (
 	maxUploadParts      = 10000                          // Part number must be an integer between 1 and 10000, inclusive.
 	defaultChunkSize    = fs.SizeSuffix(1024 * 1024 * 5) // Part size should be in [100KB, 5GB]
 	minChunkSize        = 100 * fs.Kibi
-	maxChunkSize        = 100 * fs.Gibi
+	maxChunkSize        = 5 * fs.Gibi
 	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
 	maxUploadCutoff     = 20 * fs.Gibi // maximum allowed size for singlepart uploads
 )
