@@ -164,7 +164,6 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		remote: remote,
 	}
 
-	uploadParts := min(max(1, f.opt.MaxUploadParts), maxUploadParts)
 	size := src.Size()
 
 	// calculate size of parts
@@ -176,10 +175,10 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 	if size == -1 {
 		warnStreamUpload.Do(func() {
 			fs.Logf(f, "Streaming uploads using chunk size %v will have maximum file size of %v",
-				f.opt.ChunkSize, fs.SizeSuffix(int64(chunkSize)*int64(uploadParts)))
+				f.opt.ChunkSize, fs.SizeSuffix(int64(chunkSize)*int64(maxUploadParts)))
 		})
 	} else {
-		chunkSize = chunksize.Calculator(src, size, uploadParts, chunkSize)
+		chunkSize = chunksize.Calculator(src, size, maxUploadParts, chunkSize)
 	}
 
 	w = &ossChunkWriter{

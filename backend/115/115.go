@@ -211,18 +211,6 @@ reporting more deviating from the truth.
 			Default:  defaultChunkSize,
 			Advanced: true,
 		}, {
-			Name: "max_upload_parts",
-			Help: `Maximum number of parts in a multipart upload.
-
-This option defines the maximum number of multipart chunks to use
-when doing a multipart upload.
-
-Rclone will automatically increase the chunk size when uploading a
-large file of a known size to stay below this number of chunks limit.
-`,
-			Default:  maxUploadParts,
-			Advanced: true,
-		}, {
 			Name: "upload_concurrency",
 			Help: `Concurrency for multipart uploads and copies.
 
@@ -302,7 +290,6 @@ type Options struct {
 	UploadHashOnly      bool                 `config:"upload_hash_only"`
 	UploadCutoff        fs.SizeSuffix        `config:"upload_cutoff"`
 	ChunkSize           fs.SizeSuffix        `config:"chunk_size"`
-	MaxUploadParts      int                  `config:"max_upload_parts"`
 	UploadConcurrency   int                  `config:"upload_concurrency"`
 	Internal            bool                 `config:"internal"`
 	DualStack           bool                 `config:"dual_stack"`
