@@ -116,7 +116,7 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 	}
 	// initial load
 	if err := p.LoadSA(); err != nil {
-		return nil, fmt.Errorf("service accout pool: initial load failed: %w", err)
+		return nil, fmt.Errorf("service account pool: initial load failed: %w", err)
 	}
 	return p, nil
 }
@@ -156,12 +156,12 @@ func (p *ServiceAccountPool) LoadSA() error {
 }
 
 func (p *ServiceAccountPool) _getSA() (newSA []*baseSAobject, err error) {
-	SAs := p.SAs
-	if len(SAs) == 0 {
-		err = fmt.Errorf("no available service account")
-		return
+	if len(p.SAs) == 0 {
+		return nil, fmt.Errorf("no available service account")
 	}
-	p.SAs, newSA = SAs[:len(SAs)-1], SAs[len(SAs)-1:]
+	last := len(p.SAs) - 1
+	newSA = []*baseSAobject{p.SAs[last]}
+	p.SAs = p.SAs[:last]
 	return newSA, nil
 }
 
@@ -212,21 +212,19 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 			return fmt.Errorf("couldn't create Drive v2 client: %w", err)
 		}
 	}
-	if err == nil {
-		f.changeSAtime = time.Now()
-		f.pacer = fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
-		svcAcc := "service account credential"
-		if sa[0].ServiceAccountFile != "" {
-			svcAcc = fmt.Sprintf("service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
-		}
-		if sa[0].Impersonate != "" {
-			fs.Debugf(nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)
-		} else {
-			fs.Debugf(nil, "Now working with %s", svcAcc)
-		}
-		fs.Debugf(nil, "%d service account remaining", len(f.changeSApool.SAs))
+	f.changeSAtime = time.Now()
+	f.pacer = fs.NewPacer(ctx, pacer.NewGoogleDrive(pacer.MinSleep(f.opt.PacerMinSleep), pacer.Burst(f.opt.PacerBurst)))
+	svcAcc := "service account credential"
+	if sa[0].ServiceAccountFile != "" {
+		svcAcc = fmt.Sprintf("service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
 	}
-	return err
+	if sa[0].Impersonate != "" {
+		fs.Debugf(nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)
+	} else {
+		fs.Debugf(nil, "Now working with %s", svcAcc)
+	}
+	fs.Debugf(nil, "%d service account remaining", len(f.changeSApool.SAs))
+	return
 }
 
 // ------------------------------------------------------------
@@ -336,13 +334,14 @@ func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDe
 
 	// list the objects
 	infos := []*drive.File{}
-	if srcDepth == "0" {
+	switch srcDepth {
+	case "0":
 		info, err := f.getFile(ctx, srcID, "id,name,parents")
 		if err != nil {
 			return nil, fmt.Errorf("couldn't get source info: %w", err)
 		}
 		infos = append(infos, info)
-	} else if srcDepth == "1" {
+	case "1":
 		_, err = f.list(ctx, []string{srcID}, "", false, false, f.opt.TrashedOnly, true, func(info *drive.File) bool {
 			infos = append(infos, info)
 			return false
@@ -397,6 +396,11 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 		var tickerC <-chan time.Time
 		for {
 			select {
+			case <-ctx.Done():
+				if ticker != nil {
+					ticker.Stop()
+				}
+				return
 			case pollInterval, ok := <-pollIntervalChan:
 				if !ok {
 					if ticker != nil {
