@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -229,11 +228,15 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 
 // ------------------------------------------------------------
 
+type GdsRequest struct {
+	UserID string `json:"userid"`
+	ApiKey string `json:"apikey"`
+	Mode   string `json:"mode"`
+}
+
 type GdsClient struct {
 	client *rest.Client
-	userid string
-	apikey string
-	mode   string
+	req    *GdsRequest
 }
 
 func newGdsClient(ctx context.Context, opt *Options) (*GdsClient, bool, error) {
@@ -245,9 +248,11 @@ func newGdsClient(ctx context.Context, opt *Options) (*GdsClient, bool, error) {
 	}
 	gds := &GdsClient{
 		client: rest.NewClient(fshttp.NewClient(ctx)).SetRoot(opt.GdsEndpoint),
-		userid: opt.GdsUserid,
-		apikey: opt.GdsApikey,
-		mode:   opt.GdsMode,
+		req: &GdsRequest{
+			UserID: opt.GdsUserid,
+			ApiKey: opt.GdsApikey,
+			Mode:   opt.GdsMode,
+		},
 	}
 	return gds, ok, nil
 }
@@ -268,22 +273,14 @@ type GdsRemote struct {
 }
 
 func (gds *GdsClient) getGdsRemote(ctx context.Context) (remote *GdsRemote, err error) {
-	form := url.Values{}
-	form.Set("userid", gds.userid)
-	form.Set("apikey", gds.apikey)
-	form.Set("mode", gds.mode)
-	opts := rest.Opts{
-		Method:          "POST",
-		MultipartParams: form,
-	}
+	opts := rest.Opts{Method: "POST"}
 	var info *GdsResponse
-	_, err = gds.client.CallJSON(ctx, &opts, nil, &info)
+	_, err = gds.client.CallJSON(ctx, &opts, gds.req, &info)
 	if err != nil {
-		return
+		return nil, err
 	}
 	if info.Result != "success" {
-		err = fmt.Errorf("%v", info.Result)
-		return
+		return nil, fmt.Errorf("%s", info.Result)
 	}
 	fs.Debugf(nil, "member: %+v\n", string(info.Data.Member))
 	return info.Data.Remote, nil
