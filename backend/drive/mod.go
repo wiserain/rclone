@@ -607,33 +607,31 @@ func (f *Fs) _activityNotifyRunner(ctx context.Context, notifyFunc func(string, 
 			return err
 		}
 
-		type entryToClear struct {
-			path      string
-			entryType fs.EntryType
-		}
-		var pathsToClear []entryToClear
+		visitedPaths := make(map[string]struct{})
 		for _, activity := range info.Activities {
 			actType, oldPath, newPath, isDir := f.parseActivity(ctx, activity)
-			fs.Infof(nil, "driveactivity %s: %q -> %q", actType, oldPath, newPath)
+			if oldPath == "" && newPath == "" {
+				continue
+			}
+			fs.Infof(nil, "driveactivity: %s: %q -> %q", actType, oldPath, newPath)
 			entryType := fs.EntryDirectory
 			if !isDir {
 				entryType = fs.EntryObject
 			}
-			pathsToClear = append(pathsToClear, entryToClear{path: oldPath, entryType: entryType})
-			pathsToClear = append(pathsToClear, entryToClear{path: newPath, entryType: entryType})
-		}
-
-		visitedPaths := make(map[string]struct{})
-		for _, entry := range pathsToClear {
-			if entry.path == "" {
-				continue
+			if oldPath != "" {
+				parentPath, _ := dircache.SplitPath(oldPath)
+				if _, seen := visitedPaths[parentPath]; !seen {
+					visitedPaths[parentPath] = struct{}{}
+					notifyFunc(oldPath, entryType)
+				}
 			}
-			parentPath, _ := dircache.SplitPath(entry.path)
-			if _, ok := visitedPaths[parentPath]; ok {
-				continue
+			if newPath != "" && newPath != oldPath {
+				parentPath, _ := dircache.SplitPath(newPath)
+				if _, seen := visitedPaths[parentPath]; !seen {
+					visitedPaths[parentPath] = struct{}{}
+					notifyFunc(newPath, entryType)
+				}
 			}
-			visitedPaths[parentPath] = struct{}{}
-			notifyFunc(entry.path, entry.entryType)
 		}
 
 		if info.NextPageToken == "" {
