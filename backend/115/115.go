@@ -564,16 +564,16 @@ func (p *poolClient) Do(ctx context.Context, req *http.Request) (resp *http.Resp
 func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (pc *poolClient, err error) {
 	// cookies -> credentials
 	var creds []*Credential
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	for _, cookie := range cookies {
 		cred := (&Credential{}).FromCookie(cookie)
 		if err = cred.Valid(); err != nil {
 			return nil, fmt.Errorf("%w: %q", err, cookie)
 		}
-		if seen[cred.UID] {
+		if _, ok := seen[cred.UID]; ok {
 			return nil, fmt.Errorf("duplicate UID: %q", cookie)
 		}
-		seen[cred.UID] = true
+		seen[cred.UID] = struct{}{}
 		creds = append(creds, cred)
 	}
 	if len(creds) == 0 {

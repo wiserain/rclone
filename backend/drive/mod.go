@@ -623,16 +623,16 @@ func (f *Fs) _activityNotifyRunner(ctx context.Context, notifyFunc func(string, 
 			pathsToClear = append(pathsToClear, entryToClear{path: newPath, entryType: entryType})
 		}
 
-		visitedPaths := make(map[string]bool)
+		visitedPaths := make(map[string]struct{})
 		for _, entry := range pathsToClear {
 			if entry.path == "" {
 				continue
 			}
 			parentPath, _ := dircache.SplitPath(entry.path)
-			if visitedPaths[parentPath] {
+			if _, ok := visitedPaths[parentPath]; ok {
 				continue
 			}
-			visitedPaths[parentPath] = true
+			visitedPaths[parentPath] = struct{}{}
 			notifyFunc(entry.path, entry.entryType)
 		}
 
