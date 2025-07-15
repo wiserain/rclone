@@ -27,10 +27,15 @@ import (
 
 // ------------------------------------------------------------
 
+var (
+	reRootID         = regexp.MustCompile(`^\{([^}]{5,})\}`)
+	reRootIDURLPath  = regexp.MustCompile(`\/(folders|files|file\/d)(\/([A-Za-z0-9_-]{6,}))+\/?`)
+	reRootIDURLParam = regexp.MustCompile(`.+id=([A-Za-z0-9_-]{6,}).?`)
+)
+
 // parse object id from path remote:{ID}
 func parseRootID(s string) (rootID string, err error) {
-	re := regexp.MustCompile(`\{([^}]{5,})\}`)
-	m := re.FindStringSubmatch(s)
+	m := reRootID.FindStringSubmatch(s)
 	if m == nil {
 		return "", fmt.Errorf("%s does not contain any valid id", s)
 	}
@@ -39,14 +44,12 @@ func parseRootID(s string) (rootID string, err error) {
 	if strings.HasPrefix(rootID, "http") {
 		// folders - https://drive.google.com/drive/u/0/folders/
 		// file - https://drive.google.com/file/d/
-		re := regexp.MustCompile(`\/(folders|files|file\/d)(\/([A-Za-z0-9_-]{6,}))+\/?`)
-		if m := re.FindStringSubmatch(rootID); m != nil {
+		if m := reRootIDURLPath.FindStringSubmatch(rootID); m != nil {
 			rootID = m[len(m)-1]
 			return
 		}
 		// id - https://drive.google.com/open?id=
-		re = regexp.MustCompile(`.+id=([A-Za-z0-9_-]{6,}).?`)
-		if m := re.FindStringSubmatch(rootID); m != nil {
+		if m := reRootIDURLParam.FindStringSubmatch(rootID); m != nil {
 			rootID = m[1]
 			return
 		}

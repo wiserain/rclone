@@ -14,10 +14,14 @@ import (
 
 // ------------------------------------------------------------
 
+var (
+	reRootID        = regexp.MustCompile(`^\{([^}]{5,})\}`)
+	reRootIDURLPath = regexp.MustCompile(`\/drive\/(all|recent)(\/([A-Za-z0-9_-]{6,}))+\/?`)
+)
+
 // parseRootID parses RootID from path
 func parseRootID(s string) (rootID string, err error) {
-	re := regexp.MustCompile(`\{([^}]{5,})\}`)
-	m := re.FindStringSubmatch(s)
+	m := reRootID.FindStringSubmatch(s)
 	if m == nil {
 		return "", fmt.Errorf("%s does not contain a valid id", s)
 	}
@@ -27,8 +31,7 @@ func parseRootID(s string) (rootID string, err error) {
 		// https://mypikpak.com/drive/all/{ID}
 		// https://mypikpak.com/drive/recent/{ID}
 		// https://mypikpak.com/s/{ID}
-		re := regexp.MustCompile(`\/drive\/(all|recent)(\/([A-Za-z0-9_-]{6,}))+\/?`)
-		if m := re.FindStringSubmatch(rootID); m != nil {
+		if m := reRootIDURLPath.FindStringSubmatch(rootID); m != nil {
 			rootID = m[len(m)-1]
 			return
 		}

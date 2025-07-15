@@ -11,17 +11,20 @@ import (
 
 // ------------------------------------------------------------
 
+var (
+	reRootID = regexp.MustCompile(`^\{([^}]{11,})\}`)
+	reCID    = regexp.MustCompile(`(cid=)?(\d{19})`)
+)
+
 // parseRootID parses RootID from path
 func parseRootID(s string) (rootID, receiveCode string, err error) {
-	re := regexp.MustCompile(`^\{([^}]{11,})\}`)
-	m := re.FindStringSubmatch(s)
+	m := reRootID.FindStringSubmatch(s)
 	if m == nil {
 		return "", "", fmt.Errorf("%s does not contain a valid id", s)
 	}
 	rootID = m[1]
 
-	re = regexp.MustCompile(`(cid=)?(\d{19})`)
-	if m := re.FindStringSubmatch(rootID); m != nil {
+	if m := reCID.FindStringSubmatch(rootID); m != nil {
 		// https://115.com/?cid={CID}&offset=0&tab=&mode=wangpan
 		// {CID}
 		return m[len(m)-1], "", nil
