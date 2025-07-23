@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -244,6 +245,28 @@ func (f *Fs) renameObject(ctx context.Context, fid, newName string) (err error) 
 	return f.srv.CallBASE(ctx, &opts)
 }
 
+// guessFileName determines the final file name after a server-side rename operation,
+// considering following file extension constraints:
+//   - If the original file has an extension, it cannot be changed or removed.
+//     The new name will retain the original extension (e.g., "foo.ext" to "bar" results in "bar.ext").
+//   - If the original file has no extension but the new name includes one,
+//     the original file's base name will be kept with an implicit empty extension (e.g., "foo" to "bar.ext" results in "foo.").
+//   - If both the original file and new name have no extensions, the new name is applied directly.
+func guessFileName(oldName, newName string) string {
+	oldExt := filepath.Ext(oldName)
+	newExt := filepath.Ext(newName)
+
+	if oldExt != "" {
+		baseNewName := strings.TrimSuffix(newName, newExt)
+		return baseNewName + oldExt
+	} else {
+		if newExt != "" {
+			return strings.TrimSuffix(oldName, oldExt) + "."
+		}
+		return newName
+	}
+}
+
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	form := url.Values{}
 	for i, fid := range fids {
@@ -260,6 +283,13 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	return f.srv.CallBASE(ctx, &opts)
 }
 
+// moveFiles moves files or directories to a new parent folder on server-side
+//
+//   - If the new parent is the same as the old one,
+//     no action is taken for that item, and no error occurs.
+//   - If a name collision occurs, 115 might automatically
+//     rename the item(s) by appending a numbered suffix. For example,
+//     foo.txt -> foo(1).txt or foo(2).txt if foo(1).txt already exists
 func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
 	form := url.Values{}
 	for i, fid := range fids {
