@@ -1193,7 +1193,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcLeaf != dstLeaf {
 		// Rename
-		err = f.renameFile(ctx, srcObj.id, dstLeaf)
+		err = f.renameObject(ctx, srcObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("move: couldn't rename moved file: %w", err)
 		}
@@ -1240,7 +1240,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	// Can't copy and change name in one step so we have to check if we have
 	// the correct name after copy
 	if srcLeaf != dstLeaf {
-		err = f.renameFile(ctx, srcID, dstLeaf)
+		err = f.renameObject(ctx, srcID, dstLeaf)
 		if err != nil {
 			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
 		}
@@ -1309,7 +1309,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcLeaf != dstLeaf {
 		// Rename
-		err = f.renameFile(ctx, dstObj.id, dstLeaf)
+		err = f.renameObject(ctx, dstObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
