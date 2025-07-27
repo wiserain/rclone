@@ -2,6 +2,7 @@ package _115
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -233,7 +234,7 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 //   - Invalid Characters: New file/folder names containing `"` `<` `>`
 //     characters will result in an error:
 //     `{"state":false,"error":"文件名不能包含以下任意字符之一\"\"<>\"","errno":20003}`.
-func (f *Fs) renameObject(ctx context.Context, fid, newName string) (err error) {
+func (f *Fs) renameObject(ctx context.Context, fid, newName string) (finalName string, err error) {
 	form := url.Values{}
 	form.Set(fmt.Sprintf("files_new_name[%s]", fid), f.opt.Enc.FromStandardName(newName))
 
@@ -242,7 +243,37 @@ func (f *Fs) renameObject(ctx context.Context, fid, newName string) (err error) 
 		Path:            "/files/batch_rename",
 		MultipartParams: form,
 	}
-	return f.srv.CallBASE(ctx, &opts)
+
+	var info struct {
+		api.Base
+		Data json.RawMessage `json:"data,omitempty"`
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("rename: API call failed: %w", err)
+	}
+	if err = info.Err(); err != nil {
+		return "", fmt.Errorf("rename: API returned error: %w", err)
+	}
+
+	// Try to unmarshal as map[string]string first
+	var nameMap map[string]string
+	if err := json.Unmarshal(info.Data, &nameMap); err == nil {
+		if actualName, ok := nameMap[fid]; ok {
+			return f.opt.Enc.ToStandardName(actualName), nil
+		}
+		return "", fmt.Errorf("rename: file ID %s not found in response map", fid)
+	}
+	// Try to unmarshal as empty array (no change)
+	var emptyArr []any
+	if err := json.Unmarshal(info.Data, &emptyArr); err == nil && len(emptyArr) == 0 {
+		return newName, nil
+	}
+	return "", fmt.Errorf("rename: unexpected data format: %q", string(info.Data))
 }
 
 // guessFileName determines the final file name after a server-side rename operation,

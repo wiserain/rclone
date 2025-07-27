@@ -1231,7 +1231,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 			}
 		}
 		// After resolving any conflict, rename the moved file (which might have a suffix) to the desired dstLeaf.
-		if err = f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
+		if _, err = f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
 			return nil, fmt.Errorf("move: couldn't rename moved file %q to %q: %w", dstObj.id, dstLeaf, err)
 		}
 	}
@@ -1277,7 +1277,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	// Can't copy and change name in one step so we have to check if we have
 	// the correct name after copy
 	if srcLeaf != dstLeaf {
-		err = f.renameObject(ctx, srcID, dstLeaf)
+		_, err = f.renameObject(ctx, srcID, dstLeaf)
 		if err != nil {
 			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
 		}
@@ -1346,7 +1346,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	if srcLeaf != dstLeaf {
 		// Rename
-		err = f.renameObject(ctx, dstObj.id, dstLeaf)
+		_, err = f.renameObject(ctx, dstObj.id, dstLeaf)
 		if err != nil {
 			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
 		}
