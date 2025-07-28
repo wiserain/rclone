@@ -45,6 +45,7 @@ import (
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/random"
@@ -1142,6 +1143,58 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) error {
 	return err
 }
 
+// removeExisting removes an existing file in a safe way so that it
+// can be restored if the operation fails.
+//
+// This first detects if there is an existing file and renames it to a
+// temporary name if there is.
+//
+// The returned cleanup function should be called on a defer statement
+// with a pointer to the error returned. It will revert the changes if
+// there is an error or delete the existing file if not.
+func (f *Fs) removeExisting(ctx context.Context, remote string, operation string) (cleanup func(*error), err error) {
+	existingObj, err := f.NewObject(ctx, remote)
+	if err != nil {
+		if err == fs.ErrorObjectNotFound {
+			return func(*error) {}, nil
+		}
+		return nil, fmt.Errorf("%s: couldn't locate existing file: %w", operation, err)
+	}
+
+	// Avoid making the leaf name longer if it's already lengthy to avoid
+	// trouble with file name length limits.
+	dir, leaf := dircache.SplitPath(remote)
+	prefix := "rcloneTemp-" + random.String(8) + "-"
+	var newLeaf string
+	if len(leaf) > 100 {
+		newLeaf = prefix + operations.TruncateString(leaf, len(leaf)-len(prefix))
+	} else {
+		newLeaf = prefix + leaf
+	}
+	remoteSaved := path.Join(dir, newLeaf)
+
+	fs.Debugf(existingObj, "%s: renaming existing object to %q before starting", operation, remoteSaved)
+	existingObj, err = f.Move(ctx, existingObj, remoteSaved)
+	if err != nil {
+		return nil, fmt.Errorf("%s: failed to rename existing file: %w", operation, err)
+	}
+	return func(perr *error) {
+		if *perr == nil {
+			fs.Debugf(existingObj, "%s: removing renamed existing file after operation", operation)
+			err := existingObj.Remove(ctx)
+			if err != nil {
+				*perr = fmt.Errorf("%s: failed to remove renamed existing file: %w", operation, err)
+			}
+		} else {
+			fs.Debugf(existingObj, "%s: renaming existing back after failed operation", operation)
+			_, renameErr := f.Move(ctx, existingObj, remote)
+			if renameErr != nil {
+				fs.Errorf(existingObj, "%s: failed to restore existing file after failed operation: %v", operation, renameErr)
+			}
+		}
+	}, nil
+}
+
 // Move src to this remote using server-side move operations.
 //
 // # This is stored with the remote path given
@@ -1239,14 +1292,12 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	}
 
 	// Assume there must be a conflict
-	conflict, err := f.readMetaDataForPath(ctx, remote)
+	cleanup, err := f.removeExisting(ctx, remote, "server side move")
 	if err != nil {
-		return nil, fmt.Errorf("move: couldn't locate potential conflicting file: %w", err)
+		return nil, fmt.Errorf("move: couldn't delete potential conflicting file: %w", err)
 	}
-	// Delete conflicting file to free up the dstLeaf name.
-	if err = f.deleteFiles(ctx, []string{conflict.ID()}); err != nil {
-		return nil, fmt.Errorf("move: couldn't delete conflicting file: %w", err)
-	}
+	defer cleanup(&err)
+
 	// After resolving conflict, rename the moved file (which might have a suffix) to the desired dstLeaf.
 	if err = f.renameObjectWithCheck(ctx, srcObj.id, dstLeaf); err != nil {
 		return nil, fmt.Errorf("move: couldn't rename moved file to %q: %w", dstLeaf, err)
@@ -1361,14 +1412,11 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	// Check for potential conflicts: 115 creates numbered copies on name collision.
 	var conflict *api.File
 	if srcLeaf == dstLeaf {
-		if conflict, err = f.readMetaDataForPath(ctx, remote); err == nil {
-			// delete conflicting file
-			if err = f.deleteFiles(ctx, []string{conflict.ID()}); err != nil {
-				return nil, fmt.Errorf("copy: couldn't delete conflicting file: %w", err)
-			}
-		} else if err != fs.ErrorObjectNotFound {
-			return nil, err
+		cleanup, err := f.removeExisting(ctx, remote, "server side copy")
+		if err != nil {
+			return nil, fmt.Errorf("copy: couldn't delete conflicting file: %w", err)
 		}
+		defer cleanup(&err)
 	} else {
 		dstDir, _ := dircache.SplitPath(remote)
 		dstObj.remote = path.Join(dstDir, srcLeaf)
