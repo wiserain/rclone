@@ -1165,13 +1165,13 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 		return nil, fs.ErrorCantMove
 	}
 
-	// Check if rename is necessary and possible
+	// Determine if a rename operation is necessary and if the API supports it
+	// based on our empirical rules (guessFileName). This prevents futile API calls.
 	_, srcLeaf := dircache.SplitPath(srcObj.remote)
 	_, dstLeaf := dircache.SplitPath(remote)
 	if srcLeaf != dstLeaf {
-		if guessed := guessFileName(srcLeaf, dstLeaf); guessed != dstLeaf {
-			fs.Debugf(src, "Can't move - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
-			return nil, fs.ErrorCantMove
+		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
+			return nil, fmt.Errorf("move: API does not allow renaming %q to %q", srcLeaf, dstLeaf)
 		}
 	}
 
@@ -1181,61 +1181,86 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	}
 
 	// Create temporary object - still needs id, sha1sum, pickCode
-	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
+	dstObj, _, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
 
+	// Move to new parent if needed
 	if srcObj.parent != dstParentID {
 		// Perform the move. A numbered copy might be generated upon name collision.
 		if err = f.moveFiles(ctx, []string{srcObj.id}, dstParentID); err != nil {
-			return nil, fmt.Errorf("move: failed to move object %s to new parent %s: %w", srcObj.id, dstParentID, err)
+			return nil, fmt.Errorf("move: failed to move object to new parent %s: %w", dstParentID, err)
 		}
 		defer func() {
 			if err != nil {
-				// FIXME: Restored file might have a numbered name if a conflict occurs
 				if mvErr := f.moveFiles(ctx, []string{srcObj.id}, srcObj.parent); mvErr != nil {
-					fs.Logf(f, "move: couldn't restore original object %q to %q after move failure: %v", dstObj.id, src.Remote(), mvErr)
+					fs.Logf(f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), mvErr)
 				}
 			}
 		}()
 	}
 
-	// Find the moved object using getFile
-	moved, err := f.getFile(ctx, srcObj.id, "")
-	if err != nil {
-		return nil, fmt.Errorf("move: couldn't get moved file: %w", err)
-	}
-	if moved.ParentID() != dstParentID {
-		return nil, fmt.Errorf("move: moved file %q not found in destination - expected to be in %q but in %q", srcObj.id, dstParentID, moved.ParentID())
+	defer func() {
+		if err != nil {
+			if newName, rnErr := f.renameObject(ctx, srcObj.id, srcLeaf); rnErr != nil || newName != srcLeaf {
+				fs.Logf(f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), rnErr)
+			}
+		}
+	}()
+
+	// Rename if needed
+	var moved *api.File
+	if srcLeaf != dstLeaf {
+		if newName, err := f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
+			return nil, fmt.Errorf("move: couldn't rename moved file to %q: %w", dstLeaf, err)
+		} else if newName == dstLeaf {
+			// manually set metadata from src to save API calls
+			dstObj.id = srcObj.id
+			dstObj.sha1sum = srcObj.sha1sum
+			dstObj.pickCode = srcObj.pickCode
+			dstObj.hasMetaData = true
+			return dstObj, nil
+		}
+	} else {
+		// Find the moved object using getFile
+		moved, err = f.getFile(ctx, srcObj.id, "")
+		if err != nil {
+			return nil, fmt.Errorf("move: couldn't get moved file: %w", err)
+		}
+		if moved.ParentID() != dstParentID {
+			return nil, fmt.Errorf("move: moved file not found in destination - expected to be in %q but in %q", dstParentID, moved.ParentID())
+		}
+		if moved.Name == dstLeaf {
+			return dstObj, dstObj.setMetaData(moved)
+		}
 	}
 
-	// Handling name collison
-	if moved.Name != dstLeaf {
-		// Find the conflict object with the same name.
-		var conflict *api.File
-		_, err = f.listAll(ctx, dstParentID, f.opt.ListChunk, true, false, func(item *api.File) bool {
-			if item.Name == dstLeaf && item.ID() != srcObj.id {
-				conflict = item
-				return true
-			}
-			return false
-		})
-		if err != nil {
-			return nil, fmt.Errorf("move: failed to check for conflicting file in destination directory: %w", err)
-		}
-		if conflict != nil {
-			// If a conflicting file exists, delete it to free up the dstLeaf name.
-			if err = f.deleteFiles(ctx, []string{conflict.ID()}); err != nil {
-				return nil, fmt.Errorf("move: couldn't delete conflicting file: %w", err)
-			}
-		}
-		// After resolving any conflict, rename the moved file (which might have a suffix) to the desired dstLeaf.
-		if _, err = f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
-			return nil, fmt.Errorf("move: couldn't rename moved file %q to %q: %w", dstObj.id, dstLeaf, err)
-		}
+	// Assume there must be a conflict
+	conflict, err := f.readMetaDataForPath(ctx, remote)
+	if err != nil {
+		return nil, fmt.Errorf("move: couldn't locate potential conflicting file: %w", err)
 	}
-	return dstObj, dstObj.setMetaData(moved)
+	// Delete conflicting file to free up the dstLeaf name.
+	if err = f.deleteFiles(ctx, []string{conflict.ID()}); err != nil {
+		return nil, fmt.Errorf("move: couldn't delete conflicting file: %w", err)
+	}
+	// After resolving conflict, rename the moved file (which might have a suffix) to the desired dstLeaf.
+	if newName, err := f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
+		return nil, fmt.Errorf("move: couldn't rename moved file to %q: %w", dstLeaf, err)
+	} else if newName != dstLeaf {
+		return nil, fmt.Errorf("move: couldn't rename moved file - wanted %q got %q", dstLeaf, newName)
+	}
+
+	if moved != nil {
+		return dstObj, dstObj.setMetaData(moved)
+	}
+	// manually set metadata from src to save API calls
+	dstObj.id = srcObj.id
+	dstObj.sha1sum = srcObj.sha1sum
+	dstObj.pickCode = srcObj.pickCode
+	dstObj.hasMetaData = true
+	return dstObj, nil
 }
 
 // DirMove moves src, srcRemote to this remote at dstRemote
