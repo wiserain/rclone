@@ -276,6 +276,18 @@ func (f *Fs) renameObject(ctx context.Context, fid, newName string) (finalName s
 	return "", fmt.Errorf("rename: unexpected data format: %q", string(info.Data))
 }
 
+// renameObjectWithCheck renames an object by ID and verifies the new name.
+func (f *Fs) renameObjectWithCheck(ctx context.Context, fid, newName string) error {
+	finalName, err := f.renameObject(ctx, fid, newName)
+	if err != nil {
+		return err
+	}
+	if newName != finalName {
+		return fmt.Errorf("rename mismatch: wanted %q, got %q", newName, finalName)
+	}
+	return nil
+}
+
 // guessFileName determines the final file name after a server-side rename operation,
 // considering following file extension constraints:
 //   - If the original file has an extension, it cannot be changed or removed.

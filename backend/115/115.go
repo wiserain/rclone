@@ -1204,7 +1204,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 
 	defer func() {
 		if err != nil {
-			if newName, rnErr := f.renameObject(ctx, srcObj.id, srcLeaf); rnErr != nil || newName != srcLeaf {
+			if rnErr := f.renameObjectWithCheck(ctx, srcObj.id, srcLeaf); rnErr != nil {
 				fs.Logf(f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), rnErr)
 			}
 		}
@@ -1247,10 +1247,8 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 		return nil, fmt.Errorf("move: couldn't delete conflicting file: %w", err)
 	}
 	// After resolving conflict, rename the moved file (which might have a suffix) to the desired dstLeaf.
-	if newName, err := f.renameObject(ctx, srcObj.id, dstLeaf); err != nil {
+	if err = f.renameObjectWithCheck(ctx, srcObj.id, dstLeaf); err != nil {
 		return nil, fmt.Errorf("move: couldn't rename moved file to %q: %w", dstLeaf, err)
-	} else if newName != dstLeaf {
-		return nil, fmt.Errorf("move: couldn't rename moved file - wanted %q got %q", dstLeaf, newName)
 	}
 
 	if moved != nil {
@@ -1303,7 +1301,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	// Can't copy and change name in one step so we have to check if we have
 	// the correct name after copy
 	if srcLeaf != dstLeaf {
-		_, err = f.renameObject(ctx, srcID, dstLeaf)
+		err = f.renameObjectWithCheck(ctx, srcID, dstLeaf)
 		if err != nil {
 			return fmt.Errorf("dirmove: couldn't rename moved dir: %w", err)
 		}
@@ -1374,11 +1372,11 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 		dstObj.remote = path.Join(dstDir, srcLeaf)
 		if conflict, err = f.readMetaDataForPath(ctx, dstObj.remote); err == nil {
 			tmpName := "rcloneTemp-" + random.String(8) + "-" + conflict.Name
-			if newName, rnErr := f.renameObject(ctx, conflict.ID(), tmpName); rnErr != nil || newName != tmpName {
+			if rnErr := f.renameObjectWithCheck(ctx, conflict.ID(), tmpName); rnErr != nil {
 				return nil, fmt.Errorf("copy: couldn't rename conflicting file: %w", rnErr)
 			}
 			defer func() {
-				if newName, rnErr := f.renameObject(ctx, conflict.ID(), conflict.Name); rnErr != nil || newName != conflict.Name {
+				if rnErr := f.renameObjectWithCheck(ctx, conflict.ID(), conflict.Name); rnErr != nil {
 					fs.Logf(f, "copy: couldn't rename conflicting file back to original: %v", rnErr)
 				}
 			}()
