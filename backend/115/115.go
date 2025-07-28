@@ -1172,7 +1172,8 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	_, dstLeaf := dircache.SplitPath(remote)
 	if srcLeaf != dstLeaf {
 		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
-			return nil, fmt.Errorf("move: API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			fs.Debugf(src, "Can't move - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			return nil, fs.ErrorCantMove
 		}
 	}
 
@@ -1336,7 +1337,8 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	_, dstLeaf := dircache.SplitPath(remote)
 	if srcLeaf != dstLeaf {
 		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
-			return nil, fmt.Errorf("copy: API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			fs.Debugf(src, "Can't copy - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			return nil, fs.ErrorCantCopy
 		}
 	}
 
