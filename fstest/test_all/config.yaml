@@ -438,6 +438,10 @@ backends:
    remote:   "Test115:"
    fastlist: false
    oneonly:  true
+   ignore:
+    #  These will always fail due to file extension constraints on a server-side rename operation
+     - TestRemoveExisting # fs/operations
+     - TestSyncBackupDirWithSuffix # fs/sync
  - backend:  "pikpak"
    remote:   "TestPikPak:"
    fastlist: false
