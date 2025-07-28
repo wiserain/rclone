@@ -47,6 +47,7 @@ import (
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/lib/encoder"
 	"github.com/rclone/rclone/lib/pacer"
+	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -1320,7 +1321,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 // Will only be called if src.Fs().Name() == f.Name()
 //
 // If it isn't possible then return fs.ErrorCantCopy
-func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
+func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Object, err error) {
 	if f.isShare {
 		fs.Debugf(src, "Can't copy - shared filesystem")
 		return nil, fs.ErrorCantCopy
@@ -1330,13 +1331,24 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		fs.Debugf(src, "Can't copy - not same remote type")
 		return nil, fs.ErrorCantCopy
 	}
-	err := srcObj.readMetaData(ctx)
+
+	// Determine if a rename operation is necessary and if the API supports it
+	// based on our empirical rules (guessFileName). This prevents futile API calls.
+	_, srcLeaf := dircache.SplitPath(srcObj.remote)
+	_, dstLeaf := dircache.SplitPath(remote)
+	if srcLeaf != dstLeaf {
+		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
+			return nil, fmt.Errorf("copy: API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+		}
+	}
+
+	err = srcObj.readMetaData(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create temporary object - still needs id, sha1sum, pickCode
-	dstObj, dstLeaf, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
+	dstObj, _, dstParentID, err := f.createObject(ctx, remote, srcObj.modTime, srcObj.size)
 	if err != nil {
 		return nil, err
 	}
@@ -1345,6 +1357,36 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		fs.Debugf(src, "Can't copy - same parent")
 		return nil, fs.ErrorCantCopy
 	}
+
+	// Check for potential conflicts: 115 creates numbered copies on name collision.
+	var conflict *api.File
+	if srcLeaf == dstLeaf {
+		if conflict, err = f.readMetaDataForPath(ctx, remote); err == nil {
+			// delete conflicting file
+			if err = f.deleteFiles(ctx, []string{conflict.ID()}); err != nil {
+				return nil, fmt.Errorf("copy: couldn't delete conflicting file: %w", err)
+			}
+		} else if err != fs.ErrorObjectNotFound {
+			return nil, err
+		}
+	} else {
+		dstDir, _ := dircache.SplitPath(remote)
+		dstObj.remote = path.Join(dstDir, srcLeaf)
+		if conflict, err = f.readMetaDataForPath(ctx, dstObj.remote); err == nil {
+			tmpName := "rcloneTemp-" + random.String(8) + "-" + conflict.Name
+			if newName, rnErr := f.renameObject(ctx, conflict.ID(), tmpName); rnErr != nil || newName != tmpName {
+				return nil, fmt.Errorf("copy: couldn't rename conflicting file: %w", rnErr)
+			}
+			defer func() {
+				if newName, rnErr := f.renameObject(ctx, conflict.ID(), conflict.Name); rnErr != nil || newName != conflict.Name {
+					fs.Logf(f, "copy: couldn't rename conflicting file back to original: %v", rnErr)
+				}
+			}()
+		} else if err != fs.ErrorObjectNotFound {
+			return nil, err
+		}
+	}
+
 	// Copy the object
 	if srcObj.fs.isShare {
 		if err := f.copyFromShareSrc(ctx, src, dstParentID); err != nil {
@@ -1355,28 +1397,15 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 			return nil, fmt.Errorf("couldn't copy file: %w", err)
 		}
 	}
-	// Update the copied object with new parent but old name
-	if info, err := dstObj.fs.readMetaDataForPath(ctx, srcObj.remote); err != nil {
-		return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
-	} else if err = dstObj.setMetaData(info); err != nil {
-		return nil, err
-	}
-
-	// Can't copy and change name in one step so we have to check if we have
-	// the correct name after copy
-	srcLeaf, _, err := srcObj.fs.dirCache.FindPath(ctx, srcObj.remote, false)
+	err = dstObj.readMetaData(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("copy: couldn't locate copied file: %w", err)
 	}
 
 	if srcLeaf != dstLeaf {
-		// Rename
-		_, err = f.renameObject(ctx, dstObj.id, dstLeaf)
-		if err != nil {
-			return nil, fmt.Errorf("copy: couldn't rename copied file: %w", err)
-		}
+		return f.Move(ctx, dstObj, remote)
 	}
-	return dstObj, dstObj.readMetaData(ctx)
+	return dstObj, nil
 }
 
 // purgeCheck removes the root directory, if check is set then it
