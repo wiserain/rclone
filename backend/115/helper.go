@@ -2,11 +2,13 @@ package _115
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -202,18 +204,110 @@ func (f *Fs) makeDir(ctx context.Context, pid, name string) (info *api.NewDir, e
 	return
 }
 
-func (f *Fs) renameFile(ctx context.Context, fid, newName string) (err error) {
+// renameObject renames a file or directory by its ID on the server-side.
+//
+// API Returns:
+//   - An empty data array ({"state":true,"error":"","errno":0,"data":[]})
+//     if no actual file name change occurred. This includes cases where
+//     the new name is identical to the current name.
+//   - A data object (e.g., {"state":true,"error":"","errno":0,"data":{"3206932984123456789":"foo(1).txt"}})
+//     containing the file ID and the final renamed file name if a change
+//     was successful. This covers both normal successful renames and
+//     automatic renames due to name collisions.
+//
+// Specific behaviors:
+//   - Name Collision: If a name collision occurs, 115 might automatically
+//     rename the item(s) by appending a numbered suffix. For example,
+//     "foo.txt" could become "foo(1).txt" or "foo(2).txt" if "foo(1).txt"
+//     already exists.
+//   - File Extension: If the target `fid` is a file (not a folder), its
+//     extension cannot be changed **or removed** once it has one.
+//     Files without an explicit extension are implicitly considered to have
+//     an empty string extension, allowing them to be renamed to new names
+//     without an extension (e.g., "foo" to "bar"). However, if a file gains
+//     an extension, it cannot be reverted to an extension-less name.
+//     If a new name includes an extension, only the part before the extension
+//     will be applied if the file already has an extension or if you're trying
+//     to remove one. For example, renaming "foo.ext" to "bar" will
+//     result in "bar.ext". Similarly, renaming "foo" to "bar.ext"
+//     will result in "foo.".
+//   - Invalid Characters: New file/folder names containing `"` `<` `>`
+//     characters will result in an error:
+//     `{"state":false,"error":"文件名不能包含以下任意字符之一\"\"<>\"","errno":20003}`.
+func (f *Fs) renameObject(ctx context.Context, fid, newName string) (finalName string, err error) {
 	form := url.Values{}
-	form.Set("fid", fid)
-	form.Set("file_name", newName)
-	form.Set(fmt.Sprintf("files_new_name[%s]", fid), newName)
+	form.Set(fmt.Sprintf("files_new_name[%s]", fid), f.opt.Enc.FromStandardName(newName))
 
 	opts := rest.Opts{
 		Method:          "POST",
 		Path:            "/files/batch_rename",
 		MultipartParams: form,
 	}
-	return f.srv.CallBASE(ctx, &opts)
+
+	var info struct {
+		api.Base
+		Data json.RawMessage `json:"data,omitempty"`
+	}
+	var resp *http.Response
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &info)
+		return shouldRetry(ctx, resp, info, err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("rename: API call failed: %w", err)
+	}
+	if err = info.Err(); err != nil {
+		return "", fmt.Errorf("rename: API returned error: %w", err)
+	}
+
+	// Try to unmarshal as map[string]string first
+	var nameMap map[string]string
+	if err := json.Unmarshal(info.Data, &nameMap); err == nil {
+		if actualName, ok := nameMap[fid]; ok {
+			return f.opt.Enc.ToStandardName(actualName), nil
+		}
+		return "", fmt.Errorf("rename: file ID %s not found in response map", fid)
+	}
+	// Try to unmarshal as empty array (no change)
+	var emptyArr []any
+	if err := json.Unmarshal(info.Data, &emptyArr); err == nil && len(emptyArr) == 0 {
+		return newName, nil
+	}
+	return "", fmt.Errorf("rename: unexpected data format: %q", string(info.Data))
+}
+
+// renameObjectWithCheck renames an object by ID and verifies the new name.
+func (f *Fs) renameObjectWithCheck(ctx context.Context, fid, newName string) error {
+	finalName, err := f.renameObject(ctx, fid, newName)
+	if err != nil {
+		return err
+	}
+	if newName != finalName {
+		return fmt.Errorf("rename mismatch: wanted %q, got %q", newName, finalName)
+	}
+	return nil
+}
+
+// guessFileName determines the final file name after a server-side rename operation,
+// considering following file extension constraints:
+//   - If the original file has an extension, it cannot be changed or removed.
+//     The new name will retain the original extension (e.g., "foo.ext" to "bar" results in "bar.ext").
+//   - If the original file has no extension but the new name includes one,
+//     the original file's base name will be kept with an implicit empty extension (e.g., "foo" to "bar.ext" results in "foo.").
+//   - If both the original file and new name have no extensions, the new name is applied directly.
+func guessFileName(oldName, newName string) string {
+	oldExt := filepath.Ext(oldName)
+	newExt := filepath.Ext(newName)
+
+	if oldExt != "" {
+		baseNewName := strings.TrimSuffix(newName, newExt)
+		return baseNewName + oldExt
+	} else {
+		if newExt != "" {
+			return strings.TrimSuffix(oldName, oldExt) + "."
+		}
+		return newName
+	}
 }
 
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
@@ -232,6 +326,13 @@ func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
 	return f.srv.CallBASE(ctx, &opts)
 }
 
+// moveFiles moves files or directories to a new parent folder on server-side
+//
+//   - If the new parent is the same as the old one,
+//     no action is taken for that item, and no error occurs.
+//   - If a name collision occurs, 115 might automatically
+//     rename the item(s) by appending a numbered suffix. For example,
+//     foo.txt -> foo(1).txt or foo(2).txt if foo(1).txt already exists
 func (f *Fs) moveFiles(ctx context.Context, fids []string, pid string) (err error) {
 	form := url.Values{}
 	for i, fid := range fids {
