@@ -259,14 +259,16 @@ Use this flag with the "--115-download-cookie" option to bypass proxy settings f
 			Advanced: true,
 			Default: (encoder.EncodeLtGt |
 				encoder.EncodeDoubleQuote |
-				encoder.EncodeLeftSpace |
-				encoder.EncodeLeftSpace |
-				encoder.EncodeLeftTilde |
 				encoder.EncodeCtl |
-				encoder.EncodeLeftPeriod |
+				encoder.EncodeLeftSpace |
 				encoder.EncodeRightSpace |
-				encoder.EncodeRightPeriod |
-				encoder.EncodeInvalidUtf8), // 文件名不能包含以下任意字符之一""<>" (20003)
+				encoder.EncodeDel |
+				encoder.EncodeInvalidUtf8),
+			// Need to encode these for filenames
+			// - control chars
+			// - LeftSpace, RightSpace, DEL(0x7F)
+			// - InvalidUtf8
+			// including `"<>` for dirnames - 文件名不能包含以下任意字符之一""<>" (20003)
 		}},
 	})
 }
