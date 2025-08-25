@@ -1,4 +1,5 @@
-// from "github.com/gaoyb7/115drive-webdav/115"
+// Package crypto provides encryption and decryption utilities for 115 backend.
+// Originally from "github.com/gaoyb7/115drive-webdav/115"
 package crypto
 
 import (
@@ -49,6 +50,7 @@ var (
 	rsaServerKey *rsa.PublicKey
 )
 
+// Key represents a 16-byte encryption key.
 type Key [16]byte
 
 func init() {
@@ -57,12 +59,14 @@ func init() {
 	rsaServerKey = key.(*rsa.PublicKey)
 }
 
+// GenerateKey creates a new random 16-byte Key.
 func GenerateKey() Key {
 	key := Key{}
 	_, _ = io.ReadFull(rand.Reader, key[:])
 	return key
 }
 
+// Encode encrypts and encodes the input using the provided Key.
 func Encode(input []byte, key Key) (output string) {
 	buf := make([]byte, 16+len(input))
 	copy(buf, key[:])
@@ -74,6 +78,7 @@ func Encode(input []byte, key Key) (output string) {
 	return
 }
 
+// Decode decrypts and decodes the input string using the provided Key.
 func Decode(input string, key Key) (output []byte, err error) {
 	data, err := base64.StdEncoding.DecodeString(input)
 	if err != nil {

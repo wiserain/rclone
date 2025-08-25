@@ -410,6 +410,8 @@ func errorHandler(resp *http.Response) error {
 	return errResponse
 }
 
+// Credential holds authentication information, typically in the form of cookies,
+// to access 115
 type Credential struct {
 	UID  string
 	CID  string

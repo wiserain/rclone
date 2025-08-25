@@ -60,6 +60,7 @@ func (f *Fs) getID(ctx context.Context, path string) (id string, err error) {
 	return id, nil
 }
 
+// RedeemResult represents the result of a redeem request.
 type RedeemResult struct {
 	AddDays int    `json:"add_days"`
 	Code    string `json:"code"`
@@ -130,6 +131,7 @@ type ResourceList struct {
 	} `json:"list"`
 }
 
+// ResourceMeta contains metadata for a resource.
 type ResourceMeta struct {
 	Error         string `json:"error,omitempty"` // "403:E_PARSE_BT"
 	Icon          string `json:"icon,omitempty"`
@@ -138,6 +140,7 @@ type ResourceMeta struct {
 	URL           string `json:"url,omitempty"`
 }
 
+// ResourceDir represents a directory of resources.
 type ResourceDir struct {
 	PageSize      int         `json:"page_size"`
 	NextPageToken string      `json:"next_page_token"`

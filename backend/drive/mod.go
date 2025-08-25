@@ -64,6 +64,7 @@ type baseSAobject struct {
 	Impersonate        string
 }
 
+// ServiceAccountPool manages a pool of service accounts for Google Drive operations.
 type ServiceAccountPool struct {
 	creds   string          // on newServiceAccountPool
 	files   []string        // on newServiceAccountPool
@@ -123,6 +124,7 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 	return p, nil
 }
 
+// LoadSA loads service accounts into the pool.
 func (p *ServiceAccountPool) LoadSA() error {
 	if p.numLoad >= p.maxLoad {
 		return fmt.Errorf("maximum service account load exceeded")
@@ -167,6 +169,7 @@ func (p *ServiceAccountPool) _getSA() (newSA []*baseSAobject, err error) {
 	return newSA, nil
 }
 
+// GetSA returns a service account from the pool.
 func (p *ServiceAccountPool) GetSA() (newSA []*baseSAobject, err error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -231,12 +234,14 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 
 // ------------------------------------------------------------
 
+// GdsRequest represents a request to the GDS API.
 type GdsRequest struct {
 	UserID string `json:"userid"`
 	APIKey string `json:"apikey"`
 	Mode   string `json:"mode"`
 }
 
+// GdsClient is a client for interacting with the GDS API.
 type GdsClient struct {
 	client *rest.Client
 	req    *GdsRequest
@@ -260,6 +265,7 @@ func newGdsClient(ctx context.Context, opt *Options) (*GdsClient, bool, error) {
 	return gds, ok, nil
 }
 
+// GdsResponse represents a response from the GDS API.
 type GdsResponse struct {
 	Result string `json:"result"`
 	Data   struct {
@@ -268,6 +274,7 @@ type GdsResponse struct {
 	} `json:"data"`
 }
 
+// GdsRemote contains information about a remote from the GDS API.
 type GdsRemote struct {
 	SA           json.RawMessage `json:"sa"`
 	RootFolderID string          `json:"root_folder_id"`

@@ -1,3 +1,4 @@
+// Package api has type definitions for 115
 package api
 
 import (
@@ -36,8 +37,10 @@ func (t *Time) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Int is a custom integer type for JSON unmarshalling.
 type Int int
 
+// UnmarshalJSON implements custom unmarshalling for Int.
 func (e *Int) UnmarshalJSON(in []byte) (err error) {
 	s := strings.Trim(string(in), `"`)
 	if s == "" {
@@ -49,8 +52,10 @@ func (e *Int) UnmarshalJSON(in []byte) (err error) {
 	return
 }
 
+// Int64 is a custom int64 type for JSON unmarshalling.
 type Int64 int64
 
+// UnmarshalJSON implements custom unmarshalling for Int64.
 func (e *Int64) UnmarshalJSON(in []byte) (err error) {
 	s := strings.Trim(string(in), `"`)
 	if s == "" {
@@ -66,6 +71,7 @@ func (e *Int64) UnmarshalJSON(in []byte) (err error) {
 // Unquoted inputs are treated as raw bytes and converted directly to a string.
 type String string
 
+// UnmarshalJSON implements custom unmarshalling for String.
 func (s *String) UnmarshalJSON(in []byte) error {
 	if n := len(in); n > 1 && in[0] == '"' && in[n-1] == '"' {
 		return json.Unmarshal(in, (*string)(s))
@@ -74,6 +80,7 @@ func (s *String) UnmarshalJSON(in []byte) error {
 	return nil
 }
 
+// Error represents an API error.
 type Error struct {
 	Status    int    `json:"status,omitempty"`
 	Message   string `json:"message,omitempty"`
@@ -94,6 +101,7 @@ var _ error = (*Error)(nil)
 
 // ------------------------------------------------------------
 
+// Base is the base response for many API responses.
 type Base struct {
 	Msg     string `json:"msg,omitempty"`
 	Errno   Int    `json:"errno,omitempty"`   // Base, NewDir, DirID, UploadBasicInfo, ShareSnap
@@ -104,6 +112,7 @@ type Base struct {
 	State   bool   `json:"state,omitempty"`
 }
 
+// ErrCode returns the error code from Base.
 func (b *Base) ErrCode() Int {
 	if b.Errno != 0 {
 		return b.Errno
@@ -114,6 +123,7 @@ func (b *Base) ErrCode() Int {
 	return b.Code
 }
 
+// ErrMsg returns the error message from Base.
 func (b *Base) ErrMsg() string {
 	if b.Error != "" {
 		return b.Error
@@ -124,7 +134,7 @@ func (b *Base) ErrMsg() string {
 	return b.Msg
 }
 
-// Returns Error or Nil
+// Err returns an error if State is false, otherwise nil.
 func (b *Base) Err() error {
 	if b.State {
 		return nil
@@ -136,6 +146,7 @@ func (b *Base) Err() error {
 	return errors.New(out)
 }
 
+// File represents a file or directory in 115.
 type File struct {
 	FID       string      `json:"fid,omitempty"` // file; empty if dir
 	UID       json.Number `json:"uid,omitempty"` // user
@@ -162,10 +173,12 @@ type File struct {
 	// c=2 系统处理中，暂不支持操作 system processing; operation not supported at this time
 }
 
+// IsDir reports whether the File is a directory.
 func (f *File) IsDir() bool {
 	return f.FID == ""
 }
 
+// ID returns the file or directory ID.
 func (f *File) ID() string {
 	if f.IsDir() {
 		return f.CID.String()
@@ -173,6 +186,7 @@ func (f *File) ID() string {
 	return f.FID
 }
 
+// ParentID returns the parent ID of the file or directory.
 func (f *File) ParentID() string {
 	if f.IsDir() {
 		return f.PID
@@ -180,6 +194,7 @@ func (f *File) ParentID() string {
 	return f.CID.String()
 }
 
+// ModTime returns the modification time of the file.
 func (f *File) ModTime() time.Time {
 	if t := time.Time(f.Te); !t.IsZero() {
 		return t
@@ -194,6 +209,7 @@ func (f *File) ModTime() time.Time {
 	return time.Time{}
 }
 
+// FilePath represents a path element in a file path.
 type FilePath struct {
 	Name string      `json:"name,omitempty"`
 	AID  json.Number `json:"aid,omitempty"` // area
@@ -206,6 +222,7 @@ type FilePath struct {
 	Fvs  string      `json:"fvs,omitempty"`
 }
 
+// FileList represents a list of files and directories.
 type FileList struct {
 	Base
 	Files          []*File     `json:"data,omitempty"`
@@ -239,11 +256,13 @@ type FileList struct {
 	Suffix         string      `json:"suffix,omitempty"`
 }
 
+// FileInfo represents file information.
 type FileInfo struct {
 	Base
 	Data []*File `json:"data,omitempty"`
 }
 
+// NewDir represents the response for creating a new directory.
 type NewDir struct {
 	Base
 	AID      int    `json:"aid,omitempty"`
@@ -253,12 +272,14 @@ type NewDir struct {
 	FileName string `json:"file_name,omitempty"`
 }
 
+// DirID represents a directory ID response.
 type DirID struct {
 	Base
 	ID        json.Number `json:"id,omitempty"`
 	IsPrivate json.Number `json:"is_private,omitempty"`
 }
 
+// FileStats represents statistics about a file or directory.
 type FileStats struct {
 	Count        json.Number `json:"count,omitempty"`
 	Size         string      `json:"size,omitempty"`
@@ -283,20 +304,24 @@ type FileStats struct {
 	} `json:"paths,omitempty"`
 }
 
+// StringInfo represents a response with a string data field.
 type StringInfo struct {
 	Base
 	Data String `json:"data,omitempty"`
 }
 
+// IndexInfo represents index information.
 type IndexInfo struct {
 	Base
 	Data *IndexData `json:"data,omitempty"`
 }
 
+// IndexData represents data for index information.
 type IndexData struct {
 	SpaceInfo map[string]*SizeInfo `json:"space_info"`
 }
 
+// SizeInfo represents size information.
 type SizeInfo struct {
 	Size       float64 `json:"size"`
 	SizeFormat string  `json:"size_format"`
@@ -304,6 +329,7 @@ type SizeInfo struct {
 
 // ------------------------------------------------------------
 
+// DownloadURL represents a downloadable URL and its metadata.
 type DownloadURL struct {
 	URL     string `json:"url"`
 	Client  Int    `json:"client"`
@@ -312,6 +338,7 @@ type DownloadURL struct {
 	Cookies []*http.Cookie
 }
 
+// UnmarshalJSON implements custom unmarshalling for DownloadURL.
 func (u *DownloadURL) UnmarshalJSON(data []byte) error {
 	if string(data) == "false" {
 		*u = DownloadURL{}
@@ -358,6 +385,7 @@ func (u *DownloadURL) Valid() bool {
 	return u != nil && !u.expired()
 }
 
+// Cookie returns the cookies as a string.
 func (u *DownloadURL) Cookie() string {
 	cookie := ""
 	for _, ck := range u.Cookies {
@@ -366,6 +394,7 @@ func (u *DownloadURL) Cookie() string {
 	return cookie
 }
 
+// DownloadInfo represents information about a downloadable file.
 type DownloadInfo struct {
 	FileName string      `json:"file_name"`
 	FileSize Int64       `json:"file_size"`
@@ -373,10 +402,12 @@ type DownloadInfo struct {
 	URL      DownloadURL `json:"url"`
 }
 
+// DownloadData is a map of file IDs to DownloadInfo.
 type DownloadData map[string]*DownloadInfo
 
 // ------------------------------------------------------------
 
+// UploadBasicInfo represents basic information for uploads.
 type UploadBasicInfo struct {
 	Base
 	Uploadinfo       string      `json:"uploadinfo,omitempty"`
@@ -394,6 +425,7 @@ type UploadBasicInfo struct {
 	UploadAllowedMsg string      `json:"upload_allowed_msg,omitempty"`
 }
 
+// UploadInitInfo represents initialization info for uploads.
 type UploadInitInfo struct {
 	Request   string `json:"request"`
 	ErrorCode int    `json:"statuscode"`
@@ -421,19 +453,23 @@ type UploadInitInfo struct {
 	SignCheck string `json:"sign_check"`
 }
 
+// GetCallback returns the base64-encoded callback string.
 func (ui *UploadInitInfo) GetCallback() string {
 	return base64.StdEncoding.EncodeToString([]byte(ui.Callback.Callback))
 }
 
+// GetCallbackVar returns the base64-encoded callback var string.
 func (ui *UploadInitInfo) GetCallbackVar() string {
 	return base64.StdEncoding.EncodeToString([]byte(ui.Callback.CallbackVar))
 }
 
+// CallbackInfo represents callback information for uploads.
 type CallbackInfo struct {
 	Base
 	Data *CallbackData `json:"data,omitempty"`
 }
 
+// CallbackData represents data for upload callbacks.
 type CallbackData struct {
 	AID      int    `json:"aid,omitempty"`
 	CID      string `json:"cid,omitempty"`
@@ -446,6 +482,7 @@ type CallbackData struct {
 	ThumbURL string `json:"thumb_url,omitempty"`
 }
 
+// OSSToken represents an OSS token for uploads.
 type OSSToken struct {
 	AccessKeyID     string    `json:"AccessKeyID"`
 	AccessKeySecret string    `json:"AccessKeySecret"`
@@ -456,6 +493,7 @@ type OSSToken struct {
 	ErrorMessage    string    `json:"ErrorMessage,omitempty"`
 }
 
+// TimeToExpiry returns the time duration until the token expires.
 func (t *OSSToken) TimeToExpiry() time.Duration {
 	if t == nil {
 		return 0
@@ -468,6 +506,7 @@ func (t *OSSToken) TimeToExpiry() time.Duration {
 
 // ------------------------------------------------------------
 
+// NewURL represents a new URL response.
 type NewURL struct {
 	State    bool   `json:"state,omitempty"`
 	ErrorMsg string `json:"error_msg,omitempty"`
@@ -489,11 +528,13 @@ type NewURL struct {
 	Errcode int `json:"errcode,omitempty"`
 }
 
+// ShareSnap represents a snapshot of a share.
 type ShareSnap struct {
 	Base
 	Data *ShareSnapData `json:"data,omitempty"`
 }
 
+// ShareSnapData represents data for a share snapshot.
 type ShareSnapData struct {
 	Userinfo struct {
 		UserID   string `json:"user_id,omitempty"`
@@ -528,6 +569,7 @@ type ShareSnapData struct {
 	} `json:"user_appeal,omitempty"`
 }
 
+// ShareDownloadInfo represents information for a shared download.
 type ShareDownloadInfo struct {
 	FileID   string      `json:"fid"`
 	FileName string      `json:"fn"`

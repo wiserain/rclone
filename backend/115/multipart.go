@@ -1,5 +1,6 @@
-// Implements multipart uploading for 115. Mostly from lib/multipart
 package _115
+
+// Implements multipart uploading for 115. Mostly from lib/multipart
 
 import (
 	"context"
