@@ -233,7 +233,7 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 
 type GdsRequest struct {
 	UserID string `json:"userid"`
-	ApiKey string `json:"apikey"`
+	APIKey string `json:"apikey"`
 	Mode   string `json:"mode"`
 }
 
@@ -253,7 +253,7 @@ func newGdsClient(ctx context.Context, opt *Options) (*GdsClient, bool, error) {
 		client: rest.NewClient(fshttp.NewClient(ctx)).SetRoot(opt.GdsEndpoint),
 		req: &GdsRequest{
 			UserID: opt.GdsUserid,
-			ApiKey: opt.GdsApikey,
+			APIKey: opt.GdsApikey,
 			Mode:   opt.GdsMode,
 		},
 	}
@@ -439,8 +439,8 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			isDir = item.DriveItem.DriveFile != nil
 			return
 		}
-		itemJson, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJson))
+		itemJSON, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJSON))
 	case *driveactivity.Target:
 		if item.DriveItem != nil {
 			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
@@ -449,8 +449,8 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			mimeType = item.DriveItem.MimeType
 			return
 		}
-		itemJson, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJson))
+		itemJSON, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJSON))
 	}
 	return
 }
@@ -475,8 +475,8 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		for _, act := range activity.Actions {
 			if act.Detail.Move != nil {
 				for _, ref := range act.Detail.Move.AddedParents {
-					if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-						newParents = append(newParents, parentId)
+					if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+						newParents = append(newParents, parentID)
 					}
 				}
 			}
@@ -486,13 +486,13 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	case actDetail.Move != nil:
 		actionType = "MOVE"
 		for _, ref := range actDetail.Move.RemovedParents {
-			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-				oldParents = append(oldParents, parentId)
+			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+				oldParents = append(oldParents, parentID)
 			}
 		}
 		for _, ref := range actDetail.Move.AddedParents {
-			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-				newParents = append(newParents, parentId)
+			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+				newParents = append(newParents, parentID)
 			}
 		}
 	case actDetail.Rename != nil:
@@ -515,14 +515,14 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 
 	// parse target info assuming a single driveItem
 	if len(activity.Targets) != 1 {
-		actJson, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJson)
+		actJSON, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJSON)
 		return
 	}
-	fileId, fileName, _, isDir := parseTarget(activity.Targets[0])
-	if fileId == "" || fileName == "" {
-		actJson, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJson)
+	fileID, fileName, _, isDir := parseTarget(activity.Targets[0])
+	if fileID == "" || fileName == "" {
+		actJSON, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJSON)
 		return
 	}
 	if oldName == "" {
@@ -533,7 +533,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	}
 
 	// find the old path to clear that is already on existing file/dir tree
-	if dirPath, ok := f.dirCache.GetInv(fileId); ok {
+	if dirPath, ok := f.dirCache.GetInv(fileID); ok {
 		// this will cover (move,rename,delete) of existing dirs
 		oldPath = dirPath
 	} else {
@@ -565,7 +565,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		if len(newParents) == 0 {
 			// (create,restore) dirs
 			// (edit,rename,delete,restore) files
-			file, err := f.getFile(ctx, fileId, "parents")
+			file, err := f.getFile(ctx, fileID, "parents")
 			if err != nil {
 				fs.Infof(nil, "driveactivity: failed to get file info: %v", err)
 			} else {
@@ -586,7 +586,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		}
 	}
 	if newPath != "" && isDir {
-		f.dirCache.Put(newPath, fileId)
+		f.dirCache.Put(newPath, fileID)
 	}
 	return
 }

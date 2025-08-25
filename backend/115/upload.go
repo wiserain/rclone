@@ -212,12 +212,12 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 }
 
 func (f *Fs) postUpload(v map[string]any) (*api.CallbackData, error) {
-	callbackJson, err := json.Marshal(v)
+	callbackJSON, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
 	var info api.CallbackInfo
-	if err := json.Unmarshal(callbackJson, &info); err != nil {
+	if err := json.Unmarshal(callbackJSON, &info); err != nil {
 		return nil, err
 	}
 	return info.Data, info.Err()
