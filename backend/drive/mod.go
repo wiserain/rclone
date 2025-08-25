@@ -59,19 +59,21 @@ func parseRootID(s string) (rootID string, err error) {
 
 // ------------------------------------------------------------
 
-type baseSAobject struct {
+// ServiceAccount represents a Google service account file and an optional impersonated user.
+// It is used to authenticate and authorize API requests to Google Drive.
+type ServiceAccount struct {
 	ServiceAccountFile string
 	Impersonate        string
 }
 
 // ServiceAccountPool manages a pool of service accounts for Google Drive operations.
 type ServiceAccountPool struct {
-	creds   string          // on newServiceAccountPool
-	files   []string        // on newServiceAccountPool
-	users   []string        // on newServiceAccountPool
-	mutex   *sync.Mutex     // on newServiceAccountPool
-	maxLoad int             // on newServiceAccountPool
-	SAs     []*baseSAobject // on LoadSA()
+	creds   string            // on newServiceAccountPool
+	files   []string          // on newServiceAccountPool
+	users   []string          // on newServiceAccountPool
+	mutex   *sync.Mutex       // on newServiceAccountPool
+	maxLoad int               // on newServiceAccountPool
+	SAs     []*ServiceAccount // on LoadSA()
 	numLoad int
 }
 
@@ -131,11 +133,11 @@ func (p *ServiceAccountPool) LoadSA() error {
 	}
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	// make a list of baseSAobjects
-	var saList []*baseSAobject
+	// make a list of ServiceAccount
+	var saList []*ServiceAccount
 	for _, sa := range p.files {
 		for _, imp := range p.users {
-			saList = append(saList, &baseSAobject{
+			saList = append(saList, &ServiceAccount{
 				ServiceAccountFile: sa,
 				Impersonate:        imp,
 			})
@@ -143,7 +145,7 @@ func (p *ServiceAccountPool) LoadSA() error {
 	}
 	if len(saList) == 0 && p.creds != "" {
 		for _, imp := range p.users {
-			saList = append(saList, &baseSAobject{
+			saList = append(saList, &ServiceAccount{
 				ServiceAccountFile: "",
 				Impersonate:        imp,
 			})
@@ -159,18 +161,18 @@ func (p *ServiceAccountPool) LoadSA() error {
 	return nil
 }
 
-func (p *ServiceAccountPool) _getSA() (newSA []*baseSAobject, err error) {
+func (p *ServiceAccountPool) _getSA() (newSA []*ServiceAccount, err error) {
 	if len(p.SAs) == 0 {
 		return nil, fmt.Errorf("no available service account")
 	}
 	last := len(p.SAs) - 1
-	newSA = []*baseSAobject{p.SAs[last]}
+	newSA = []*ServiceAccount{p.SAs[last]}
 	p.SAs = p.SAs[:last]
 	return newSA, nil
 }
 
 // GetSA returns a service account from the pool.
-func (p *ServiceAccountPool) GetSA() (newSA []*baseSAobject, err error) {
+func (p *ServiceAccountPool) GetSA() ([]*ServiceAccount, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	return p._getSA()
