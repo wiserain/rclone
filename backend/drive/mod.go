@@ -59,18 +59,21 @@ func parseRootID(s string) (rootID string, err error) {
 
 // ------------------------------------------------------------
 
-type baseSAobject struct {
+// ServiceAccount represents a Google service account file and an optional impersonated user.
+// It is used to authenticate and authorize API requests to Google Drive.
+type ServiceAccount struct {
 	ServiceAccountFile string
 	Impersonate        string
 }
 
+// ServiceAccountPool manages a pool of service accounts for Google Drive operations.
 type ServiceAccountPool struct {
-	creds   string          // on newServiceAccountPool
-	files   []string        // on newServiceAccountPool
-	users   []string        // on newServiceAccountPool
-	mutex   *sync.Mutex     // on newServiceAccountPool
-	maxLoad int             // on newServiceAccountPool
-	SAs     []*baseSAobject // on LoadSA()
+	creds   string            // on newServiceAccountPool
+	files   []string          // on newServiceAccountPool
+	users   []string          // on newServiceAccountPool
+	mutex   *sync.Mutex       // on newServiceAccountPool
+	maxLoad int               // on newServiceAccountPool
+	SAs     []*ServiceAccount // on LoadSA()
 	numLoad int
 }
 
@@ -123,17 +126,18 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 	return p, nil
 }
 
+// LoadSA loads service accounts into the pool.
 func (p *ServiceAccountPool) LoadSA() error {
 	if p.numLoad >= p.maxLoad {
 		return fmt.Errorf("maximum service account load exceeded")
 	}
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	// make a list of baseSAobjects
-	var saList []*baseSAobject
+	// make a list of ServiceAccount
+	var saList []*ServiceAccount
 	for _, sa := range p.files {
 		for _, imp := range p.users {
-			saList = append(saList, &baseSAobject{
+			saList = append(saList, &ServiceAccount{
 				ServiceAccountFile: sa,
 				Impersonate:        imp,
 			})
@@ -141,7 +145,7 @@ func (p *ServiceAccountPool) LoadSA() error {
 	}
 	if len(saList) == 0 && p.creds != "" {
 		for _, imp := range p.users {
-			saList = append(saList, &baseSAobject{
+			saList = append(saList, &ServiceAccount{
 				ServiceAccountFile: "",
 				Impersonate:        imp,
 			})
@@ -157,17 +161,18 @@ func (p *ServiceAccountPool) LoadSA() error {
 	return nil
 }
 
-func (p *ServiceAccountPool) _getSA() (newSA []*baseSAobject, err error) {
+func (p *ServiceAccountPool) _getSA() (newSA []*ServiceAccount, err error) {
 	if len(p.SAs) == 0 {
 		return nil, fmt.Errorf("no available service account")
 	}
 	last := len(p.SAs) - 1
-	newSA = []*baseSAobject{p.SAs[last]}
+	newSA = []*ServiceAccount{p.SAs[last]}
 	p.SAs = p.SAs[:last]
 	return newSA, nil
 }
 
-func (p *ServiceAccountPool) GetSA() (newSA []*baseSAobject, err error) {
+// GetSA returns a service account from the pool.
+func (p *ServiceAccountPool) GetSA() ([]*ServiceAccount, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	return p._getSA()
@@ -231,12 +236,14 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 
 // ------------------------------------------------------------
 
+// GdsRequest represents a request to the GDS API.
 type GdsRequest struct {
 	UserID string `json:"userid"`
-	ApiKey string `json:"apikey"`
+	APIKey string `json:"apikey"`
 	Mode   string `json:"mode"`
 }
 
+// GdsClient is a client for interacting with the GDS API.
 type GdsClient struct {
 	client *rest.Client
 	req    *GdsRequest
@@ -253,13 +260,14 @@ func newGdsClient(ctx context.Context, opt *Options) (*GdsClient, bool, error) {
 		client: rest.NewClient(fshttp.NewClient(ctx)).SetRoot(opt.GdsEndpoint),
 		req: &GdsRequest{
 			UserID: opt.GdsUserid,
-			ApiKey: opt.GdsApikey,
+			APIKey: opt.GdsApikey,
 			Mode:   opt.GdsMode,
 		},
 	}
 	return gds, ok, nil
 }
 
+// GdsResponse represents a response from the GDS API.
 type GdsResponse struct {
 	Result string `json:"result"`
 	Data   struct {
@@ -268,6 +276,7 @@ type GdsResponse struct {
 	} `json:"data"`
 }
 
+// GdsRemote contains information about a remote from the GDS API.
 type GdsRemote struct {
 	SA           json.RawMessage `json:"sa"`
 	RootFolderID string          `json:"root_folder_id"`
@@ -439,8 +448,8 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			isDir = item.DriveItem.DriveFile != nil
 			return
 		}
-		itemJson, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJson))
+		itemJSON, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJSON))
 	case *driveactivity.Target:
 		if item.DriveItem != nil {
 			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
@@ -449,8 +458,8 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			mimeType = item.DriveItem.MimeType
 			return
 		}
-		itemJson, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJson))
+		itemJSON, _ := item.MarshalJSON()
+		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJSON))
 	}
 	return
 }
@@ -475,8 +484,8 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		for _, act := range activity.Actions {
 			if act.Detail.Move != nil {
 				for _, ref := range act.Detail.Move.AddedParents {
-					if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-						newParents = append(newParents, parentId)
+					if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+						newParents = append(newParents, parentID)
 					}
 				}
 			}
@@ -486,13 +495,13 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	case actDetail.Move != nil:
 		actionType = "MOVE"
 		for _, ref := range actDetail.Move.RemovedParents {
-			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-				oldParents = append(oldParents, parentId)
+			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+				oldParents = append(oldParents, parentID)
 			}
 		}
 		for _, ref := range actDetail.Move.AddedParents {
-			if parentId, _, _, _ := parseTarget(ref); parentId != "" {
-				newParents = append(newParents, parentId)
+			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+				newParents = append(newParents, parentID)
 			}
 		}
 	case actDetail.Rename != nil:
@@ -515,14 +524,14 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 
 	// parse target info assuming a single driveItem
 	if len(activity.Targets) != 1 {
-		actJson, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJson)
+		actJSON, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJSON)
 		return
 	}
-	fileId, fileName, _, isDir := parseTarget(activity.Targets[0])
-	if fileId == "" || fileName == "" {
-		actJson, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJson)
+	fileID, fileName, _, isDir := parseTarget(activity.Targets[0])
+	if fileID == "" || fileName == "" {
+		actJSON, _ := activity.MarshalJSON()
+		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJSON)
 		return
 	}
 	if oldName == "" {
@@ -533,7 +542,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	}
 
 	// find the old path to clear that is already on existing file/dir tree
-	if dirPath, ok := f.dirCache.GetInv(fileId); ok {
+	if dirPath, ok := f.dirCache.GetInv(fileID); ok {
 		// this will cover (move,rename,delete) of existing dirs
 		oldPath = dirPath
 	} else {
@@ -565,7 +574,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		if len(newParents) == 0 {
 			// (create,restore) dirs
 			// (edit,rename,delete,restore) files
-			file, err := f.getFile(ctx, fileId, "parents")
+			file, err := f.getFile(ctx, fileID, "parents")
 			if err != nil {
 				fs.Infof(nil, "driveactivity: failed to get file info: %v", err)
 			} else {
@@ -586,7 +595,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		}
 	}
 	if newPath != "" && isDir {
-		f.dirCache.Put(newPath, fileId)
+		f.dirCache.Put(newPath, fileID)
 	}
 	return
 }

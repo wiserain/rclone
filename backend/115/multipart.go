@@ -1,5 +1,6 @@
+package _115 // nolint:revive
+
 // Implements multipart uploading for 115. Mostly from lib/multipart
-package _115
 
 import (
 	"context"

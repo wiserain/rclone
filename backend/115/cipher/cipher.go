@@ -1,4 +1,5 @@
-// from "github.com/orzogc/fake115uploader/cipher"
+// Package cipher provides encryption and decryption utilities for the 115 backend.
+// Originally from "github.com/orzogc/fake115uploader/cipher"
 package cipher
 
 import (
