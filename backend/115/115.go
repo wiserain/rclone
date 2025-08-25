@@ -749,12 +749,12 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 
 	// setting appVer
 	re := regexp.MustCompile(`\d+\.\d+\.\d+(\.\d+)?$`)
-	if m := re.FindStringSubmatch(opt.UserAgent); m == nil {
+	match := re.FindString(opt.UserAgent)
+	if match == "" {
 		return nil, fmt.Errorf("%q does not contain a valid app version", opt.UserAgent)
-	} else {
-		f.appVer = m[0]
-		fs.Debugf(nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
 	}
+	f.appVer = match
+	fs.Debugf(nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
 
 	err = f.newClientWithPacer(ctx, opt)
 	if err != nil {

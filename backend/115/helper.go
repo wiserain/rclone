@@ -300,14 +300,13 @@ func guessFileName(oldName, newName string) string {
 	newExt := filepath.Ext(newName)
 
 	if oldExt != "" {
-		baseNewName := strings.TrimSuffix(newName, newExt)
-		return baseNewName + oldExt
-	} else {
-		if newExt != "" {
-			return strings.TrimSuffix(oldName, oldExt) + "."
-		}
-		return newName
+		newBaseName := strings.TrimSuffix(newName, newExt)
+		return newBaseName + oldExt
 	}
+	if newExt != "" {
+		return oldName + "."
+	}
+	return newName
 }
 
 func (f *Fs) deleteFiles(ctx context.Context, fids []string) (err error) {
