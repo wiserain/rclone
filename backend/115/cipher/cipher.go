@@ -147,7 +147,7 @@ func (c *RsaCipher) Decrypt(cipherText []byte) ([]byte, error) {
 	text = text[:n]
 	blockCount := len(text) / rsaBlockSize
 	plainText := make([]byte, 0, blockCount*rsaBlockSize)
-	for i := 0; i < blockCount; i++ {
+	for i := range blockCount {
 		n := big.NewInt(0).SetBytes(text[i*rsaBlockSize : (i+1)*rsaBlockSize])
 		m := big.NewInt(0).Exp(n, big.NewInt(int64(c.key.publicKey.E)), c.key.publicKey.N)
 		b := m.Bytes()
@@ -175,7 +175,7 @@ func genKey(randKey []byte, keyLen int) []byte {
 	length := keyLen * (keyLen - 1)
 	index := 0
 	if len(randKey) != 0 {
-		for i := 0; i < keyLen; i++ {
+		for i := range keyLen {
 			x := randKey[i] + gKts[index]
 			xorKey = append(xorKey, gKts[length]^x)
 			length -= keyLen
@@ -191,7 +191,7 @@ func xor(src, key []byte) []byte {
 	secret := make([]byte, 0, len(src))
 	pad := len(src) % 4
 	if pad > 0 {
-		for i := 0; i < pad; i++ {
+		for i := range pad {
 			secret = append(secret, src[i]^key[i])
 		}
 		src = src[pad:]
@@ -329,28 +329,28 @@ func (c *EcdhCipher) EncodeToken(timestamp int64) (string, error) {
 	time := make([]byte, 4)
 	binary.BigEndian.PutUint32(time, uint32(timestamp))
 
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		tmp = append(tmp, c.pubKey[i]^r1)
 	}
 	tmp = append(tmp, []byte{r1, 0x73 ^ r1}...)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tmp = append(tmp, r1)
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		tmp = append(tmp, r1^time[3-i])
 	}
 	for i := 15; i < len(c.pubKey); i++ {
 		tmp = append(tmp, c.pubKey[i]^r2)
 	}
 	tmp = append(tmp, []byte{r2, 0x01 ^ r2}...)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tmp = append(tmp, r2)
 	}
 
 	crc := make([]byte, 4)
 	binary.BigEndian.PutUint32(crc, crc32.ChecksumIEEE(append([]byte(crcSalt), tmp...)))
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		tmp = append(tmp, crc[3-i])
 	}
 

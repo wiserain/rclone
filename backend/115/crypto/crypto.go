@@ -95,7 +95,7 @@ func Decode(input string, key Key) (output []byte, err error) {
 
 func xorDeriveKey(seed []byte, size int) []byte {
 	key := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		key[i] = (seed[i] + xorKeySeed[size*i]) & 0xff
 		key[i] ^= xorKeySeed[size*(size-i-1)]
 	}
@@ -106,7 +106,7 @@ func xorTransform(data []byte, key []byte) {
 	dataSize, keySize := len(data), len(key)
 	mod := dataSize % 4
 	if mod > 0 {
-		for i := 0; i < mod; i++ {
+		for i := range mod {
 			data[i] ^= key[i%keySize]
 		}
 	}
