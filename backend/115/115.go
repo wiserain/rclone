@@ -1,4 +1,5 @@
-package _115
+// Package _115 interfaces with the 115 cloud disk
+package _115 // nolint:revive
 
 // ------------------------------------------------------------
 // NOTE

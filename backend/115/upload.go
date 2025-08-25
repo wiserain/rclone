@@ -1,4 +1,4 @@
-package _115
+package _115 // nolint:revive
 
 import (
 	"bytes"

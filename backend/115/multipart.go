@@ -1,4 +1,4 @@
-package _115
+package _115 // nolint:revive
 
 // Implements multipart uploading for 115. Mostly from lib/multipart
 
