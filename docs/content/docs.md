@@ -103,7 +103,7 @@ Its syntax is like this
 rclone subcommand [options] <parameters> <parameters...>
 ```
 
-A `subcommand` is a the rclone operation required, (e.g. `sync`,
+A `subcommand` is an rclone operation required (e.g. `sync`,
 `copy`, `ls`).
 
 An `option` is a single letter flag (e.g. `-v`) or a group of single
@@ -878,7 +878,9 @@ which would have been updated or deleted will be stored in
 
 If running rclone from a script you might want to use today's date as
 the directory name passed to `--backup-dir` to store the old files, or
-you might want to pass `--suffix` with today's date.
+you might want to pass `--suffix` with today's date. This can be done
+with `--suffix $(date +%F)` in bash, and
+`--suffix $(Get-Date -Format 'yyyy-MM-dd')` in PowerShell.
 
 See `--compare-dest` and `--copy-dest`.
 
@@ -2097,25 +2099,25 @@ some context for the `Metadata` which may be important.
 
 ```json
 {
-    "SrcFs": "gdrive:",
-    "SrcFsType": "drive",
-    "DstFs": "newdrive:user",
-    "DstFsType": "onedrive",
-    "Remote": "test.txt",
-    "Size": 6,
-    "MimeType": "text/plain; charset=utf-8",
-    "ModTime": "2022-10-11T17:53:10.286745272+01:00",
-    "IsDir": false,
-    "ID": "xyz",
-    "Metadata": {
-        "btime": "2022-10-11T16:53:11Z",
-        "content-type": "text/plain; charset=utf-8",
-        "mtime": "2022-10-11T17:53:10.286745272+01:00",
-        "owner": "user1@domain1.com",
-        "permissions": "...",
-        "description": "my nice file",
-        "starred": "false"
-    }
+  "SrcFs": "gdrive:",
+  "SrcFsType": "drive",
+  "DstFs": "newdrive:user",
+  "DstFsType": "onedrive",
+  "Remote": "test.txt",
+  "Size": 6,
+  "MimeType": "text/plain; charset=utf-8",
+  "ModTime": "2022-10-11T17:53:10.286745272+01:00",
+  "IsDir": false,
+  "ID": "xyz",
+  "Metadata": {
+    "btime": "2022-10-11T16:53:11Z",
+    "content-type": "text/plain; charset=utf-8",
+    "mtime": "2022-10-11T17:53:10.286745272+01:00",
+    "owner": "user1@domain1.com",
+    "permissions": "...",
+    "description": "my nice file",
+    "starred": "false"
+  }
 }
 ```
 
@@ -2127,15 +2129,15 @@ the description:
 
 ```json
 {
-    "Metadata": {
-        "btime": "2022-10-11T16:53:11Z",
-        "content-type": "text/plain; charset=utf-8",
-        "mtime": "2022-10-11T17:53:10.286745272+01:00",
-        "owner": "user1@domain2.com",
-        "permissions": "...",
-        "description": "my nice file [migrated from domain1]",
-        "starred": "false"
-    }
+  "Metadata": {
+    "btime": "2022-10-11T16:53:11Z",
+    "content-type": "text/plain; charset=utf-8",
+    "mtime": "2022-10-11T17:53:10.286745272+01:00",
+    "owner": "user1@domain2.com",
+    "permissions": "...",
+    "description": "my nice file [migrated from domain1]",
+    "starred": "false"
+  }
 }
 ```
 
