@@ -12,8 +12,8 @@ description: "Rclone Changelog"
 
 - Bug Fixes
   - build
-      - update Go to 1.25.3
-      - Update Docker image Alpine version to fix CVE-2025-9230
+    - update Go to 1.25.3
+    - Update Docker image Alpine version to fix CVE-2025-9230
   - bisync: Fix race when CaptureOutput is used concurrently (Nick Craig-Wood)
   - doc fixes (albertony, dougal, iTrooz, Matt LaPaglia, Nick Craig-Wood)
   - index: Add missing providers (dougal)
