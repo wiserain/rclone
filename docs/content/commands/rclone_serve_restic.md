@@ -33,7 +33,7 @@ following instructions.
 
 Now start the rclone restic server
 
-```sh
+```console
 rclone serve restic -v remote:backup
 ```
 
@@ -63,7 +63,7 @@ the URL for the REST server.
 
 For example:
 
-```sh
+```console
 $ export RESTIC_REPOSITORY=rest:http://localhost:8080/
 $ export RESTIC_PASSWORD=yourpassword
 $ restic init
@@ -87,7 +87,7 @@ Note that you can use the endpoint to host multiple repositories.  Do
 this by adding a directory name or path after the URL.  Note that
 these **must** end with /.  Eg
 
-```sh
+```console
 $ export RESTIC_REPOSITORY=rest:http://localhost:8080/user1repo/
 # backup user1 stuff
 $ export RESTIC_REPOSITORY=rest:http://localhost:8080/user2repo/
@@ -130,6 +130,8 @@ inserts leading and trailing "/" on `--baseurl`, so `--baseurl "rclone"`,
 `--baseurl "/rclone"` and `--baseurl "/rclone/"` are all treated
 identically.
 
+`--disable-zip` may be set to disable the zipping download option.
+
 ### TLS (SSL)
 
 By default this will serve over http.  If you want you can serve over
@@ -159,7 +161,7 @@ It can be configured with .socket and .service unit files as described in
 
 Socket activation can be tested ad-hoc with the `systemd-socket-activate`command
 
-```sh
+```console
 systemd-socket-activate -l 8000 -- rclone serve
 ```
 
@@ -187,7 +189,7 @@ authentication.  Bcrypt is recommended.
 
 To create an htpasswd file:
 
-```sh
+```console
 touch htpasswd
 htpasswd -B htpasswd user
 htpasswd -B htpasswd anotherUser

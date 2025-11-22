@@ -66,13 +66,13 @@ Create a new DWORD BasicAuthLevel with value 2.
 
 You can serve the webdav on a unix socket like this:
 
-```sh
+```console
 rclone serve webdav --addr unix:///tmp/my.socket remote:path
 ```
 
 and connect to it like this using rclone and the webdav backend:
 
-```sh
+```console
 rclone --webdav-unix-socket /tmp/my.socket --webdav-url http://localhost lsf :webdav:
 ```
 
@@ -110,6 +110,8 @@ inserts leading and trailing "/" on `--baseurl`, so `--baseurl "rclone"`,
 `--baseurl "/rclone"` and `--baseurl "/rclone/"` are all treated
 identically.
 
+`--disable-zip` may be set to disable the zipping download option.
+
 ### TLS (SSL)
 
 By default this will serve over http.  If you want you can serve over
@@ -139,7 +141,7 @@ It can be configured with .socket and .service unit files as described in
 
 Socket activation can be tested ad-hoc with the `systemd-socket-activate`command
 
-```sh
+```console
 systemd-socket-activate -l 8000 -- rclone serve
 ```
 
@@ -151,24 +153,22 @@ This will socket-activate rclone on the first connection to port 8000 over TCP.
 and WebDAV serve functions.  The server exports the following markup
 to be used within the template to server pages:
 
-| Parameter   | Description |
-| :---------- | :---------- |
-| .Name       | The full path of a file/directory. |
-| .Title      | Directory listing of .Name |
-| .Sort       | The current sort used.  This is changeable via ?sort= parameter |
-|             | Sort Options: namedirfirst,name,size,time (default namedirfirst) |
-| .Order      | The current ordering used.  This is changeable via ?order= parameter |
-|             | Order Options: asc,desc (default asc) |
-| .Query      | Currently unused. |
-| .Breadcrumb | Allows for creating a relative navigation |
-|-- .Link     | The relative to the root link of the Text. |
-|-- .Text     | The Name of the directory. |
-| .Entries    | Information about a specific file/directory. |
-|-- .URL      | The 'url' of an entry.  |
-|-- .Leaf     | Currently same as 'URL' but intended to be 'just' the name. |
-|-- .IsDir    | Boolean for if an entry is a directory or not. |
-|-- .Size     | Size in Bytes of the entry. |
-|-- .ModTime  | The UTC timestamp of an entry. |
+| Parameter   | Subparameter | Description |
+| :---------- | :----------- | :---------- |
+| .Name       |              | The full path of a file/directory. |
+| .Title      |              | Directory listing of '.Name'. |
+| .Sort       |              | The current sort used. This is changeable via '?sort=' parameter. Possible values: namedirfirst, name, size, time (default namedirfirst). |
+| .Order      |              | The current ordering used. This is changeable via '?order=' parameter. Possible values: asc, desc (default asc). |
+| .Query      |              | Currently unused. |
+| .Breadcrumb |              | Allows for creating a relative navigation. |
+|             | .Link        | The link of the Text relative to the root. |
+|             | .Text        | The Name of the directory. |
+| .Entries    |              | Information about a specific file/directory. |
+|             | .URL         | The url of an entry. |
+|             | .Leaf        | Currently same as '.URL' but intended to be just the name. |
+|             | .IsDir       | Boolean for if an entry is a directory or not. |
+|             | .Size        | Size in bytes of the entry. |
+|             | .ModTime     | The UTC timestamp of an entry. |
 
 The server also makes the following functions available so that they can be used
 within the template. These functions help extend the options for dynamic
@@ -203,7 +203,7 @@ authentication.  Bcrypt is recommended.
 
 To create an htpasswd file:
 
-```sh
+```console
 touch htpasswd
 htpasswd -B htpasswd user
 htpasswd -B htpasswd anotherUser
@@ -251,20 +251,20 @@ You can send a `SIGHUP` signal to rclone for it to flush all
 directory caches, regardless of how old they are.  Assuming only one
 rclone instance is running, you can reset the cache like this:
 
-```sh
+```console
 kill -SIGHUP $(pidof rclone)
 ```
 
 If you configure rclone with a [remote control](/rc) then you can use
 rclone rc to flush the whole directory cache:
 
-```sh
+```console
 rclone rc vfs/forget
 ```
 
 Or individual files or directories:
 
-```sh
+```console
 rclone rc vfs/forget file=path/to/file dir=path/to/dir
 ```
 
@@ -679,7 +679,7 @@ Note that some backends won't create metadata unless you pass in the
 For example, using `rclone mount` with `--metadata --vfs-metadata-extension .metadata`
 we get
 
-```sh
+```console
 $ ls -l /mnt/
 total 1048577
 -rw-rw-r-- 1 user user 1073741824 Mar  3 16:03 1G

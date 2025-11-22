@@ -45,6 +45,7 @@ See the [global flags page](/flags/) for global options not listed here.
 * [rclone config reconnect](/commands/rclone_config_reconnect/)	 - Re-authenticates user with remote.
 * [rclone config redacted](/commands/rclone_config_redacted/)	 - Print redacted (decrypted) config file, or the redacted config for a single remote.
 * [rclone config show](/commands/rclone_config_show/)	 - Print (decrypted) config file, or the config for a single remote.
+* [rclone config string](/commands/rclone_config_string/)	 - Print connection string for a single remote.
 * [rclone config touch](/commands/rclone_config_touch/)	 - Ensure configuration file exists.
 * [rclone config update](/commands/rclone_config_update/)	 - Update options in an existing remote.
 * [rclone config userinfo](/commands/rclone_config_userinfo/)	 - Prints info about logged in user of remote.

@@ -16,14 +16,14 @@ Generates a fish autocompletion script for rclone.
 This writes to /etc/fish/completions/rclone.fish by default so will
 probably need to be run with sudo or as root, e.g.
 
-```sh
+```console
 sudo rclone completion fish
 ```
 
 Logout and login again to use the autocompletion scripts, or source
 them directly
 
-```sh
+```console
 . /etc/fish/completions/rclone.fish
 ```
 

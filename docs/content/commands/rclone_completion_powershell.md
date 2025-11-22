@@ -15,7 +15,7 @@ Generate the autocompletion script for powershell.
 
 To load completions in your current shell session:
 
-```sh
+```console
 rclone completion powershell | Out-String | Invoke-Expression
 ```
 

@@ -46,14 +46,14 @@ cause problems for S3 clients which rely on the Etag being the MD5.
 For a simple set up, to serve `remote:path` over s3, run the server
 like this:
 
-```sh
+```console
 rclone serve s3 --auth-key ACCESS_KEY_ID,SECRET_ACCESS_KEY remote:path
 ```
 
 For example, to use a simple folder in the filesystem, run the server
 with a command like this:
 
-```sh
+```console
 rclone serve s3 --auth-key ACCESS_KEY_ID,SECRET_ACCESS_KEY local:/path/to/folder
 ```
 
@@ -169,7 +169,7 @@ authentication.  Bcrypt is recommended.
 
 To create an htpasswd file:
 
-```sh
+```console
 touch htpasswd
 htpasswd -B htpasswd user
 htpasswd -B htpasswd anotherUser
@@ -212,6 +212,8 @@ inserts leading and trailing "/" on `--baseurl`, so `--baseurl "rclone"`,
 `--baseurl "/rclone"` and `--baseurl "/rclone/"` are all treated
 identically.
 
+`--disable-zip` may be set to disable the zipping download option.
+
 ### TLS (SSL)
 
 By default this will serve over http.  If you want you can serve over
@@ -241,7 +243,7 @@ It can be configured with .socket and .service unit files as described in
 
 Socket activation can be tested ad-hoc with the `systemd-socket-activate`command
 
-```sh
+```console
 systemd-socket-activate -l 8000 -- rclone serve
 ```
 
@@ -283,20 +285,20 @@ You can send a `SIGHUP` signal to rclone for it to flush all
 directory caches, regardless of how old they are.  Assuming only one
 rclone instance is running, you can reset the cache like this:
 
-```sh
+```console
 kill -SIGHUP $(pidof rclone)
 ```
 
 If you configure rclone with a [remote control](/rc) then you can use
 rclone rc to flush the whole directory cache:
 
-```sh
+```console
 rclone rc vfs/forget
 ```
 
 Or individual files or directories:
 
-```sh
+```console
 rclone rc vfs/forget file=path/to/file dir=path/to/dir
 ```
 
@@ -711,7 +713,7 @@ Note that some backends won't create metadata unless you pass in the
 For example, using `rclone mount` with `--metadata --vfs-metadata-extension .metadata`
 we get
 
-```sh
+```console
 $ ls -l /mnt/
 total 1048577
 -rw-rw-r-- 1 user user 1073741824 Mar  3 16:03 1G

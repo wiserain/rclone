@@ -12,7 +12,7 @@ Generate public link to file/folder.
 
 Create, retrieve or remove a public link to the given file or folder.
 
-```sh
+```console
 rclone link remote:path/to/file
 rclone link remote:path/to/folder/
 rclone link --unlink remote:path/to/folder/

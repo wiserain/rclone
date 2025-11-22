@@ -17,7 +17,7 @@ If you supply the `--reverse` flag, it will return encrypted file names.
 
 use it like this
 
-```sh
+```console
 rclone cryptdecode encryptedremote: encryptedfilename1 encryptedfilename2
 rclone cryptdecode --reverse encryptedremote: filename1 filename2
 ```

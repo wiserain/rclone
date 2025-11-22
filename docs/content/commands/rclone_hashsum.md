@@ -29,23 +29,23 @@ as a relative path).
 
 Run without a hash to see the list of all supported hashes, e.g.
 
-```sh
+```console
 $ rclone hashsum
 Supported hashes are:
-  * md5
-  * sha1
-  * whirlpool
-  * crc32
-  * sha256
-  * sha512
-  * blake3
-  * xxh3
-  * xxh128
+- md5
+- sha1
+- whirlpool
+- crc32
+- sha256
+- sha512
+- blake3
+- xxh3
+- xxh128
 ```
 
 Then
 
-```sh
+```console
 rclone hashsum MD5 remote:path
 ```
 

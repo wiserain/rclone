@@ -13,11 +13,19 @@ Serve a remote over a protocol.
 Serve a remote over a given protocol. Requires the use of a
 subcommand to specify the protocol, e.g.
 
-```sh
+```console
 rclone serve http remote:
 ```
 
+When the "--metadata" flag is enabled, the following metadata fields will be provided as headers:
+- "content-disposition"
+- "cache-control" 
+- "content-language"
+- "content-encoding"
+Note: The availability of these fields depends on whether the remote supports metadata.
+
 Each subcommand has its own options which you can see in their help.
+
 
 ```
 rclone serve <protocol> [opts] <remote> [flags]

@@ -1720,77 +1720,84 @@ func (f *Fs) decompressDir(ctx context.Context, filename, id, password string, s
 
 var commandHelp = []fs.CommandHelp{{
 	Name:  "addurl",
-	Short: "Add offline download task for url",
+	Short: "Add offline download task for url.",
 	Long: `This command adds offline download task for url.
 
-Usage:
+Usage example:
 
-    rclone backend addurl pikpak:dirpath url
+` + "```console" + `
+rclone backend addurl pikpak:dirpath url
+` + "```" + `
 
-Downloads will be stored in 'dirpath'. If 'dirpath' is invalid, 
-download will fallback to default 'My Pack' folder.
-`,
+Downloads will be stored in 'dirpath'. If 'dirpath' is invalid,
+download will fallback to default 'My Pack' folder.`,
 }, { // mod
 	Name:  "checkurl",
 	Short: "Check the resource of url",
 	Long: `This command is used to check the status of resources on the server.
 
-Usage:
+Usage example:
 
-    rclone backend checkurl pikpak:dirpath URL1 {URL2} {URL3}
-	rclone backend checkurl pikpak:dirpath URL1 -o add=all
+` + "```console" + `
+rclone backend checkurl pikpak:dirpath URL1 {URL2} {URL3}
+rclone backend checkurl pikpak:dirpath URL1 -o add=all
+` + "```" + `
 
 At least one URL must be specified. If you set '-o add=all', it will add an
 offline download task for all URLs depending on their cache status. Possible 
-choices for this option includes 'all', 'cached-only', and 'not-cached'.
-`,
+choices for this option includes 'all', 'cached-only', and 'not-cached'.`,
 }, {
 	Name:  "decompress",
-	Short: "Request decompress of a file/files in a folder",
+	Short: "Request decompress of a file/files in a folder.",
 	Long: `This command requests decompress of file/files in a folder.
 
-Usage:
+Usage examples:
 
-    rclone backend decompress pikpak:dirpath {filename} -o password=password
-    rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
+` + "```console" + `
+rclone backend decompress pikpak:dirpath {filename} -o password=password
+rclone backend decompress pikpak:dirpath {filename} -o delete-src-file
+` + "```" + `
 
-An optional argument 'filename' can be specified for a file located in 
-'pikpak:dirpath'. You may want to pass '-o password=password' for a 
-password-protected files. Also, pass '-o delete-src-file' to delete 
+An optional argument 'filename' can be specified for a file located in
+'pikpak:dirpath'. You may want to pass '-o password=password' for a
+password-protected files. Also, pass '-o delete-src-file' to delete
 source files after decompression finished.
 
 Result:
 
-    {
-        "Decompressed": 17,
-        "SourceDeleted": 0,
-        "Errors": 0
-    }
-`,
+` + "```json" + `
+{
+    "Decompressed": 17,
+    "SourceDeleted": 0,
+    "Errors": 0
+}
+` + "```",
 }, { // mod
 	Name:  "getid",
 	Short: "Get an ID of a file or directory",
 	Long: `This command is to obtain an ID of a file or directory.
 
-Usage:
+Usage examples:
 
-    rclone backend getid pikpak:path {subpath}
+` + "```console" + `
+rclone backend getid pikpak:path {subpath}
+` + "```" + `
 
 The 'path' should point to a directory not a file. Use an extra argument
-'subpath' to get an ID of a file located in 'pikpak:path'.
-`,
+'subpath' to get an ID of a file located in 'pikpak:path'.`,
 }, { // mod
 	Name:  "redeem",
 	Short: "Request redeem for the current account",
 	Long: `This command requests redeem for the current account.
 
-Usage:
+Usage examples:
 
-    rclone backend redeem pikpak: code
+` + "```console" + `
+rclone backend redeem pikpak: code
+` + "```" + `
 
 The 'code' is an activation code for the redeem reqeust. The result 
-will be returned in json-formatted string.
-`,
+will be returned in json-formatted string.`,
 }}
 
 // Command the backend to run a named command

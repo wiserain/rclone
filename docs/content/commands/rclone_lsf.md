@@ -17,7 +17,7 @@ one per line.  The directories will have a / suffix.
 
 E.g.
 
-```sh
+```console
 $ rclone lsf swift:bucket
 bevajer5jef
 canole
@@ -48,7 +48,7 @@ So if you wanted the path, size and modification time, you would use
 
 E.g.
 
-```sh
+```console
 $ rclone lsf  --format "tsp" swift:bucket
 2016-06-25 18:55:41;60295;bevajer5jef
 2016-06-25 18:55:43;90613;canole
@@ -66,13 +66,13 @@ type.
 
 For example, to emulate the md5sum command you can use
 
-```sh
+```console
 rclone lsf -R --hash MD5 --format hp --separator "  " --files-only .
 ```
 
 E.g.
 
-```sh
+```console
 $ rclone lsf -R --hash MD5 --format hp --separator "  " --files-only swift:bucket
 7908e352297f0f530b84a756f188baa3  bevajer5jef
 cd65ac234e6fea5925974a51cdd865cc  canole
@@ -89,7 +89,7 @@ putting it last is a good strategy.
 
 E.g.
 
-```sh
+```console
 $ rclone lsf  --separator "," --format "tshp" swift:bucket
 2016-06-25 18:55:41,60295,7908e352297f0f530b84a756f188baa3,bevajer5jef
 2016-06-25 18:55:43,90613,cd65ac234e6fea5925974a51cdd865cc,canole
@@ -103,7 +103,7 @@ if they contain,
 
 E.g.
 
-```sh
+```console
 $ rclone lsf --csv --files-only --format ps remote:path
 test.log,22355
 test.sh,449
@@ -116,7 +116,7 @@ to pass to an rclone copy with the `--files-from-raw` flag.
 For example, to find all the files modified within one day and copy
 those only (without traversing the whole directory structure):
 
-```sh
+```console
 rclone lsf --absolute --files-only --max-age 1d /path/to/local > new_files
 rclone copy --files-from-raw new_files /path/to/local remote:path
 ```
@@ -125,13 +125,15 @@ The default time format is `'2006-01-02 15:04:05'`.
 [Other formats](https://pkg.go.dev/time#pkg-constants) can be specified with
 the `--time-format` flag. Examples:
 
-```sh
+```console
 rclone lsf remote:path --format pt --time-format 'Jan 2, 2006 at 3:04pm (MST)'
 rclone lsf remote:path --format pt --time-format '2006-01-02 15:04:05.000000000'
 rclone lsf remote:path --format pt --time-format '2006-01-02T15:04:05.999999999Z07:00'
 rclone lsf remote:path --format pt --time-format RFC3339
 rclone lsf remote:path --format pt --time-format DateOnly
 rclone lsf remote:path --format pt --time-format max
+rclone lsf remote:path --format pt --time-format unix
+rclone lsf remote:path --format pt --time-format unixnano
 ```
 
 `--time-format max` will automatically truncate `2006-01-02 15:04:05.000000000`
@@ -177,7 +179,7 @@ rclone lsf remote:path [flags]
   -h, --help                 help for lsf
   -R, --recursive            Recurse into the listing
   -s, --separator string     Separator for the items in the format (default ";")
-  -t, --time-format string   Specify a custom time format, or 'max' for max precision supported by remote (default: 2006-01-02 15:04:05)
+  -t, --time-format string   Specify a custom time format - see docs for details (default: 2006-01-02 15:04:05)
 ```
 
 Options shared with other commands are described next.

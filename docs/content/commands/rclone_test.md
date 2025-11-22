@@ -14,7 +14,7 @@ Rclone test is used to run test commands.
 
 Select which test command you want with the subcommand, eg
 
-```sh
+```console
 rclone test memory remote:
 ```
 
@@ -43,6 +43,7 @@ See the [global flags page](/flags/) for global options not listed here.
 * [rclone test makefile](/commands/rclone_test_makefile/)	 - Make files with random contents of the size given
 * [rclone test makefiles](/commands/rclone_test_makefiles/)	 - Make a random file hierarchy in a directory
 * [rclone test memory](/commands/rclone_test_memory/)	 - Load all the objects at remote:path into memory and report memory stats.
+* [rclone test speed](/commands/rclone_test_speed/)	 - Run a speed test to the remote
 
 
 <!-- markdownlint-restore -->
