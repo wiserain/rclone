@@ -284,15 +284,16 @@ func calcBlockSHA1(ctx context.Context, in io.Reader, src fs.ObjectInfo, rangeSp
 	}
 
 	var reader io.Reader
-	if ra, ok := in.(io.ReaderAt); ok {
-		reader = io.NewSectionReader(ra, start, end-start+1)
-	} else if srcObj := unWrapObjectInfo(src); srcObj != nil {
+	// Prioritize using the source object with range option, as it's more reliable
+	if srcObj := unWrapObjectInfo(src); srcObj != nil {
 		rc, err := srcObj.Open(ctx, &fs.RangeOption{Start: start, End: end})
 		if err != nil {
 			return "", fmt.Errorf("failed to open source: %w", err)
 		}
 		defer fs.CheckClose(rc, &err)
 		reader = rc
+	} else if ra, ok := in.(io.ReaderAt); ok {
+		reader = io.NewSectionReader(ra, start, end-start+1)
 	} else {
 		return "", fmt.Errorf("failed to get reader from source %s", src)
 	}
