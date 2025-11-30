@@ -255,6 +255,11 @@ This enables separate client instances dedicated to downloading files`,
 			
 Use this flag with the "--115-download-cookie" option to bypass proxy settings for downloads.`,
 		}, {
+			Name:     "no_history",
+			Default:  false,
+			Advanced: true,
+			Help:     `Do not record uploaded files in the recent actions history.`,
+		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
 			Advanced: true,
@@ -301,6 +306,7 @@ type Options struct {
 	CheckUpload         bool                 `config:"check_upload"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
+	NoHistory           bool                 `config:"no_history"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
 }
 
