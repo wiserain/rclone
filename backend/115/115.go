@@ -241,6 +241,11 @@ this may help to speed up the transfers.`,
 			Default:  false,
 			Advanced: true,
 		}, {
+			Name:     "upload_history",
+			Default:  false,
+			Advanced: true,
+			Help:     `If set, uploaded files will appear in the recent upload history in the web UI.`,
+		}, {
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
@@ -299,6 +304,7 @@ type Options struct {
 	Internal            bool                 `config:"internal"`
 	DualStack           bool                 `config:"dual_stack"`
 	CheckUpload         bool                 `config:"check_upload"`
+	UploadHistory       bool                 `config:"upload_history"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
