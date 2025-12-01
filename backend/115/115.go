@@ -256,7 +256,7 @@ This enables separate client instances dedicated to downloading files`,
 Use this flag with the "--115-download-cookie" option to bypass proxy settings for downloads.`,
 		}, {
 			Name:     "no_history",
-			Default:  false,
+			Default:  true,
 			Advanced: true,
 			Help:     `Do not record uploaded files in the recent actions history.`,
 		}, {

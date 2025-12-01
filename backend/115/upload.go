@@ -173,9 +173,7 @@ func (f *Fs) initUpload(ctx context.Context, size int64, name, dirID, sha1sum, s
 		form.Set("sign_key", signKey)
 		form.Set("sign_val", signVal)
 	}
-	if f.opt.NoHistory {
-		form.Set("topupload", "2")
-	}
+	form.Set("topupload", strconv.FormatBool(!f.opt.NoHistory))
 	if encrypted, err = ecdhCipher.Encrypt([]byte(form.Encode())); err != nil {
 		return
 	}
