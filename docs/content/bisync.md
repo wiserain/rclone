@@ -1049,17 +1049,11 @@ The following backends have known issues that need more investigation:
 <!--- start list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 - `TestDropbox` (`dropbox`)
   - [`TestBisyncRemoteRemote/normalization`](https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
-- `TestGoFile` (`gofile`)
-  - [`TestBisyncRemoteLocal/all_changed`](https://pub.rclone.org/integration-tests/current/gofile-cmd.bisync-TestGoFile-1.txt)
-  - [`TestBisyncRemoteLocal/backupdir`](https://pub.rclone.org/integration-tests/current/gofile-cmd.bisync-TestGoFile-1.txt)
-  - [`TestBisyncRemoteLocal/basic`](https://pub.rclone.org/integration-tests/current/gofile-cmd.bisync-TestGoFile-1.txt)
-  - [`TestBisyncRemoteLocal/changes`](https://pub.rclone.org/integration-tests/current/gofile-cmd.bisync-TestGoFile-1.txt)
-  - [`TestBisyncRemoteLocal/check_access`](https://pub.rclone.org/integration-tests/current/gofile-cmd.bisync-TestGoFile-1.txt)
-  - [78 more](https://pub.rclone.org/integration-tests/current/)
-- `TestPcloud` (`pcloud`)
-  - [`TestBisyncRemoteRemote/check_access`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-  - [`TestBisyncRemoteRemote/check_access_filters`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-- Updated: 2025-12-10-010012
+- `TestSeafile` (`seafile`)
+  - [`TestBisyncLocalRemote/volatile`](https://pub.rclone.org/integration-tests/current/seafile-cmd.bisync-TestSeafile-1.txt)
+- `TestSeafileV6` (`seafile`)
+  - [`TestBisyncLocalRemote/volatile`](https://pub.rclone.org/integration-tests/current/seafile-cmd.bisync-TestSeafileV6-1.txt)
+- Updated: 2026-01-30-010015
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -1068,6 +1062,7 @@ that are deemed unfixable for the time being:
 <!--- start list_ignores - DO NOT EDIT THIS SECTION - use make commanddocs --->
 - `TestArchive` (`archive`)
 - `TestCache` (`cache`)
+- `TestDrime` (`drime`)
 - `TestFileLu` (`filelu`)
 - `TestFilesCom` (`filescom`)
 - `TestImageKit` (`imagekit`)
