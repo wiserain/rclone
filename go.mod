@@ -19,10 +19,10 @@ require (
 	github.com/aalpar/deheap v0.0.0-20210914013432-0cc84d79dec3
 	github.com/abbot/go-http-auth v0.4.0
 	github.com/aead/ecdh v0.2.0
-	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.1.3
+	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.4.0
 	github.com/anacrolix/dms v1.7.2
 	github.com/anacrolix/log v0.17.0
-	github.com/andreburgaud/crypt2go v1.4.2
+	github.com/andreburgaud/crypt2go v1.8.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/aws/aws-sdk-go-v2 v1.39.6
 	github.com/aws/aws-sdk-go-v2/config v1.31.17
@@ -67,7 +67,7 @@ require (
 	github.com/oracle/oci-go-sdk/v65 v65.104.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/peterh/liner v1.2.2
-	github.com/pierrec/lz4/v4 v4.1.22
+	github.com/pierrec/lz4/v4 v4.1.25
 	github.com/pkg/sftp v1.13.10
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/prometheus/client_golang v1.23.2
