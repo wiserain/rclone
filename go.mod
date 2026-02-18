@@ -11,7 +11,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azfile v1.5.3
 	github.com/Azure/go-ntlmssp v0.0.2-0.20251110135918-10b7b7e7cd26
-	github.com/FilenCloudDienste/filen-sdk-go v0.0.35
+	github.com/FilenCloudDienste/filen-sdk-go v0.0.37
 	github.com/Files-com/files-sdk-go/v3 v3.2.264
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/a1ex3/zstd-seekable-format-go/pkg v0.10.0
@@ -42,13 +42,13 @@ require (
 	github.com/dropbox/dropbox-sdk-go-unofficial/v6 v6.0.5
 	github.com/gabriel-vasile/mimetype v1.4.11
 	github.com/gdamore/tcell/v2 v2.9.0
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-darwin/apfs v0.0.0-20211011131704-f84b94dbf348
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
-	github.com/internxt/rclone-adapter v0.0.0-20260130171252-c3c6ebb49276
+	github.com/internxt/rclone-adapter v0.0.0-20260213125353-6f59c89fcb7c
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/jlaffaye/ftp v0.2.1-0.20240918233326-1b970516f5d3
 	github.com/josephspurrier/goversioninfo v1.5.0
