@@ -445,7 +445,7 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 		if item.DriveItem != nil {
 			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
 			name = item.DriveItem.Title
-			isDir = item.DriveItem.DriveFile != nil
+			isDir = item.DriveItem.DriveFolder != nil
 			return
 		}
 		itemJSON, _ := item.MarshalJSON()
@@ -454,7 +454,7 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 		if item.DriveItem != nil {
 			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
 			name = item.DriveItem.Title
-			isDir = item.DriveItem.DriveFile != nil
+			isDir = item.DriveItem.DriveFolder != nil
 			mimeType = item.DriveItem.MimeType
 			return
 		}
