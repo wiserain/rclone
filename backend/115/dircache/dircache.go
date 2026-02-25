@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"strings"
 	"sync"
@@ -336,10 +337,22 @@ func (dc *DirCache) Fill(src *DirCache) *DirCache {
 
 // Call with mu held
 func (dc *DirCache) _fill(src *DirCache) *DirCache {
+	if src == nil || src == dc {
+		return dc
+	}
+
+	// Copy source maps under source read lock to avoid aliasing and races.
+	src.cacheMu.RLock()
+	cacheCopy := make(map[string]string, len(src.cache))
+	maps.Copy(cacheCopy, src.cache)
+	invCacheCopy := make(map[string]string, len(src.invCache))
+	maps.Copy(invCacheCopy, src.invCache)
+	src.cacheMu.RUnlock()
+
 	dc.cacheMu.Lock()
-	defer dc.cacheMu.Unlock()
-	dc.cache = src.cache
-	dc.invCache = src.invCache
+	dc.cache = cacheCopy
+	dc.invCache = invCacheCopy
+	dc.cacheMu.Unlock()
 	return dc
 }
 
