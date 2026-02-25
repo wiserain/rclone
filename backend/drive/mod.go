@@ -180,13 +180,13 @@ func (p *ServiceAccountPool) GetSA() ([]*ServiceAccount, error) {
 
 // dynamically change service account if necessary
 func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
-	// check min sleep
-	if fs.Duration(time.Since(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
+	f.changeSAmu.Lock()
+	defer f.changeSAmu.Unlock()
+	// check min sleep while holding the lock to avoid concurrent races
+	if !f.changeSAtime.IsZero() && fs.Duration(time.Since(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
 		fs.Debugf(nil, "retrying with the same service account")
 		return nil
 	}
-	f.changeSAmu.Lock()
-	defer f.changeSAmu.Unlock()
 	// reloading SA
 	if len(f.changeSApool.SAs) < 1 {
 		if err := f.changeSApool.LoadSA(); err != nil {

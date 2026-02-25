@@ -53,7 +53,9 @@ type resumableUpload struct {
 func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, fileID, remote string, info *drive.File) (*drive.File, error) {
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-		_ = f.changeServiceAccount(ctx) // ignore error
+		if err := f.changeServiceAccount(ctx); err != nil {
+			fs.Errorf(f, "failed to change service account: %v", err)
+		}
 	}
 	params := url.Values{
 		"alt":        {"json"},

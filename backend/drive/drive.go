@@ -3040,7 +3040,9 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
-		_ = f.changeServiceAccount(ctx) // ignore error
+		if err := f.changeServiceAccount(ctx); err != nil {
+			fs.Errorf(f, "failed to change service account: %v", err)
+		}
 	}
 	var info *drive.File
 	err = f.pacer.Call(func() (bool, error) {
