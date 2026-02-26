@@ -440,7 +440,7 @@ func (cr *Credential) Valid() error {
 // FromCookie loads credential from cookie string
 func (cr *Credential) FromCookie(cookieStr string) *Credential {
 	for item := range strings.SplitSeq(cookieStr, ";") {
-		kv := strings.Split(strings.TrimSpace(item), "=")
+		kv := strings.SplitN(strings.TrimSpace(item), "=", 2)
 		if len(kv) != 2 {
 			continue
 		}
