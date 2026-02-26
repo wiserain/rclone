@@ -609,7 +609,7 @@ OUTER:
 				break OUTER
 			}
 		}
-		offset += f.opt.ListChunk
+		offset += len(info.Data.List)
 		if offset >= info.Data.Count {
 			break
 		}
