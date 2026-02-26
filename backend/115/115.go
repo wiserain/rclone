@@ -1819,11 +1819,7 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		return nil, fmt.Errorf("open file failed: %w", err)
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		err = errorHandler(res)
-		if err == nil || err.Error() == "" {
-			err = fmt.Errorf("http error %d: %v", res.StatusCode, res.Status)
-		}
-		return nil, fmt.Errorf("open file failed: %w", err)
+		return nil, fmt.Errorf("open file failed: %w", errorHandler(res))
 	}
 	return res.Body, nil
 }
