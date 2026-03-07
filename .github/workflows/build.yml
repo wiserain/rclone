@@ -488,10 +488,9 @@ jobs:
           sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
           sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
           sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
-          cd ./scripts
-          ./run-docker.sh ./build-package.sh -a aarch64 rclone
-          ./run-docker.sh ./build-package.sh -a arm rclone
-          cd ../output
+          ./scripts/run-docker.sh ./build-package.sh -a aarch64 rclone
+          ./scripts/run-docker.sh ./build-package.sh -a arm rclone
+          cd ./output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       - name: build (release)
         if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
@@ -505,10 +504,9 @@ jobs:
           sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
           sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
           sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
-          cd ./scripts
-          ./run-docker.sh ./build-package.sh -a aarch64 rclone
-          ./run-docker.sh ./build-package.sh -a arm rclone
-          cd ../output
+          ./scripts/run-docker.sh ./build-package.sh -a aarch64 rclone
+          ./scripts/run-docker.sh ./build-package.sh -a arm rclone
+          cd ./output
           for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
       # - 
       #   if: ${{ contains(github.ref, 'refs/tags/') }}
