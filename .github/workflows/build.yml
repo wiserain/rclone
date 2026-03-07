@@ -322,9 +322,15 @@ jobs:
           skip-cache: true
 
       - name: Install govulncheck
+        # temporary fix: run govulncheck with patched toolchain while keeping build/test on Go 1.25.8
+        env:
+          GOTOOLCHAIN: go1.26.1
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Scan for vulnerabilities
+        # temporary fix: Go 1.25.8 stdlib is flagged by govulncheck (GO-2026-4599/GO-2026-4600)
+        env:
+          GOTOOLCHAIN: go1.26.1
         run: govulncheck ./...
 
       - name: Check Markdown format
