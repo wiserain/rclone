@@ -1,6 +1,6 @@
 rclone(1) User Manual
 Nick Craig-Wood
-Mar 23, 2026
+Apr 08, 2026
 
 NAME
 
@@ -4625,10 +4625,10 @@ Examples:
     // Output: stories/The Quick Brown Fox!.txt
 
     rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{YYYYMMDD}"
-    // Output: stories/The Quick Brown Fox!-20260323
+    // Output: stories/The Quick Brown Fox!-20260408
 
     rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{macfriendlytime}"
-    // Output: stories/The Quick Brown Fox!-2026-03-23 0506PM
+    // Output: stories/The Quick Brown Fox!-2026-04-08 1211PM
 
     rclone convmv "stories/The Quick Brown Fox!.txt" --name-transform "all,regex=[\\.\\w]/ab"
     // Output: ababababababab/ababab ababababab ababababab ababab!abababab
@@ -6200,7 +6200,7 @@ not suffer from the same limitations.
 Mounting on macOS
 
 Mounting on macOS can be done either via built-in NFS server, macFUSE
-(also known as osxfuse) or FUSE-T.macFUSE is a traditional FUSE driver
+(also known as osxfuse) or FUSE-T. macFUSE is a traditional FUSE driver
 utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE
 system which "mounts" via an NFSv4 local server.
 
@@ -6245,7 +6245,7 @@ As per the FUSE-T wiki:
 
   File access and modification times cannot be set separately as it
   seems to be an issue with the NFS client which always modifies both.
-  Can be reproduced with 'touch -m' and 'touch -a' commands
+  Can be reproduced with touch -m and touch -a commands
 
 This means that viewing files with various tools, notably macOS Finder,
 will cause rlcone to update the modification time of the file. This may
@@ -6263,9 +6263,11 @@ running rclone mount:
 
   NOTICE: mount helper error: fusermount3: mount failed: Permission
   denied CRITICAL: Fatal error: failed to mount FUSE fs: fusermount:
-  exit status 1 This may be due to newer Apparmor restrictions, which
-  can be disabled with sudo aa-disable /usr/bin/fusermount3 (you may
-  need to sudo apt install apparmor-utils beforehand).
+  exit status 1
+
+This may be due to newer Apparmor restrictions, which can be disabled
+with sudo aa-disable /usr/bin/fusermount3 (you may need to
+sudo apt install apparmor-utils beforehand).
 
 Limitations
 
@@ -7549,7 +7551,7 @@ not suffer from the same limitations.
 Mounting on macOS
 
 Mounting on macOS can be done either via built-in NFS server, macFUSE
-(also known as osxfuse) or FUSE-T.macFUSE is a traditional FUSE driver
+(also known as osxfuse) or FUSE-T. macFUSE is a traditional FUSE driver
 utilizing a macOS kernel extension (kext). FUSE-T is an alternative FUSE
 system which "mounts" via an NFSv4 local server.
 
@@ -7594,7 +7596,7 @@ As per the FUSE-T wiki:
 
   File access and modification times cannot be set separately as it
   seems to be an issue with the NFS client which always modifies both.
-  Can be reproduced with 'touch -m' and 'touch -a' commands
+  Can be reproduced with touch -m and touch -a commands
 
 This means that viewing files with various tools, notably macOS Finder,
 will cause rlcone to update the modification time of the file. This may
@@ -7612,9 +7614,11 @@ running rclone mount:
 
   NOTICE: mount helper error: fusermount3: mount failed: Permission
   denied CRITICAL: Fatal error: failed to mount FUSE fs: fusermount:
-  exit status 1 This may be due to newer Apparmor restrictions, which
-  can be disabled with sudo aa-disable /usr/bin/fusermount3 (you may
-  need to sudo apt install apparmor-utils beforehand).
+  exit status 1
+
+This may be due to newer Apparmor restrictions, which can be disabled
+with sudo aa-disable /usr/bin/fusermount3 (you may need to
+sudo apt install apparmor-utils beforehand).
 
 Limitations
 
@@ -22993,7 +22997,7 @@ Flags for general networking and HTTP stuff.
           --tpslimit float                     Limit HTTP transactions per second to this
           --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
           --use-cookies                        Enable session cookiejar
-          --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.3")
+          --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.4")
 
 Performance
 
@@ -25659,11 +25663,7 @@ The following backends have known issues that need more investigation:
 
 -   TestDropbox (dropbox)
     -   TestBisyncRemoteRemote/normalization
--   TestPcloud (pcloud)
-    -   TestBisyncRemoteLocal/createemptysrcdirs
-    -   TestBisyncLocalRemote/resync_modes
-    -   TestBisyncRemoteRemote/resolve
--   Updated: 2026-03-14-010012
+-   Updated: 2026-04-07-010015
 
 The following backends either have not been tested recently or have
 known issues that are deemed unfixable for the time being:
@@ -65185,6 +65185,46 @@ Options:
 -   "error": Return an error based on option value.
 
 Changelog
+
+v1.73.4 - 2026-04-08
+
+See commits
+
+-   Bug Fixes
+    -   build
+        -   Update to go 1.25.9 to fix multiple CVEs (Nick Craig-Wood)
+            -   CVE-2026-32282: os: Root.Chmod can follow symlinks out
+                of the root on Linux
+            -   CVE-2026-32289: html/template: JS template literal
+                context incorrectly tracked
+            -   CVE-2026-33810: crypto/x509: excluded DNS constraints
+                not properly applied to wildcard domains
+            -   CVE-2026-27144: cmd/compile: no-op interface conversion
+                bypasses overlap checking
+            -   CVE-2026-27143: cmd/compile: possible memory corruption
+                after bound check elimination
+            -   CVE-2026-32288: archive/tar: unbounded allocation when
+                parsing old format GNU sparse map
+            -   CVE-2026-32283: crypto/tls: multiple key update
+                handshake messages can cause connection to deadlock
+            -   CVE-2026-27140: cmd/go: trust layer bypass when using
+                cgo and SWIG
+            -   CVE-2026-32280: crypto/x509: unexpected work during
+                chain building
+            -   CVE-2026-32281: crypto/x509: inefficient policy
+                validation
+        -   Fix Denial of Service due to Panic in AWS SDK for Go v2 SDK
+            EventStream Decoder (dependabot[bot])
+        -   Update golang.org/x/image to 0.38.0 to fix CVE-2026-33809
+            (dependabot[bot])
+    -   docs
+        -   Fix header level for metadata option (Clément Notin)
+        -   Fix markdown issues in mount docs (albertony)
+        -   Fix link to not be language specific (Ross Smith II)
+        -   Note macOS 10.15 (Catalina) support with version v1.70.3
+            (kapitainsky)
+-   Filen
+    -   Update SDK version (Enduriel)
 
 v1.73.3 - 2026-03-23
 
