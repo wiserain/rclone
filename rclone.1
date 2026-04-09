@@ -15,7 +15,7 @@
 . ftr VB CB
 . ftr VBI CBI
 .\}
-.TH "rclone" "1" "Mar 23, 2026" "User Manual" ""
+.TH "rclone" "1" "Apr 08, 2026" "User Manual" ""
 .hy
 .SH NAME
 .PP
@@ -6313,14 +6313,14 @@ rclone convmv \[dq]stories/The Quick Brown Fox!.txt\[dq] --name-transform \[dq]a
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{YYYYMMDD}\[dq]
-// Output: stories/The Quick Brown Fox!-20260323
+// Output: stories/The Quick Brown Fox!-20260408
 \f[R]
 .fi
 .IP
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{macfriendlytime}\[dq]
-// Output: stories/The Quick Brown Fox!-2026-03-23 0506PM
+// Output: stories/The Quick Brown Fox!-2026-04-08 1211PM
 \f[R]
 .fi
 .IP
@@ -8344,8 +8344,9 @@ not suffer from the same limitations.
 Mounting on macOS can be done either via built-in NFS
 server (https://rclone.org/commands/rclone_serve_nfs/),
 macFUSE (https://osxfuse.github.io/) (also known as osxfuse) or
-FUSE-T (https://www.fuse-t.org/).macFUSE is a traditional FUSE driver
-utilizing a macOS kernel extension (kext).
+FUSE-T (https://www.fuse-t.org/).
+macFUSE is a traditional FUSE driver utilizing a macOS kernel extension
+(kext).
 FUSE-T is an alternative FUSE system which \[dq]mounts\[dq] via an NFSv4
 local server.
 .SS Unicode Normalization
@@ -8399,7 +8400,7 @@ wiki (https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 .PP
 File access and modification times cannot be set separately as it seems
 to be an issue with the NFS client which always modifies both.
-Can be reproduced with \[aq]touch -m\[aq] and \[aq]touch -a\[aq]
+Can be reproduced with \f[V]touch -m\f[R] and \f[V]touch -a\f[R]
 commands
 .RE
 .PP
@@ -8419,11 +8420,13 @@ running \f[V]rclone mount\f[R]:
 .PP
 NOTICE: mount helper error: fusermount3: mount failed: Permission denied
 CRITICAL: Fatal error: failed to mount FUSE fs: fusermount: exit status
-1 This may be due to newer Apparmor (https://wiki.ubuntu.com/AppArmor)
+1
+.RE
+.PP
+This may be due to newer Apparmor (https://wiki.ubuntu.com/AppArmor)
 restrictions, which can be disabled with
 \f[V]sudo aa-disable /usr/bin/fusermount3\f[R] (you may need to
 \f[V]sudo apt install apparmor-utils\f[R] beforehand).
-.RE
 .SS Limitations
 .PP
 Without the use of \f[V]--vfs-cache-mode\f[R] this can only write files
@@ -9998,8 +10001,9 @@ not suffer from the same limitations.
 Mounting on macOS can be done either via built-in NFS
 server (https://rclone.org/commands/rclone_serve_nfs/),
 macFUSE (https://osxfuse.github.io/) (also known as osxfuse) or
-FUSE-T (https://www.fuse-t.org/).macFUSE is a traditional FUSE driver
-utilizing a macOS kernel extension (kext).
+FUSE-T (https://www.fuse-t.org/).
+macFUSE is a traditional FUSE driver utilizing a macOS kernel extension
+(kext).
 FUSE-T is an alternative FUSE system which \[dq]mounts\[dq] via an NFSv4
 local server.
 .SS Unicode Normalization
@@ -10053,7 +10057,7 @@ wiki (https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 .PP
 File access and modification times cannot be set separately as it seems
 to be an issue with the NFS client which always modifies both.
-Can be reproduced with \[aq]touch -m\[aq] and \[aq]touch -a\[aq]
+Can be reproduced with \f[V]touch -m\f[R] and \f[V]touch -a\f[R]
 commands
 .RE
 .PP
@@ -10073,11 +10077,13 @@ running \f[V]rclone mount\f[R]:
 .PP
 NOTICE: mount helper error: fusermount3: mount failed: Permission denied
 CRITICAL: Fatal error: failed to mount FUSE fs: fusermount: exit status
-1 This may be due to newer Apparmor (https://wiki.ubuntu.com/AppArmor)
+1
+.RE
+.PP
+This may be due to newer Apparmor (https://wiki.ubuntu.com/AppArmor)
 restrictions, which can be disabled with
 \f[V]sudo aa-disable /usr/bin/fusermount3\f[R] (you may need to
 \f[V]sudo apt install apparmor-utils\f[R] beforehand).
-.RE
 .SS Limitations
 .PP
 Without the use of \f[V]--vfs-cache-mode\f[R] this can only write files
@@ -29918,7 +29924,7 @@ Flags for general networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.73.3\[dq])
+      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.73.4\[dq])
 \f[R]
 .fi
 .SS Performance
@@ -33187,17 +33193,7 @@ The following backends have known issues that need more investigation:
 \f[V]TestBisyncRemoteRemote/normalization\f[R] (https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
 .RE
 .IP \[bu] 2
-\f[V]TestPcloud\f[R] (\f[V]pcloud\f[R])
-.RS 2
-.IP \[bu] 2
-\f[V]TestBisyncRemoteLocal/createemptysrcdirs\f[R] (https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-.IP \[bu] 2
-\f[V]TestBisyncLocalRemote/resync_modes\f[R] (https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-.IP \[bu] 2
-\f[V]TestBisyncRemoteRemote/resolve\f[R] (https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-.RE
-.IP \[bu] 2
-Updated: 2026-03-14-010012
+Updated: 2026-04-07-010015
 .PP
 The following backends either have not been tested recently or have
 known issues that are deemed unfixable for the time being:
@@ -85740,7 +85736,7 @@ T}
 .PP
 When running on Windows the following characters are replaced.
 This list is based on the Windows file naming
-conventions (https://docs.microsoft.com/de-de/windows/desktop/FileIO/naming-a-file#naming-conventions).
+conventions (https://docs.microsoft.com/windows/desktop/FileIO/naming-a-file#naming-conventions).
 .PP
 .TS
 tab(@);
@@ -86921,6 +86917,72 @@ Options:
 .IP \[bu] 2
 \[dq]error\[dq]: Return an error based on option value.
 .SH Changelog
+.SS v1.73.4 - 2026-04-08
+.PP
+See commits (https://github.com/rclone/rclone/compare/v1.73.3...v1.73.4)
+.IP \[bu] 2
+Bug Fixes
+.RS 2
+.IP \[bu] 2
+build
+.RS 2
+.IP \[bu] 2
+Update to go 1.25.9 to fix multiple CVEs (Nick Craig-Wood)
+.RS 2
+.IP \[bu] 2
+CVE-2026-32282: os: Root.Chmod can follow symlinks out of the root on
+Linux
+.IP \[bu] 2
+CVE-2026-32289: html/template: JS template literal context incorrectly
+tracked
+.IP \[bu] 2
+CVE-2026-33810: crypto/x509: excluded DNS constraints not properly
+applied to wildcard domains
+.IP \[bu] 2
+CVE-2026-27144: cmd/compile: no-op interface conversion bypasses overlap
+checking
+.IP \[bu] 2
+CVE-2026-27143: cmd/compile: possible memory corruption after bound
+check elimination
+.IP \[bu] 2
+CVE-2026-32288: archive/tar: unbounded allocation when parsing old
+format GNU sparse map
+.IP \[bu] 2
+CVE-2026-32283: crypto/tls: multiple key update handshake messages can
+cause connection to deadlock
+.IP \[bu] 2
+CVE-2026-27140: cmd/go: trust layer bypass when using cgo and SWIG
+.IP \[bu] 2
+CVE-2026-32280: crypto/x509: unexpected work during chain building
+.IP \[bu] 2
+CVE-2026-32281: crypto/x509: inefficient policy validation
+.RE
+.IP \[bu] 2
+Fix Denial of Service due to Panic in AWS SDK for Go v2 SDK EventStream
+Decoder (dependabot[bot])
+.IP \[bu] 2
+Update golang.org/x/image to 0.38.0 to fix CVE-2026-33809
+(dependabot[bot])
+.RE
+.IP \[bu] 2
+docs
+.RS 2
+.IP \[bu] 2
+Fix header level for metadata option (Clément Notin)
+.IP \[bu] 2
+Fix markdown issues in mount docs (albertony)
+.IP \[bu] 2
+Fix link to not be language specific (Ross Smith II)
+.IP \[bu] 2
+Note macOS 10.15 (Catalina) support with version v1.70.3 (kapitainsky)
+.RE
+.RE
+.IP \[bu] 2
+Filen
+.RS 2
+.IP \[bu] 2
+Update SDK version (Enduriel)
+.RE
 .SS v1.73.3 - 2026-03-23
 .PP
 See commits (https://github.com/rclone/rclone/compare/v1.73.2...v1.73.3)

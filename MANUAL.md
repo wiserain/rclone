@@ -1,6 +1,6 @@
 % rclone(1) User Manual
 % Nick Craig-Wood
-% Mar 23, 2026
+% Apr 08, 2026
 
 # NAME
 
@@ -5408,12 +5408,12 @@ rclone convmv "stories/The Quick Brown Fox!.txt" --name-transform "all,command=e
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{YYYYMMDD}"
-// Output: stories/The Quick Brown Fox!-20260323
+// Output: stories/The Quick Brown Fox!-20260408
 ```
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{macfriendlytime}"
-// Output: stories/The Quick Brown Fox!-2026-03-23 0506PM
+// Output: stories/The Quick Brown Fox!-2026-04-08 1211PM
 ```
 
 ```console
@@ -6921,7 +6921,8 @@ Mount the remote as file system on a mountpoint.
 Rclone mount allows Linux, FreeBSD, macOS and Windows to
 mount any of Rclone's cloud storage systems as a file system with FUSE.
 
-First set up your remote using `rclone config`. Check it works with `rclone ls` etc.
+First set up your remote using `rclone config`. Check it works with `rclone ls`
+etc.
 
 On Linux and macOS, you can run mount in either foreground or background (aka
 daemon) mode. Mount runs in foreground mode by default. Use the `--daemon` flag
@@ -6949,8 +6950,8 @@ The following examples will mount to an automatically assigned drive,
 to specific drive letter `X:`, to path `C:\path\parent\mount`
 (where parent directory or drive must exist, and mount must **not** exist,
 and is not supported when [mounting as a network drive](#mounting-modes-on-windows)),
-and the last example will mount as network share `\\cloud\remote` and map it to an
-automatically assigned drive:
+and the last example will mount as network share `\\cloud\remote` and map it to
+an automatically assigned drive:
 
 ```console
 rclone mount remote:path/to/files *
@@ -7056,8 +7057,8 @@ rclone mount remote:path/to/files X: --volname \\server\share
 
 You may also specify the network share UNC path as the mountpoint itself. Then rclone
 will automatically assign a drive letter, same as with `*` and use that as
-mountpoint, and instead use the UNC path specified as the volume name, as if it were
-specified with the `--volname` option. This will also implicitly set
+mountpoint, and instead use the UNC path specified as the volume name, as if it
+were specified with the `--volname` option. This will also implicitly set
 the `--network-mode` option. This means the following two examples have same result:
 
 ```console
@@ -7188,7 +7189,7 @@ does not suffer from the same limitations.
 
 Mounting on macOS can be done either via [built-in NFS server](https://rclone.org/commands/rclone_serve_nfs/),
 [macFUSE](https://osxfuse.github.io/) (also known as osxfuse) or
-[FUSE-T](https://www.fuse-t.org/).macFUSE is a traditional FUSE driver utilizing
+[FUSE-T](https://www.fuse-t.org/). macFUSE is a traditional FUSE driver utilizing
 a macOS kernel extension (kext). FUSE-T is an alternative FUSE system which
 "mounts" via an NFSv4 local server.
 
@@ -7231,13 +7232,13 @@ current as  of FUSE-T version 1.0.14.
 
 As per the [FUSE-T wiki](https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 
-> File access and modification times cannot be set separately as it seems to be an
-> issue with the NFS client which always modifies both. Can be reproduced with
-> 'touch -m' and 'touch -a' commands
+> File access and modification times cannot be set separately as it seems to be
+> an issue with the NFS client which always modifies both. Can be reproduced
+> with `touch -m` and `touch -a` commands
 
-This means that viewing files with various tools, notably macOS Finder, will cause
-rlcone to update the modification time of the file. This may make rclone upload a
-full new copy of the file.
+This means that viewing files with various tools, notably macOS Finder, will
+cause rlcone to update the modification time of the file. This may make rclone
+upload a full new copy of the file.
 
 #### Read Only mounts
 
@@ -7251,9 +7252,10 @@ On newer versions of Ubuntu, you may encounter the following error when running
 
 > NOTICE: mount helper error: fusermount3: mount failed: Permission denied
 > CRITICAL: Fatal error: failed to mount FUSE fs: fusermount: exit status 1
+
 This may be due to newer [Apparmor](https://wiki.ubuntu.com/AppArmor) restrictions,
-which can be disabled with `sudo aa-disable /usr/bin/fusermount3` (you may need to
-`sudo apt install apparmor-utils` beforehand).
+which can be disabled with `sudo aa-disable /usr/bin/fusermount3` (you may need
+to `sudo apt install apparmor-utils` beforehand).
 
 ## Limitations
 
@@ -8363,7 +8365,8 @@ Mount the remote as file system on a mountpoint.
 Rclone nfsmount allows Linux, FreeBSD, macOS and Windows to
 mount any of Rclone's cloud storage systems as a file system with FUSE.
 
-First set up your remote using `rclone config`. Check it works with `rclone ls` etc.
+First set up your remote using `rclone config`. Check it works with `rclone ls`
+etc.
 
 On Linux and macOS, you can run mount in either foreground or background (aka
 daemon) mode. Mount runs in foreground mode by default. Use the `--daemon` flag
@@ -8391,8 +8394,8 @@ The following examples will mount to an automatically assigned drive,
 to specific drive letter `X:`, to path `C:\path\parent\mount`
 (where parent directory or drive must exist, and mount must **not** exist,
 and is not supported when [mounting as a network drive](#mounting-modes-on-windows)),
-and the last example will mount as network share `\\cloud\remote` and map it to an
-automatically assigned drive:
+and the last example will mount as network share `\\cloud\remote` and map it to
+an automatically assigned drive:
 
 ```console
 rclone nfsmount remote:path/to/files *
@@ -8498,8 +8501,8 @@ rclone nfsmount remote:path/to/files X: --volname \\server\share
 
 You may also specify the network share UNC path as the mountpoint itself. Then rclone
 will automatically assign a drive letter, same as with `*` and use that as
-mountpoint, and instead use the UNC path specified as the volume name, as if it were
-specified with the `--volname` option. This will also implicitly set
+mountpoint, and instead use the UNC path specified as the volume name, as if it
+were specified with the `--volname` option. This will also implicitly set
 the `--network-mode` option. This means the following two examples have same result:
 
 ```console
@@ -8630,7 +8633,7 @@ does not suffer from the same limitations.
 
 Mounting on macOS can be done either via [built-in NFS server](https://rclone.org/commands/rclone_serve_nfs/),
 [macFUSE](https://osxfuse.github.io/) (also known as osxfuse) or
-[FUSE-T](https://www.fuse-t.org/).macFUSE is a traditional FUSE driver utilizing
+[FUSE-T](https://www.fuse-t.org/). macFUSE is a traditional FUSE driver utilizing
 a macOS kernel extension (kext). FUSE-T is an alternative FUSE system which
 "mounts" via an NFSv4 local server.
 
@@ -8673,13 +8676,13 @@ current as  of FUSE-T version 1.0.14.
 
 As per the [FUSE-T wiki](https://github.com/macos-fuse-t/fuse-t/wiki#caveats):
 
-> File access and modification times cannot be set separately as it seems to be an
-> issue with the NFS client which always modifies both. Can be reproduced with
-> 'touch -m' and 'touch -a' commands
+> File access and modification times cannot be set separately as it seems to be
+> an issue with the NFS client which always modifies both. Can be reproduced
+> with `touch -m` and `touch -a` commands
 
-This means that viewing files with various tools, notably macOS Finder, will cause
-rlcone to update the modification time of the file. This may make rclone upload a
-full new copy of the file.
+This means that viewing files with various tools, notably macOS Finder, will
+cause rlcone to update the modification time of the file. This may make rclone
+upload a full new copy of the file.
 
 #### Read Only mounts
 
@@ -8693,9 +8696,10 @@ On newer versions of Ubuntu, you may encounter the following error when running
 
 > NOTICE: mount helper error: fusermount3: mount failed: Permission denied
 > CRITICAL: Fatal error: failed to mount FUSE fs: fusermount: exit status 1
+
 This may be due to newer [Apparmor](https://wiki.ubuntu.com/AppArmor) restrictions,
-which can be disabled with `sudo aa-disable /usr/bin/fusermount3` (you may need to
-`sudo apt install apparmor-utils` beforehand).
+which can be disabled with `sudo aa-disable /usr/bin/fusermount3` (you may need
+to `sudo apt install apparmor-utils` beforehand).
 
 ## Limitations
 
@@ -18714,7 +18718,7 @@ This is the default.
 `CAUTIOUS` will try to prevent rclone from reaching the limit. Only applicable
 for `--max-transfer`.
 
-## -M, --metadata
+### -M, --metadata
 
 Setting this flag enables rclone to copy the metadata from the source
 to the destination. For local backends this is ownership, permissions,
@@ -24809,7 +24813,7 @@ Flags for general networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.3")
+      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.4")
 ```
 
 
@@ -27563,11 +27567,7 @@ The following backends have known issues that need more investigation:
 <!--- start list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 - `TestDropbox` (`dropbox`)
   - [`TestBisyncRemoteRemote/normalization`](https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
-- `TestPcloud` (`pcloud`)
-  - [`TestBisyncRemoteLocal/createemptysrcdirs`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-  - [`TestBisyncLocalRemote/resync_modes`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-  - [`TestBisyncRemoteRemote/resolve`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-- Updated: 2026-03-14-010012
+- Updated: 2026-04-07-010015
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -67447,7 +67447,7 @@ handling file names.
 | /         | 0x2F  | ／           |
 
 When running on Windows the following characters are replaced. This
-list is based on the [Windows file naming conventions](https://docs.microsoft.com/de-de/windows/desktop/FileIO/naming-a-file#naming-conventions).
+list is based on the [Windows file naming conventions](https://docs.microsoft.com/windows/desktop/FileIO/naming-a-file#naming-conventions).
 
 | Character | Value | Replacement |
 | --------- |:-----:|:-----------:|
@@ -68135,6 +68135,33 @@ Options:
 <!-- markdownlint-disable line-length -->
 
 # Changelog
+
+## v1.73.4 - 2026-04-08
+
+[See commits](https://github.com/rclone/rclone/compare/v1.73.3...v1.73.4)
+
+- Bug Fixes
+  - build
+    - Update to go 1.25.9 to fix multiple CVEs (Nick Craig-Wood)
+      - CVE-2026-32282: os: Root.Chmod can follow symlinks out of the root on Linux
+      - CVE-2026-32289: html/template: JS template literal context incorrectly tracked
+      - CVE-2026-33810: crypto/x509: excluded DNS constraints not properly applied to wildcard domains
+      - CVE-2026-27144: cmd/compile: no-op interface conversion bypasses overlap checking
+      - CVE-2026-27143: cmd/compile: possible memory corruption after bound check elimination
+      - CVE-2026-32288: archive/tar: unbounded allocation when parsing old format GNU sparse map
+      - CVE-2026-32283: crypto/tls: multiple key update handshake messages can cause connection to deadlock
+      - CVE-2026-27140: cmd/go: trust layer bypass when using cgo and SWIG
+      - CVE-2026-32280: crypto/x509: unexpected work during chain building
+      - CVE-2026-32281: crypto/x509: inefficient policy validation
+    - Fix Denial of Service due to Panic in AWS SDK for Go v2 SDK EventStream Decoder (dependabot[bot])
+    - Update golang.org/x/image to 0.38.0 to fix CVE-2026-33809  (dependabot[bot])
+  - docs
+    - Fix header level for metadata option (Clément Notin)
+    - Fix markdown issues in mount docs (albertony)
+    - Fix link to not be language specific (Ross Smith II)
+    - Note macOS 10.15 (Catalina) support with version v1.70.3 (kapitainsky)
+- Filen
+  - Update SDK version (Enduriel)
 
 ## v1.73.3 - 2026-03-23
 
