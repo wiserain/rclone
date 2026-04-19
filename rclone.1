@@ -15,7 +15,7 @@
 . ftr VB CB
 . ftr VBI CBI
 .\}
-.TH "rclone" "1" "Apr 08, 2026" "User Manual" ""
+.TH "rclone" "1" "Apr 19, 2026" "User Manual" ""
 .hy
 .SH NAME
 .PP
@@ -6313,14 +6313,14 @@ rclone convmv \[dq]stories/The Quick Brown Fox!.txt\[dq] --name-transform \[dq]a
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{YYYYMMDD}\[dq]
-// Output: stories/The Quick Brown Fox!-20260408
+// Output: stories/The Quick Brown Fox!-20260419
 \f[R]
 .fi
 .IP
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{macfriendlytime}\[dq]
-// Output: stories/The Quick Brown Fox!-2026-04-08 1211PM
+// Output: stories/The Quick Brown Fox!-2026-04-19 1137AM
 \f[R]
 .fi
 .IP
@@ -27253,6 +27253,8 @@ instead:
 rclone rc --loopback operations/fsinfo fs=remote:
 \f[R]
 .fi
+.PP
+\f[B]Authentication is required for this call.\f[R]
 .SS operations/hashsum: Produces a hashsum file for all the objects in the path.
 .PP
 Produces a hash file for all the objects in the path using the hash
@@ -27674,6 +27676,8 @@ And this sets NOTICE level logs (normal without -v)
 rclone rc options/set --json \[aq]{\[dq]main\[dq]: {\[dq]LogLevel\[dq]: \[dq]NOTICE\[dq]}}\[aq]
 \f[R]
 .fi
+.PP
+\f[B]Authentication is required for this call.\f[R]
 .SS pluginsctl/addPlugin: Add a plugin using url
 .PP
 Used for adding a plugin to the webgui.
@@ -29924,7 +29928,7 @@ Flags for general networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.73.4\[dq])
+      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.73.5\[dq])
 \f[R]
 .fi
 .SS Performance
@@ -33193,7 +33197,13 @@ The following backends have known issues that need more investigation:
 \f[V]TestBisyncRemoteRemote/normalization\f[R] (https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
 .RE
 .IP \[bu] 2
-Updated: 2026-04-07-010015
+\f[V]TestSeafileV6\f[R] (\f[V]seafile\f[R])
+.RS 2
+.IP \[bu] 2
+\f[V]TestBisyncLocalRemote/rmdirs\f[R] (https://pub.rclone.org/integration-tests/current/seafile-cmd.bisync-TestSeafileV6-1.txt)
+.RE
+.IP \[bu] 2
+Updated: 2026-04-19-010011
 .PP
 The following backends either have not been tested recently or have
 known issues that are deemed unfixable for the time being:
@@ -48404,6 +48414,16 @@ cos                  s3
 \f[R]
 .fi
 .RE
+.SS Tencent COS Global Acceleration Endpoint
+.PP
+When using the Global Acceleration Endpoint
+(\f[V]cos.accelerate.myqcloud.com\f[R]), rclone automatically sets
+\f[V]no_check_bucket = true\f[R] because this acceleration endpoint does
+not support the \f[V]CreateBucket\f[R] call which is used for ensuring a
+bucket\[aq]s existence by rclone.
+Global Acceleration is a per-bucket feature, so you should first create
+the bucket in one physical region, then enable it in the Tencent Cloud
+console.
 .SS Wasabi
 .PP
 Wasabi (https://wasabi.com) is a cloud-based object storage service for
@@ -86917,6 +86937,57 @@ Options:
 .IP \[bu] 2
 \[dq]error\[dq]: Return an error based on option value.
 .SH Changelog
+.SS v1.73.5 - 2026-04-19
+.PP
+See commits (https://github.com/rclone/rclone/compare/v1.73.4...v1.73.5)
+.IP \[bu] 2
+Bug Fixes
+.RS 2
+.IP \[bu] 2
+operations: Add AuthRequired to operations/fsinfo to prevent backend
+creation CVE-2026-41179 (Nick Craig-Wood)
+.IP \[bu] 2
+rc
+.RS 2
+.IP \[bu] 2
+Add AuthRequired to options/set to prevent auth bypass CVE-2026-41176
+(Nick Craig-Wood)
+.IP \[bu] 2
+Snapshot NoAuth at startup to prevent runtime auth bypass CVE-2026-41176
+(Nick Craig-Wood)
+.RE
+.IP \[bu] 2
+filter: Fix debug logs that fire before logger is configured (Nick
+Craig-Wood)
+.RE
+.IP \[bu] 2
+Azureblob
+.RS 2
+.IP \[bu] 2
+Add Microsoft Partner Network User-Agent prefix (Nick Craig-Wood)
+.RE
+.IP \[bu] 2
+Drime
+.RS 2
+.IP \[bu] 2
+Fix User.EntryPermissions JSON unmarshalling (a1pcm)
+.RE
+.IP \[bu] 2
+Iclouddrive
+.RS 2
+.IP \[bu] 2
+Fix \[aq]directory not found\[aq] error when the directory contains
+accent marks (Brais Couce)
+.RE
+.IP \[bu] 2
+S3
+.RS 2
+.IP \[bu] 2
+Fix TencentCOS CDN endpoint failing on bucket check (Mozi)
+.IP \[bu] 2
+Fix empty delimiter parameter rejected by Archiware P5 server (Nick
+Craig-Wood)
+.RE
 .SS v1.73.4 - 2026-04-08
 .PP
 See commits (https://github.com/rclone/rclone/compare/v1.73.3...v1.73.4)

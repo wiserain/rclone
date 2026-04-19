@@ -1,6 +1,6 @@
 % rclone(1) User Manual
 % Nick Craig-Wood
-% Apr 08, 2026
+% Apr 19, 2026
 
 # NAME
 
@@ -5408,12 +5408,12 @@ rclone convmv "stories/The Quick Brown Fox!.txt" --name-transform "all,command=e
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{YYYYMMDD}"
-// Output: stories/The Quick Brown Fox!-20260408
+// Output: stories/The Quick Brown Fox!-20260419
 ```
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{macfriendlytime}"
-// Output: stories/The Quick Brown Fox!-2026-04-08 1211PM
+// Output: stories/The Quick Brown Fox!-2026-04-19 1137AM
 ```
 
 ```console
@@ -23086,6 +23086,8 @@ This command does not have a command line equivalent so use this instead:
 
     rclone rc --loopback operations/fsinfo fs=remote:
 
+**Authentication is required for this call.**
+
 ### operations/hashsum: Produces a hashsum file for all the objects in the path. {#operations-hashsum}
 
 Produces a hash file for all the objects in the path using the hash
@@ -23406,6 +23408,8 @@ And this sets INFO level logs (-v)
 And this sets NOTICE level logs (normal without -v)
 
     rclone rc options/set --json '{"main": {"LogLevel": "NOTICE"}}'
+
+**Authentication is required for this call.**
 
 ### pluginsctl/addPlugin: Add a plugin using url {#pluginsctl-addPlugin}
 
@@ -24813,7 +24817,7 @@ Flags for general networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.4")
+      --user-agent string                  Set the user-agent to a specified string (default "rclone/v1.73.5")
 ```
 
 
@@ -27567,7 +27571,9 @@ The following backends have known issues that need more investigation:
 <!--- start list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 - `TestDropbox` (`dropbox`)
   - [`TestBisyncRemoteRemote/normalization`](https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
-- Updated: 2026-04-07-010015
+- `TestSeafileV6` (`seafile`)
+  - [`TestBisyncLocalRemote/rmdirs`](https://pub.rclone.org/integration-tests/current/seafile-cmd.bisync-TestSeafileV6-1.txt)
+- Updated: 2026-04-19-010011
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -38018,6 +38024,15 @@ To configure access to Tencent COS, follow the steps below:
    ====                 ====
    cos                  s3
    ```
+
+#### Tencent COS Global Acceleration Endpoint
+
+When using the Global Acceleration Endpoint (`cos.accelerate.myqcloud.com`),
+rclone automatically sets `no_check_bucket = true` because this acceleration
+endpoint does not support the `CreateBucket` call which is used for ensuring
+a bucket's existence by rclone. Global Acceleration is a per-bucket feature,
+so you should first create the bucket in one physical region, then enable it
+in the Tencent Cloud console.
 
 ### Wasabi
 
@@ -68135,6 +68150,26 @@ Options:
 <!-- markdownlint-disable line-length -->
 
 # Changelog
+
+## v1.73.5 - 2026-04-19
+
+[See commits](https://github.com/rclone/rclone/compare/v1.73.4...v1.73.5)
+
+- Bug Fixes
+  - operations: Add AuthRequired to operations/fsinfo to prevent backend creation CVE-2026-41179 (Nick Craig-Wood)
+  - rc
+    - Add AuthRequired to options/set to prevent auth bypass CVE-2026-41176 (Nick Craig-Wood)
+    - Snapshot NoAuth at startup to prevent runtime auth bypass CVE-2026-41176 (Nick Craig-Wood)
+  - filter: Fix debug logs that fire before logger is configured (Nick Craig-Wood)
+- Azureblob
+  - Add Microsoft Partner Network User-Agent prefix (Nick Craig-Wood)
+- Drime
+  - Fix User.EntryPermissions JSON unmarshalling (a1pcm)
+- Iclouddrive
+  - Fix 'directory not found' error when the directory contains accent marks (Brais Couce)
+- S3
+  - Fix TencentCOS CDN endpoint failing on bucket check (Mozi)
+  - Fix empty delimiter parameter rejected by Archiware P5 server (Nick Craig-Wood)
 
 ## v1.73.4 - 2026-04-08
 
