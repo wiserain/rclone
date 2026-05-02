@@ -25,6 +25,8 @@ permissions:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     outputs:
       upload_url: ${{ steps.set_upload_url.outputs.upload_url }}
