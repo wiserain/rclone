@@ -554,6 +554,8 @@ jobs:
     if: ${{ contains(github.ref, 'refs/tags/') }}
     needs: [create-release, build, termux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
