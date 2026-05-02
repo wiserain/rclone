@@ -4,8 +4,6 @@
 
 "use strict";
 
-"use strict";
-
 (() => {
   const enosys = () => {
     const err = new Error("not implemented");

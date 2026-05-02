@@ -359,8 +359,6 @@ func NewFs(ctx context.Context, name, rpath string, m configmap.Mapper) (fs.Fs, 
 	f.features.ListR = nil // Recursive listing may cause chunker skip files
 	f.features.ListP = nil // ListP not supported yet
 
-	f.features.Disable("ListR") // Recursive listing may cause chunker skip files
-
 	return f, err
 }
 

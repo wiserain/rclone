@@ -1647,8 +1647,6 @@ This command does not have a command line equivalent so use this instead:
 
     rclone rc --loopback operations/fsinfo fs=remote:
 
-**Authentication is required for this call.**
-
 ### operations/hashsum: Produces a hashsum file for all the objects in the path. {#operations-hashsum}
 
 Produces a hash file for all the objects in the path using the hash
@@ -1941,8 +1939,6 @@ And this sets INFO level logs (-v)
 And this sets NOTICE level logs (normal without -v)
 
     rclone rc options/set --json '{"main": {"LogLevel": "NOTICE"}}'
-
-**Authentication is required for this call.**
 
 ### pluginsctl/addPlugin: Add a plugin using url {#pluginsctl-addPlugin}
 
