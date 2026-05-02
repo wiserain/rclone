@@ -29,6 +29,7 @@ before using, or data loss can result. Questions can be asked in the
 
 See [full bisync description](https://rclone.org/bisync/) for details.
 
+
 ```
 rclone bisync remote1:path1 remote2:path2 [flags]
 ```
@@ -60,7 +61,7 @@ rclone bisync remote1:path1 remote2:path2 [flags]
   -1, --resync                               Performs the resync run. Equivalent to --resync-mode path1. Consider using --verbose or --dry-run first.
       --resync-mode string                   During resync, prefer the version that is: path1, path2, newer, older, larger, smaller (default: path1 if --resync, otherwise none for no resync.) (default "none")
       --slow-hash-sync-only                  Ignore slow checksums for listings and deltas, but still consider them during sync calls.
-      --workdir string                       Use custom working dir - useful for testing. (default: {WORKDIR})
+      --workdir string                       Use custom working dir - useful for testing. (default: $HOME/.cache/rclone/bisync)
 ```
 
 Options shared with other commands are described next.

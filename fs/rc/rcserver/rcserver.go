@@ -265,7 +265,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request, path string)
 	}
 
 	// Check to see if it requires authorisation
-	if !s.noAuth && call.AuthRequired && !s.server.UsingAuth() {
+	if !s.noAuth && !call.NoAuth && !s.server.UsingAuth() {
 		writeError(path, in, w, fmt.Errorf("authentication must be set up on the rc server to use %q or the --rc-no-auth flag must be in use", path), http.StatusForbidden)
 		return
 	}
@@ -409,6 +409,12 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, path string) 
 		return
 	}
 	http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+}
+
+// URLs returns the URLs the server is listening on. Only valid after
+// Serve has been called (which Start does internally before returning).
+func (s *Server) URLs() []string {
+	return s.server.URLs()
 }
 
 // Wait blocks while the server is serving requests

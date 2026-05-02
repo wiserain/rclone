@@ -667,6 +667,10 @@ backends:
    ignoretests:
      - cmd/bisync
      - cmd/gitannex
+ - backend: "huaweidrive"
+   remote: "TestHuaweiDrive:"
+   fastlist: true
+   listretries: 5
  - backend: "shade"
    remote: "TestShade:"
    fastlist: false
@@ -685,6 +689,7 @@ backends:
  - backend: "internxt"
    remote: "TestInternxt:"
    fastlist: false
+   listretries: 5
    ignore:
      - TestRWFileHandleWriteNoWrite
  - backend:  "drime"

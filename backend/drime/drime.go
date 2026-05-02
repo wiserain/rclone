@@ -565,10 +565,10 @@ OUTER:
 				break OUTER
 			}
 		}
-		if result.NextPage == 0 {
+		if result.CurrentPage == result.LastPage {
 			break
 		}
-		page = result.NextPage
+		page = result.CurrentPage + 1
 	}
 	return found, err
 }
@@ -1362,6 +1362,37 @@ func (s *drimeChunkWriter) Abort(ctx context.Context) error {
 	return nil
 }
 
+// About gets quota information
+func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
+	opts := rest.Opts{
+		Method:     "GET",
+		Path:       "/user/space-usage",
+		Parameters: url.Values{},
+	}
+	if f.opt.WorkspaceID != "" {
+		opts.Parameters.Set("workspaceId", f.opt.WorkspaceID)
+	}
+
+	var resp *http.Response
+	var result api.SpaceUsageResponse
+	var err error
+	err = f.pacer.Call(func() (bool, error) {
+		resp, err = f.srv.CallJSON(ctx, &opts, nil, &result)
+		return shouldRetry(ctx, resp, err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Drime Quota: %w", err)
+	}
+
+	usage := &fs.Usage{
+		Total: fs.NewUsageValue(result.Available),
+		Used:  fs.NewUsageValue(result.Used),
+		Free:  fs.NewUsageValue(result.Available - result.Used),
+	}
+
+	return usage, nil
+}
+
 // ------------------------------------------------------------
 
 // Fs returns the parent Fs
@@ -1574,6 +1605,7 @@ var (
 	_ fs.Mover           = (*Fs)(nil)
 	_ fs.DirMover        = (*Fs)(nil)
 	_ fs.DirCacheFlusher = (*Fs)(nil)
+	_ fs.Abouter         = (*Fs)(nil)
 	_ fs.OpenChunkWriter = (*Fs)(nil)
 	_ fs.Object          = (*Object)(nil)
 	_ fs.IDer            = (*Object)(nil)

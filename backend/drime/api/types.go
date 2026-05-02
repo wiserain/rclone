@@ -77,9 +77,9 @@ type Listing struct {
 	Data        []Item `json:"data"`
 	From        int    `json:"from"`
 	LastPage    int    `json:"last_page"`
-	NextPage    int    `json:"next_page"`
+	NextPageURL string `json:"next_page_url"`
 	PerPage     int    `json:"per_page"`
-	PrevPage    int    `json:"prev_page"`
+	PrevPageURL string `json:"prev_page_url"`
 	To          int    `json:"to"`
 	Total       int    `json:"total"`
 }
@@ -236,4 +236,12 @@ type MultiPartEntriesResponse struct {
 type MultiPartAbort struct {
 	UploadID string `json:"uploadId"`
 	Key      string `json:"key"`
+}
+
+// SpaceUsageResponse is returned by GET /user/space-usage
+type SpaceUsageResponse struct {
+	Used      int64  `json:"used"`
+	Available int64  `json:"available"`
+	Status    string `json:"status"`
+	SEO       any    `json:"seo"`
 }

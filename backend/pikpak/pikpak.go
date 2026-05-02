@@ -1650,7 +1650,7 @@ func (f *Fs) UserInfo(ctx context.Context) (userInfo map[string]string, err erro
 // ------------------------------------------------------------
 
 // add offline download task for url
-func (f *Fs) addURL(ctx context.Context, url, path string) (*api.Task, error) {
+func (f *Fs) addURL(ctx context.Context, url, name, path string) (*api.Task, error) {
 	req := api.RequestNewTask{
 		Kind:       api.KindOfFile,
 		UploadType: "UPLOAD_TYPE_URL",
@@ -1658,6 +1658,9 @@ func (f *Fs) addURL(ctx context.Context, url, path string) (*api.Task, error) {
 			URL: url,
 		},
 		FolderType: "DOWNLOAD",
+	}
+	if name != "" {
+		req.Name = f.opt.Enc.FromStandardName(name)
 	}
 	if parentID, err := f.dirCache.FindDir(ctx, path, false); err == nil {
 		req.ParentID = parentIDForRequest(parentID)
@@ -1723,14 +1726,18 @@ var commandHelp = []fs.CommandHelp{{
 	Short: "Add offline download task for url.",
 	Long: `This command adds offline download task for url.
 
-Usage example:
+Usage examples:
 
 ` + "```console" + `
 rclone backend addurl pikpak:dirpath url
+rclone backend addurl pikpak:dirpath url -o name=custom_filename.zip
 ` + "```" + `
 
 Downloads will be stored in 'dirpath'. If 'dirpath' is invalid,
 download will fallback to default 'My Pack' folder.`,
+	Opts: map[string]string{
+		"name": "Custom filename for the downloaded file.",
+	},
 }, { // mod
 	Name:  "checkurl",
 	Short: "Check the resource of url",
@@ -1815,7 +1822,11 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 		if len(arg) != 1 {
 			return nil, errors.New("need exactly 1 argument")
 		}
-		return f.addURL(ctx, arg[0], "")
+		filename := ""
+		if name, ok := opt["name"]; ok {
+			filename = name
+		}
+		return f.addURL(ctx, arg[0], filename, "")
 	case "checkurl":
 		// mod
 		if len(arg) < 1 {
@@ -1851,7 +1862,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 			}
 			res.checkCached()
 			if add == "all" || (add == "cached-only" && res.IsCached) || (add == "not-cached" && !res.IsCached) {
-				task, terr := f.addURL(ctx, res.Meta.URL, "")
+				task, terr := f.addURL(ctx, res.Meta.URL, "", "")
 				if terr != nil {
 					err = fmt.Errorf("unexpected error while requesting offline download task for %q: %w", res.Meta.URL, terr)
 					fs.Errorf(f, "%v", err)
