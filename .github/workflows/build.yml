@@ -456,7 +456,7 @@ jobs:
     if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Set Variables (beta)
@@ -478,7 +478,7 @@ jobs:
           echo "branch=$LAST_TAG" >> $GITHUB_ENV
           echo "version_all=$LAST_TAG" >> $GITHUB_ENV
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: 'termux/termux-packages'
       - name: build (beta)
@@ -556,11 +556,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: build/
           merge-multiple: true
