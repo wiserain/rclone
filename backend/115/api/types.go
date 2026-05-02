@@ -156,11 +156,11 @@ type File struct {
 	Name      string      `json:"n,omitempty"`
 	Size      Int64       `json:"s,omitempty"`
 	PickCode  string      `json:"pc,omitempty"`
-	T         string      `json:"t,omitempty"`  // representative time? "2024-05-19 03:54" or "1715919337"
-	Te        Time        `json:"te,omitempty"` // modify time
-	Tp        Time        `json:"tp,omitempty"` // create time
-	Tu        Time        `json:"tu,omitempty"` // update time?
-	To        Time        `json:"to,omitempty"` // last opened 0 if never accessed or "1716165082"
+	T         string      `json:"t,omitempty"` // representative time? "2024-05-19 03:54" or "1715919337"
+	Te        Time        `json:"te"`          // modify time
+	Tp        Time        `json:"tp"`          // create time
+	Tu        Time        `json:"tu"`          // update time?
+	To        Time        `json:"to"`          // last opened 0 if never accessed or "1716165082"
 	Ico       string      `json:"ico,omitempty"`
 	Class     string      `json:"class,omitempty"`
 	Sha       string      `json:"sha,omitempty"`
@@ -387,11 +387,11 @@ func (u *DownloadURL) Valid() bool {
 
 // Cookie returns the cookies as a string.
 func (u *DownloadURL) Cookie() string {
-	cookie := ""
+	var cookie strings.Builder
 	for _, ck := range u.Cookies {
-		cookie += fmt.Sprintf("%s=%s;", ck.Name, ck.Value)
+		cookie.WriteString(fmt.Sprintf("%s=%s;", ck.Name, ck.Value))
 	}
-	return cookie
+	return cookie.String()
 }
 
 // DownloadInfo represents information about a downloadable file.
@@ -540,24 +540,24 @@ type ShareSnapData struct {
 		UserID   string `json:"user_id,omitempty"`
 		UserName string `json:"user_name,omitempty"`
 		Face     string `json:"face,omitempty"`
-	} `json:"userinfo,omitempty"`
+	} `json:"userinfo"`
 	Shareinfo struct {
 		SnapID           string      `json:"snap_id,omitempty"`
 		FileSize         Int64       `json:"file_size,omitempty"`
 		ShareTitle       string      `json:"share_title,omitempty"`
 		ShareState       json.Number `json:"share_state,omitempty"`
 		ForbidReason     string      `json:"forbid_reason,omitempty"`
-		CreateTime       Time        `json:"create_time,omitempty"`
+		CreateTime       Time        `json:"create_time"`
 		ReceiveCode      string      `json:"receive_code,omitempty"`
 		ReceiveCount     Int         `json:"receive_count,omitempty"`
-		ExpireTime       Time        `json:"expire_time,omitempty"`
+		ExpireTime       Time        `json:"expire_time"`
 		FileCategory     int         `json:"file_category,omitempty"`
 		AutoRenewal      Int         `json:"auto_renewal,omitempty"`
 		AutoFillRecvcode Int         `json:"auto_fill_recvcode,omitempty"`
 		CanReport        int         `json:"can_report,omitempty"`
 		CanNotice        int         `json:"can_notice,omitempty"`
 		HaveVioFile      int         `json:"have_vio_file,omitempty"`
-	} `json:"shareinfo,omitempty"`
+	} `json:"shareinfo"`
 	Count      int         `json:"count,omitempty"`
 	List       []*File     `json:"list,omitempty"`
 	ShareState json.Number `json:"share_state,omitempty"`
@@ -566,7 +566,7 @@ type ShareSnapData struct {
 		CanShareAppeal  int `json:"can_share_appeal,omitempty"`
 		PopupAppealPage int `json:"popup_appeal_page,omitempty"`
 		CanGlobalAppeal int `json:"can_global_appeal,omitempty"`
-	} `json:"user_appeal,omitempty"`
+	} `json:"user_appeal"`
 }
 
 // ShareDownloadInfo represents information for a shared download.

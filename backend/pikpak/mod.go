@@ -105,7 +105,7 @@ func (f *Fs) requestRedeem(ctx context.Context, code string) (info *RedeemResult
 	req := struct {
 		ActivationCode string `json:"activation_code"`
 		Data           struct {
-		} `json:"data,omitempty"`
+		} `json:"data"`
 	}{
 		ActivationCode: code,
 	}

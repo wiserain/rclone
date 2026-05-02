@@ -142,11 +142,11 @@ func rsaDecrypt(input []byte) []byte {
 		n := big.NewInt(0).SetBytes(input[offset : offset+sliceSize])
 		m := big.NewInt(0).Exp(n, big.NewInt(int64(rsaServerKey.E)), rsaServerKey.N)
 		b := m.Bytes()
-		index := bytes.IndexByte(b, '\x00')
-		if index < 0 {
+		_, after, ok := bytes.Cut(b, []byte{'\x00'})
+		if !ok {
 			return nil
 		}
-		output = append(output, b[index+1:]...)
+		output = append(output, after...)
 	}
 	return output
 }
