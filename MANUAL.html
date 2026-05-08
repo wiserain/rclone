@@ -5,7 +5,7 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Nick Craig-Wood" />
-  <meta name="dcterms.date" content="2026-05-01" />
+  <meta name="dcterms.date" content="2026-05-08" />
   <title>rclone(1) User Manual</title>
   <style>
     html {
@@ -234,7 +234,7 @@
 <header id="title-block-header">
 <h1 class="title">rclone(1) User Manual</h1>
 <p class="author">Nick Craig-Wood</p>
-<p class="date">May 01, 2026</p>
+<p class="date">May 08, 2026</p>
 </header>
 <h1 id="name">NAME</h1>
 <p>rclone - manage files on cloud storage</p>
@@ -4576,9 +4576,9 @@ SquareBracket</code></pre>
 <pre class="console"><code>rclone convmv &quot;stories/The Quick Brown Fox!.txt&quot; --name-transform &quot;all,command=echo&quot;
 // Output: stories/The Quick Brown Fox!.txt</code></pre>
 <pre class="console"><code>rclone convmv &quot;stories/The Quick Brown Fox!&quot; --name-transform &quot;date=-{YYYYMMDD}&quot;
-// Output: stories/The Quick Brown Fox!-20260501</code></pre>
+// Output: stories/The Quick Brown Fox!-20260508</code></pre>
 <pre class="console"><code>rclone convmv &quot;stories/The Quick Brown Fox!&quot; --name-transform &quot;date=-{macfriendlytime}&quot;
-// Output: stories/The Quick Brown Fox!-2026-05-01 0208PM</code></pre>
+// Output: stories/The Quick Brown Fox!-2026-05-08 0311PM</code></pre>
 <pre class="console"><code>rclone convmv &quot;stories/The Quick Brown Fox!.txt&quot; --name-transform &quot;all,regex=[\\.\\w]/ab&quot;
 // Output: ababababababab/ababab ababababab ababababab ababab!abababab</code></pre>
 <p>The regex command generally accepts Perl-style regular expressions,
@@ -21695,7 +21695,7 @@ split into groups.</p>
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default &quot;rclone/v1.74.0&quot;)</code></pre>
+      --user-agent string                  Set the user-agent to a specified string (default &quot;rclone/v1.74.1&quot;)</code></pre>
 <h2 id="performance">Performance</h2>
 <p>Flags helpful for increasing performance.</p>
 <pre><code>      --buffer-size SizeSuffix   In memory buffer size when reading files for each --transfer (default 16Mi)
@@ -22033,7 +22033,7 @@ split into groups.</p>
       --drime-list-chunk int                                Number of items to list in each call (default 1000)
       --drime-root-folder-id string                         ID of the root folder
       --drime-upload-concurrency int                        Concurrency for multipart uploads and copies (default 4)
-      --drime-upload-cutoff SizeSuffix                      Cutoff for switching to chunked upload (default 200Mi)
+      --drime-upload-cutoff SizeSuffix                      Cutoff for switching to chunked upload (default 5Mi)
       --drime-workspace-id string                           Account ID
       --drive-acknowledge-abuse                             Set to allow files which return cannotDownloadAbusiveFile to be downloaded
       --drive-allow-import-name-change                      Allow the filetype to change when uploading Google docs
@@ -24439,7 +24439,27 @@ investigation:</p>
 <li><a
 href="https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt"><code>TestBisyncRemoteRemote/normalization</code></a></li>
 </ul></li>
-<li>Updated: 2026-05-01-010013
+<li><code>TestHuaweiDrive</code> (<code>huaweidrive</code>)
+<ul>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt"><code>TestBisyncRemoteLocal/ext_paths</code></a></li>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt"><code>TestBisyncRemoteLocal/extended_filenames</code></a></li>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt"><code>TestBisyncRemoteLocal/normalization</code></a></li>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt"><code>TestBisyncLocalRemote/ext_paths</code></a></li>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt"><code>TestBisyncLocalRemote/extended_filenames</code></a></li>
+<li><a href="https://pub.rclone.org/integration-tests/current/">4
+more</a></li>
+</ul></li>
+<li><code>TestS3R2</code> (<code>s3</code>)
+<ul>
+<li><a
+href="https://pub.rclone.org/integration-tests/current/s3-cmd.bisync-TestS3R2-1.txt"><code>TestBisyncRemoteRemote/normalization</code></a></li>
+</ul></li>
+<li>Updated: 2026-05-08-010013
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs ---></li>
 </ul>
 <p>The following backends either have not been tested recently or have
@@ -27336,6 +27356,11 @@ centers for low latency.</li>
 <li>EU South 1</li>
 <li>Provider: Fastly</li>
 </ul></li>
+<li>"eu-west-1"
+<ul>
+<li>EU West 1</li>
+<li>Provider: Fastly</li>
+</ul></li>
 <li>"jp-central-1"
 <ul>
 <li>JP Central 1</li>
@@ -27356,9 +27381,19 @@ centers for low latency.</li>
 <li>US East</li>
 <li>Provider: Fastly</li>
 </ul></li>
+<li>"us-east-1"
+<ul>
+<li>US East 1</li>
+<li>Provider: Fastly</li>
+</ul></li>
 <li>"us-west"
 <ul>
 <li>US West</li>
+<li>Provider: Fastly</li>
+</ul></li>
+<li>"us-west-1"
+<ul>
+<li>US West 1</li>
 <li>Provider: Fastly</li>
 </ul></li>
 <li>"global"
@@ -28298,6 +28333,11 @@ tenant name. Do not select this directly</li>
 <li>EU South 1</li>
 <li>Provider: Fastly</li>
 </ul></li>
+<li>"eu-west-1.object.fastlystorage.app"
+<ul>
+<li>EU West 1</li>
+<li>Provider: Fastly</li>
+</ul></li>
 <li>"jp-central-1.object.fastlystorage.app"
 <ul>
 <li>JP Central 1</li>
@@ -28318,9 +28358,19 @@ tenant name. Do not select this directly</li>
 <li>US East</li>
 <li>Provider: Fastly</li>
 </ul></li>
+<li>"us-east-1.object.fastlystorage.app"
+<ul>
+<li>US East 1</li>
+<li>Provider: Fastly</li>
+</ul></li>
 <li>"us-west.object.fastlystorage.app"
 <ul>
 <li>US West</li>
+<li>Provider: Fastly</li>
+</ul></li>
+<li>"us-west-1.object.fastlystorage.app"
+<ul>
+<li>US West 1</li>
 <li>Provider: Fastly</li>
 </ul></li>
 <li>"s5lu.com"
@@ -41443,7 +41493,7 @@ The minimum is 0 and the maximum is 5 GiB.</p>
 <li>Config: upload_cutoff</li>
 <li>Env Var: RCLONE_DRIME_UPLOAD_CUTOFF</li>
 <li>Type: SizeSuffix</li>
-<li>Default: 200Mi</li>
+<li>Default: 5Mi</li>
 </ul>
 <h4 id="drime-chunk-size">--drime-chunk-size</h4>
 <p>Chunk size to use for uploading.</p>
@@ -65008,6 +65058,71 @@ the output.</p>
 <!-- autogenerated options stop -->
 <!-- markdownlint-disable line-length -->
 <h1 id="changelog-1">Changelog</h1>
+<h2 id="v1.74.1---2026-05-08">v1.74.1 - 2026-05-08</h2>
+<p><a
+href="https://github.com/rclone/rclone/compare/v1.74.0...v1.74.1">See
+commits</a></p>
+<ul>
+<li>Bug Fixes
+<ul>
+<li>bisync: Fix retryable without <code>--resync</code> error message
+when <code>--resync</code> has a critical failure (Gustavo V. F.)</li>
+<li>build
+<ul>
+<li>Fix multiple CVEs by upgrading to go1.26.3 (Nick Craig-Wood)
+<ul>
+<li>CVE-2026-42501: cmd/go: malicious module proxy can bypass checksum
+database</li>
+<li>CVE-2026-39825: net/http/httputil: ReverseProxy forwards queries
+with more than urlmaxqueryparams parameters</li>
+<li>CVE-2026-39836: net: panic in Dial and LookupPort when handling NUL
+byte on Windows</li>
+<li>CVE-2026-42499: net/mail: quadratic string concatenation in
+consumePhrase</li>
+<li>CVE-2026-39820: net/mail: quadratic string concatentation in
+consumeComment</li>
+<li>CVE-2026-39819: cmd/go: "go bug" follows symlinks in predictable
+temporary filenames</li>
+<li>CVE-2026-39817: cmd/go: "go tool pack" does not sanitize output
+paths</li>
+<li>CVE-2026-33814: net/http: infinite loop in HTTP/2 transport when
+given bad SETTINGS_MAX_FRAME_SIZE</li>
+<li>CVE-2026-39826: html/template: escaper bypass leads to XSS</li>
+<li>CVE-2026-33811: net: crash when handling long CNAME response</li>
+<li>CVE-2026-39823: html/template: bypass of meta content URL escaping
+causes XSS</li>
+</ul></li>
+<li>Update golang.org/x/net to v0.53.0 to fix CVE-2026-33814 (Nick
+Craig-Wood)</li>
+</ul></li>
+<li>cmd/serve/s3: Return object listings in key order (Leon
+Brocard)</li>
+</ul></li>
+<li>Cloudinary
+<ul>
+<li>Fix retrying every error and fix pacer sleep units (Nick
+Craig-Wood)</li>
+</ul></li>
+<li>Drime
+<ul>
+<li>Fix large file uploads landing in drive root instead of configured
+folder (Nick Craig-Wood)</li>
+<li>Fix uploads of 100..200M files (Nick Craig-Wood)</li>
+</ul></li>
+<li>Protondrive
+<ul>
+<li>Route HTTP through rclone's transport (Nick Craig-Wood)</li>
+<li>Route library logging through rclone's logger (Nick Craig-Wood)</li>
+<li>Fix segfault when copying files missing revision metadata (Nick
+Craig-Wood)</li>
+</ul></li>
+<li>S3
+<ul>
+<li>Fix STS call per request by caching AssumeRole credentials (Nick
+Craig-Wood)</li>
+<li>Add new Fastly Object Storage regions (Leon Brocard)</li>
+</ul></li>
+</ul>
 <h2 id="v1.74.0---2026-05-01">v1.74.0 - 2026-05-01</h2>
 <p><a
 href="https://github.com/rclone/rclone/compare/v1.73.0...v1.74.0">See
