@@ -231,12 +231,12 @@ rclone convmv "stories/The Quick Brown Fox!.txt" --name-transform "all,command=e
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{YYYYMMDD}"
-// Output: stories/The Quick Brown Fox!-20260501
+// Output: stories/The Quick Brown Fox!-20260508
 ```
 
 ```console
 rclone convmv "stories/The Quick Brown Fox!" --name-transform "date=-{macfriendlytime}"
-// Output: stories/The Quick Brown Fox!-2026-05-01 0208PM
+// Output: stories/The Quick Brown Fox!-2026-05-08 0311PM
 ```
 
 ```console

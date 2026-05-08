@@ -15,7 +15,7 @@
 . ftr VB CB
 . ftr VBI CBI
 .\}
-.TH "rclone" "1" "May 01, 2026" "User Manual" ""
+.TH "rclone" "1" "May 08, 2026" "User Manual" ""
 .hy
 .SH NAME
 .PP
@@ -6326,14 +6326,14 @@ rclone convmv \[dq]stories/The Quick Brown Fox!.txt\[dq] --name-transform \[dq]a
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{YYYYMMDD}\[dq]
-// Output: stories/The Quick Brown Fox!-20260501
+// Output: stories/The Quick Brown Fox!-20260508
 \f[R]
 .fi
 .IP
 .nf
 \f[C]
 rclone convmv \[dq]stories/The Quick Brown Fox!\[dq] --name-transform \[dq]date=-{macfriendlytime}\[dq]
-// Output: stories/The Quick Brown Fox!-2026-05-01 0208PM
+// Output: stories/The Quick Brown Fox!-2026-05-08 0311PM
 \f[R]
 .fi
 .IP
@@ -30179,7 +30179,7 @@ Flags for general networking and HTTP stuff.
       --tpslimit float                     Limit HTTP transactions per second to this
       --tpslimit-burst int                 Max burst of transactions for --tpslimit (default 1)
       --use-cookies                        Enable session cookiejar
-      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.74.0\[dq])
+      --user-agent string                  Set the user-agent to a specified string (default \[dq]rclone/v1.74.1\[dq])
 \f[R]
 .fi
 .SS Performance
@@ -30577,7 +30577,7 @@ Backend-only flags (these can be set in the config file also).
       --drime-list-chunk int                                Number of items to list in each call (default 1000)
       --drime-root-folder-id string                         ID of the root folder
       --drime-upload-concurrency int                        Concurrency for multipart uploads and copies (default 4)
-      --drime-upload-cutoff SizeSuffix                      Cutoff for switching to chunked upload (default 200Mi)
+      --drime-upload-cutoff SizeSuffix                      Cutoff for switching to chunked upload (default 5Mi)
       --drime-workspace-id string                           Account ID
       --drive-acknowledge-abuse                             Set to allow files which return cannotDownloadAbusiveFile to be downloaded
       --drive-allow-import-name-change                      Allow the filetype to change when uploading Google docs
@@ -33483,7 +33483,29 @@ The following backends have known issues that need more investigation:
 \f[V]TestBisyncRemoteRemote/normalization\f[R] (https://pub.rclone.org/integration-tests/current/dropbox-cmd.bisync-TestDropbox-1.txt)
 .RE
 .IP \[bu] 2
-Updated: 2026-05-01-010013
+\f[V]TestHuaweiDrive\f[R] (\f[V]huaweidrive\f[R])
+.RS 2
+.IP \[bu] 2
+\f[V]TestBisyncRemoteLocal/ext_paths\f[R] (https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+.IP \[bu] 2
+\f[V]TestBisyncRemoteLocal/extended_filenames\f[R] (https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+.IP \[bu] 2
+\f[V]TestBisyncRemoteLocal/normalization\f[R] (https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+.IP \[bu] 2
+\f[V]TestBisyncLocalRemote/ext_paths\f[R] (https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+.IP \[bu] 2
+\f[V]TestBisyncLocalRemote/extended_filenames\f[R] (https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+.IP \[bu] 2
+4 more (https://pub.rclone.org/integration-tests/current/)
+.RE
+.IP \[bu] 2
+\f[V]TestS3R2\f[R] (\f[V]s3\f[R])
+.RS 2
+.IP \[bu] 2
+\f[V]TestBisyncRemoteRemote/normalization\f[R] (https://pub.rclone.org/integration-tests/current/s3-cmd.bisync-TestS3R2-1.txt)
+.RE
+.IP \[bu] 2
+Updated: 2026-05-08-010013
 .PP
 The following backends either have not been tested recently or have
 known issues that are deemed unfixable for the time being:
@@ -37346,6 +37368,14 @@ EU South 1
 Provider: Fastly
 .RE
 .IP \[bu] 2
+\[dq]eu-west-1\[dq]
+.RS 2
+.IP \[bu] 2
+EU West 1
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
 \[dq]jp-central-1\[dq]
 .RS 2
 .IP \[bu] 2
@@ -37378,10 +37408,26 @@ US East
 Provider: Fastly
 .RE
 .IP \[bu] 2
+\[dq]us-east-1\[dq]
+.RS 2
+.IP \[bu] 2
+US East 1
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
 \[dq]us-west\[dq]
 .RS 2
 .IP \[bu] 2
 US West
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
+\[dq]us-west-1\[dq]
+.RS 2
+.IP \[bu] 2
+US West 1
 .IP \[bu] 2
 Provider: Fastly
 .RE
@@ -38891,6 +38937,14 @@ EU South 1
 Provider: Fastly
 .RE
 .IP \[bu] 2
+\[dq]eu-west-1.object.fastlystorage.app\[dq]
+.RS 2
+.IP \[bu] 2
+EU West 1
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
 \[dq]jp-central-1.object.fastlystorage.app\[dq]
 .RS 2
 .IP \[bu] 2
@@ -38923,10 +38977,26 @@ US East
 Provider: Fastly
 .RE
 .IP \[bu] 2
+\[dq]us-east-1.object.fastlystorage.app\[dq]
+.RS 2
+.IP \[bu] 2
+US East 1
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
 \[dq]us-west.object.fastlystorage.app\[dq]
 .RS 2
 .IP \[bu] 2
 US West
+.IP \[bu] 2
+Provider: Fastly
+.RE
+.IP \[bu] 2
+\[dq]us-west-1.object.fastlystorage.app\[dq]
+.RS 2
+.IP \[bu] 2
+US West 1
 .IP \[bu] 2
 Provider: Fastly
 .RE
@@ -56983,7 +57053,7 @@ Env Var: RCLONE_DRIME_UPLOAD_CUTOFF
 .IP \[bu] 2
 Type: SizeSuffix
 .IP \[bu] 2
-Default: 200Mi
+Default: 5Mi
 .SS --drime-chunk-size
 .PP
 Chunk size to use for uploading.
@@ -89990,6 +90060,96 @@ Options:
 .IP \[bu] 2
 \[dq]error\[dq]: Return an error based on option value.
 .SH Changelog
+.SS v1.74.1 - 2026-05-08
+.PP
+See commits (https://github.com/rclone/rclone/compare/v1.74.0...v1.74.1)
+.IP \[bu] 2
+Bug Fixes
+.RS 2
+.IP \[bu] 2
+bisync: Fix retryable without \f[V]--resync\f[R] error message when
+\f[V]--resync\f[R] has a critical failure (Gustavo V.
+F.)
+.IP \[bu] 2
+build
+.RS 2
+.IP \[bu] 2
+Fix multiple CVEs by upgrading to go1.26.3 (Nick Craig-Wood)
+.RS 2
+.IP \[bu] 2
+CVE-2026-42501: cmd/go: malicious module proxy can bypass checksum
+database
+.IP \[bu] 2
+CVE-2026-39825: net/http/httputil: ReverseProxy forwards queries with
+more than urlmaxqueryparams parameters
+.IP \[bu] 2
+CVE-2026-39836: net: panic in Dial and LookupPort when handling NUL byte
+on Windows
+.IP \[bu] 2
+CVE-2026-42499: net/mail: quadratic string concatenation in
+consumePhrase
+.IP \[bu] 2
+CVE-2026-39820: net/mail: quadratic string concatentation in
+consumeComment
+.IP \[bu] 2
+CVE-2026-39819: cmd/go: \[dq]go bug\[dq] follows symlinks in predictable
+temporary filenames
+.IP \[bu] 2
+CVE-2026-39817: cmd/go: \[dq]go tool pack\[dq] does not sanitize output
+paths
+.IP \[bu] 2
+CVE-2026-33814: net/http: infinite loop in HTTP/2 transport when given
+bad SETTINGS_MAX_FRAME_SIZE
+.IP \[bu] 2
+CVE-2026-39826: html/template: escaper bypass leads to XSS
+.IP \[bu] 2
+CVE-2026-33811: net: crash when handling long CNAME response
+.IP \[bu] 2
+CVE-2026-39823: html/template: bypass of meta content URL escaping
+causes XSS
+.RE
+.IP \[bu] 2
+Update golang.org/x/net to v0.53.0 to fix CVE-2026-33814 (Nick
+Craig-Wood)
+.RE
+.IP \[bu] 2
+cmd/serve/s3: Return object listings in key order (Leon Brocard)
+.RE
+.IP \[bu] 2
+Cloudinary
+.RS 2
+.IP \[bu] 2
+Fix retrying every error and fix pacer sleep units (Nick Craig-Wood)
+.RE
+.IP \[bu] 2
+Drime
+.RS 2
+.IP \[bu] 2
+Fix large file uploads landing in drive root instead of configured
+folder (Nick Craig-Wood)
+.IP \[bu] 2
+Fix uploads of 100..200M files (Nick Craig-Wood)
+.RE
+.IP \[bu] 2
+Protondrive
+.RS 2
+.IP \[bu] 2
+Route HTTP through rclone\[aq]s transport (Nick Craig-Wood)
+.IP \[bu] 2
+Route library logging through rclone\[aq]s logger (Nick Craig-Wood)
+.IP \[bu] 2
+Fix segfault when copying files missing revision metadata (Nick
+Craig-Wood)
+.RE
+.IP \[bu] 2
+S3
+.RS 2
+.IP \[bu] 2
+Fix STS call per request by caching AssumeRole credentials (Nick
+Craig-Wood)
+.IP \[bu] 2
+Add new Fastly Object Storage regions (Leon Brocard)
+.RE
 .SS v1.74.0 - 2026-05-01
 .PP
 See commits (https://github.com/rclone/rclone/compare/v1.73.0...v1.74.0)
