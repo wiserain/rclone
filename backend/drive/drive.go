@@ -2299,6 +2299,22 @@ func (f *Fs) listRRunner(ctx context.Context, wg *sync.WaitGroup, in chan listRE
 		listRSlices{dirs, paths}.Sort()
 		var iErr error
 		foundItems := false
+		parentHits := make([]int, len(dirs))
+		addItem := func(parentIndex int, item *drive.File) bool {
+			remote := path.Join(paths[parentIndex], item.Name)
+			entry, err := f.itemToDirEntry(ctx, remote, item)
+			if err != nil {
+				iErr = err
+				return true
+			}
+
+			err = cb(entry)
+			if err != nil {
+				iErr = err
+				return true
+			}
+			return false
+		}
 		_, err := f.list(ctx, dirs, "", false, false, f.opt.TrashedOnly, false, func(item *drive.File) bool {
 			// shared with me items have no parents when at the root
 			if f.opt.SharedWithMe && len(item.Parents) == 0 && len(paths) == 1 && paths[0] == "" {
@@ -2317,6 +2333,7 @@ func (f *Fs) listRRunner(ctx context.Context, wg *sync.WaitGroup, in chan listRE
 					// - shared with me items have no parents at the root
 					// - if using a root alias, e.g. "root" or "appDataFolder" the ID won't match
 					i = 0
+					parentHits[i]++
 					// items at root can have more than one parent so we need to put
 					// the item in just once.
 					earlyExit = true
@@ -2326,17 +2343,9 @@ func (f *Fs) listRRunner(ctx context.Context, wg *sync.WaitGroup, in chan listRE
 					if i == len(dirs) || dirs[i] != parent {
 						continue
 					}
+					parentHits[i]++
 				}
-				remote := path.Join(paths[i], item.Name)
-				entry, err := f.itemToDirEntry(ctx, remote, item)
-				if err != nil {
-					iErr = err
-					return true
-				}
-
-				err = cb(entry)
-				if err != nil {
-					iErr = err
+				if addItem(i, item) {
 					return true
 				}
 
@@ -2347,6 +2356,29 @@ func (f *Fs) listRRunner(ctx context.Context, wg *sync.WaitGroup, in chan listRE
 			}
 			return false
 		})
+		// Found items in the multi directory listing, but some
+		// directories had no entries. Retry those directories
+		// individually to work around a bug in google drive where
+		// "(A in parents) or (B in parents)" can return entries for
+		// some parents but miss others.
+		if f.opt.FastListBugFix && len(dirs) > 1 && foundItems && iErr == nil && err == nil {
+			relisted := 0
+			for i, hits := range parentHits {
+				if hits != 0 {
+					continue
+				}
+				relisted++
+				_, err = f.list(ctx, []string{dirs[i]}, "", false, false, f.opt.TrashedOnly, false, func(item *drive.File) bool {
+					return addItem(i, item)
+				})
+				if err != nil || iErr != nil {
+					break
+				}
+			}
+			if relisted > 0 {
+				fs.Debugf(f, "Recycled %d directories individually to work around partial empty result from multi listing (%d)", relisted, len(dirs))
+			}
+		}
 		// Found no items in more than one directory. Retry these as
 		// individual directories This is to work around a bug in google
 		// drive where (A in parents) or (B in parents) returns nothing
