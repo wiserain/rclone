@@ -38,7 +38,22 @@ func (v vfsHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 }
 
 func (v vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
-	file, err := v.OpenFile(r.Filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0777)
+	// Respect the flags requested in the SFTP OPEN packet
+	p := r.Pflags()
+	flags := os.O_WRONLY
+	if p.Append {
+		flags |= os.O_APPEND
+	}
+	if p.Creat {
+		flags |= os.O_CREATE
+	}
+	if p.Trunc {
+		flags |= os.O_TRUNC
+	}
+	if p.Excl {
+		flags |= os.O_EXCL
+	}
+	file, err := v.OpenFile(r.Filepath, flags, 0777)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +64,18 @@ func (v vfsHandler) Filecmd(r *sftp.Request) error {
 	switch r.Method {
 	case "Setstat":
 		attr := r.Attributes()
-		if attr.Mtime != 0 {
+		flags := r.AttrFlags()
+		// A size attribute is a request to truncate the file
+		if flags.Size {
+			node, err := v.Stat(r.Filepath)
+			if err != nil {
+				return err
+			}
+			if err := node.Truncate(int64(attr.Size)); err != nil {
+				return err
+			}
+		}
+		if flags.Acmodtime {
 			modTime := time.Unix(int64(attr.Mtime), 0)
 			err := v.Chtimes(r.Filepath, modTime, modTime)
 			if err != nil {
