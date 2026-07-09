@@ -117,7 +117,10 @@ func (b *s3Backend) HeadObject(ctx context.Context, bucketName, objectName strin
 		return nil, gofakes3.BucketNotFound(bucketName)
 	}
 
-	fp := path.Join(bucketName, objectName)
+	fp, err := bucketObjectPath(bucketName, objectName)
+	if err != nil {
+		return nil, err
+	}
 	node, err := _vfs.Stat(fp)
 	if err != nil {
 		return nil, gofakes3.KeyNotFound(objectName)
@@ -127,18 +130,24 @@ func (b *s3Backend) HeadObject(ctx context.Context, bucketName, objectName strin
 		return nil, gofakes3.KeyNotFound(objectName)
 	}
 
+	// node.DirEntry() is nil while the file is still being uploaded to the
+	// backing remote (e.g. just after a multipart upload, before the VFS
+	// writeback completes). In that window the file already exists in the VFS
+	// and is returned by ListBucket, so serve its metadata from the node
+	// rather than returning a spurious 404. getFileHashByte already falls back
+	// to hashing the VFS cache when the backing object is not available yet.
 	entry := node.DirEntry()
-	if entry == nil {
-		return nil, gofakes3.KeyNotFound(objectName)
-	}
-
-	fobj := entry.(fs.Object)
 	size := node.Size()
-	hash := getFileHashByte(fobj, b.s.etagHashType)
+	hash := getFileHashByte(node, b.s.etagHashType)
+
+	mimeType := fs.MimeTypeFromName(objectName)
+	if fobj, ok := entry.(fs.Object); ok {
+		mimeType = fs.MimeType(context.Background(), fobj)
+	}
 
 	meta := map[string]string{
 		"Last-Modified": formatHeaderTime(node.ModTime()),
-		"Content-Type":  fs.MimeType(context.Background(), fobj),
+		"Content-Type":  mimeType,
 	}
 
 	if val, ok := b.meta.Load(fp); ok {
@@ -166,7 +175,10 @@ func (b *s3Backend) GetObject(ctx context.Context, bucketName, objectName string
 		return nil, gofakes3.BucketNotFound(bucketName)
 	}
 
-	fp := path.Join(bucketName, objectName)
+	fp, err := bucketObjectPath(bucketName, objectName)
+	if err != nil {
+		return nil, err
+	}
 	node, err := _vfs.Stat(fp)
 	if err != nil {
 		return nil, gofakes3.KeyNotFound(objectName)
@@ -176,16 +188,14 @@ func (b *s3Backend) GetObject(ctx context.Context, bucketName, objectName string
 		return nil, gofakes3.KeyNotFound(objectName)
 	}
 
+	// As in HeadObject, node.DirEntry() may be nil while the file is still
+	// being written back to the backing remote. The data is readable from the
+	// VFS cache via file.Open regardless, so serve it instead of 404ing.
 	entry := node.DirEntry()
-	if entry == nil {
-		return nil, gofakes3.KeyNotFound(objectName)
-	}
-
-	fobj := entry.(fs.Object)
 	file := node.(*vfs.File)
 
 	size := node.Size()
-	hash := getFileHashByte(fobj, b.s.etagHashType)
+	hash := getFileHashByte(node, b.s.etagHashType)
 
 	in, err := file.Open(os.O_RDONLY)
 	if err != nil {
@@ -211,9 +221,14 @@ func (b *s3Backend) GetObject(ctx context.Context, bucketName, objectName string
 		rdr = limitReadCloser(rdr, in.Close, rnge.Length)
 	}
 
+	mimeType := fs.MimeTypeFromName(objectName)
+	if fobj, ok := entry.(fs.Object); ok {
+		mimeType = fs.MimeType(context.Background(), fobj)
+	}
+
 	meta := map[string]string{
 		"Last-Modified": formatHeaderTime(node.ModTime()),
-		"Content-Type":  fs.MimeType(context.Background(), fobj),
+		"Content-Type":  mimeType,
 	}
 
 	if val, ok := b.meta.Load(fp); ok {
@@ -301,7 +316,10 @@ func (b *s3Backend) PutObject(
 		return result, gofakes3.BucketNotFound(bucketName)
 	}
 
-	fp := path.Join(bucketName, objectName)
+	fp, err := bucketObjectPath(bucketName, objectName)
+	if err != nil {
+		return result, err
+	}
 	objectDir := path.Dir(fp)
 	// _, err = db.fs.Stat(objectDir)
 	// if err == vfs.ENOENT {
@@ -394,7 +412,10 @@ func (b *s3Backend) deleteObject(ctx context.Context, bucketName, objectName str
 		return gofakes3.BucketNotFound(bucketName)
 	}
 
-	fp := path.Join(bucketName, objectName)
+	fp, err := bucketObjectPath(bucketName, objectName)
+	if err != nil {
+		return err
+	}
 	// S3 does not report an error when attempting to delete a key that does not exist, so
 	// we need to skip IsNotExist errors.
 	if err := _vfs.Remove(fp); err != nil && !os.IsNotExist(err) {
@@ -465,7 +486,10 @@ func (b *s3Backend) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket
 	if err != nil {
 		return result, err
 	}
-	fp := path.Join(srcBucket, srcKey)
+	fp, err := bucketObjectPath(srcBucket, srcKey)
+	if err != nil {
+		return result, err
+	}
 	if srcBucket == dstBucket && srcKey == dstKey {
 		b.meta.Store(fp, meta)
 

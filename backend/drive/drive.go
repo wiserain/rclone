@@ -148,6 +148,7 @@ var (
 	_importFormats   map[string][]string           // allowed import MIME type conversions
 	templatesOnce    sync.Once                     // parse link templates only once
 	_linkTemplates   map[string]*template.Template // available link types
+	gdocsWarnOnce    sync.Once                     // warn once about skipped non-exportable Google documents
 )
 
 // rwChoices type for fs.Bits
@@ -1393,6 +1394,7 @@ func createOAuthClient(ctx context.Context, opt *Options, name string, m configm
 			return nil, fmt.Errorf("failed to create client from environment: %w", err)
 		}
 	} else {
+		oauthutil.SharedClientIDWarning(name, "Google Drive", "https://rclone.org/drive/#making-your-own-client-id", m)
 		oAuthClient, _, err = oauthutil.NewClientWithBaseClient(ctx, name, m, driveConfig, getClient(ctx, opt))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create oauth client: %w", err)
@@ -1887,6 +1889,9 @@ func (f *Fs) newObjectWithExportInfo(
 		// If item MimeType is in the ExportFormats then it is a google doc
 		if !isDocument {
 			fs.Debugf(remote, "Ignoring unknown document type %q", info.MimeType)
+			gdocsWarnOnce.Do(func() {
+				fs.Logf(remote, "Skipping unexportable google document %q. Use --drive-show-all-gdocs to include them in server side copy and move", info.MimeType)
+			})
 			return nil, fs.ErrorObjectNotFound
 		}
 		if extension == "" {

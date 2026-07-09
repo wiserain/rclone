@@ -477,9 +477,9 @@ their checksums would change from run to run (due to small variances in the
 internals of the generated export file.) Therefore, bisync automatically skips
 `--download-hash` for files with a size less than 0.
 
-See also: [`Hasher`](https://rclone.org/hasher/) backend,
-[`cryptcheck`](/commands/rclone_cryptcheck/) command, [`rclone check
---download`](/commands/rclone_check/) option,
+See also: [`Hasher`](/hasher/) backend,
+[`cryptcheck`](/commands/rclone_cryptcheck/) command,
+[`rclone check --download`](/commands/rclone_check/) option,
 [`md5sum`](/commands/rclone_md5sum/) command
 
 ### --max-delete
@@ -1053,9 +1053,20 @@ encodings.)
 The following backends have known issues that need more investigation:
 
 <!--- start list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
-- `TestFilen` (`filen`)
-  - [`TestBisyncRemoteRemote/resync_modes`](https://pub.rclone.org/integration-tests/current/filen-cmd.bisync-TestFilen-1.txt)
-  - [`TestBisyncRemoteRemote/rmdirs`](https://pub.rclone.org/integration-tests/current/filen-cmd.bisync-TestFilen-1.txt)
+- `TestGoogleCloudStorage,directory_markers` (`googlecloudstorage`)
+  - [`TestBisyncRemoteLocal/all_changed`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
+  - [`TestBisyncRemoteLocal/backupdir`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
+  - [`TestBisyncRemoteLocal/basic`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
+  - [`TestBisyncRemoteLocal/changes`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
+  - [`TestBisyncRemoteLocal/check_access`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
+  - [79 more](https://pub.rclone.org/integration-tests/current/)
+- `TestGoogleCloudStorage` (`googlecloudstorage`)
+  - [`TestBisyncRemoteLocal/all_changed`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
+  - [`TestBisyncRemoteLocal/backupdir`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
+  - [`TestBisyncRemoteLocal/basic`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
+  - [`TestBisyncRemoteLocal/changes`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
+  - [`TestBisyncRemoteLocal/check_access`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
+  - [79 more](https://pub.rclone.org/integration-tests/current/)
 - `TestHuaweiDrive` (`huaweidrive`)
   - [`TestBisyncRemoteLocal/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncRemoteLocal/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
@@ -1063,9 +1074,7 @@ The following backends have known issues that need more investigation:
   - [`TestBisyncLocalRemote/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncLocalRemote/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [4 more](https://pub.rclone.org/integration-tests/current/)
-- `TestSeafile` (`seafile`)
-  - [`TestBisyncLocalRemote/rmdirs`](https://pub.rclone.org/integration-tests/current/seafile-cmd.bisync-TestSeafile-1.txt)
-- Updated: 2026-06-05-010010
+- Updated: 2026-07-08-010014
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -1130,8 +1139,8 @@ a mechanism to mark files as needing to be internally rechecked next time, for
 added safety. It should therefore no longer be necessary to sync only at quiet
 times -- however, note that an error can still occur if a file happens to change
 at the exact moment it's being read/written by bisync (same as would happen in
-`rclone sync`.) (See also: [`--ignore-checksum`](https://rclone.org/docs/#ignore-checksum),
-[`--local-no-check-updated`](https://rclone.org/local/#local-no-check-updated))
+`rclone sync`.) (See also: [`--ignore-checksum`](/docs/#ignore-checksum),
+[`--local-no-check-updated`](/local/#local-no-check-updated))
 
 ### Empty directories
 
@@ -1170,6 +1179,11 @@ Otherwise, the most effective and efficient method of renaming a directory
 is to rename it to the same name on both sides. (As of `rclone v1.64`,
 a `--resync` is no longer required after doing so, as bisync will automatically
 detect that Path1 and Path2 are in agreement.)
+
+Note that although the flag --track-renames ensures that renamed/moved files won't
+be deleted and uploaded again, they are still counted as deleted files for purposes
+of the --max-delete flag (as this check happens before the rename detection
+operation). See [this issue](https://github.com/rclone/rclone/issues/8685).
 
 ### `--fast-list` used by default
 
@@ -1504,7 +1518,7 @@ and in most cases it's probably not what you want!
 
 To bisync Google Docs as URL shortcut links (in a manner similar to "Drive for
 Desktop"), use: `--drive-export-formats url` (or
-[alternatives](https://rclone.org/drive/#exportformats:~:text=available%20Google%20Documents.-,Extension,macOS,-Standard%20options).)
+[alternatives](/drive/#exportformats:~:text=available%20Google%20Documents.-,Extension,macOS,-Standard%20options).)
 
 Note that these link files cannot be edited on the non-drive side -- you will
 get errors if you try to sync an edited link file back to drive. They CAN be
