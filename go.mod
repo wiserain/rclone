@@ -20,7 +20,7 @@ require (
 	github.com/abbot/go-http-auth v0.4.0
 	github.com/adrg/xdg v0.5.3
 	github.com/aead/ecdh v0.2.0
-	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.4.0
+	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.5.3
 	github.com/anacrolix/dms v1.7.2
 	github.com/anacrolix/log v0.17.0
 	github.com/andreburgaud/crypt2go v1.8.0
