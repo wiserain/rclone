@@ -3267,7 +3267,9 @@ The available flags are:
 - `auth` dumps HTTP headers like `headers`, but also includes any `Authorization:`
   headers. This means the output will probably contain sensitive information.
   Use `headers` to dump without `Authorization:` headers. Can be very verbose.
-  Useful for debugging only.
+  Useful for debugging only. This flag also makes the debug log of the config
+  process (e.g. `rclone config -vv`) show answers to questions, passwords and
+  tokens which are otherwise redacted.
 - `bodies` dumps HTTP headers and bodies. May contain sensitive info.
   Can be very verbose.  Useful for debugging only. Note that the bodies
   are buffered in memory so don't use this for enormous files.
@@ -3289,6 +3291,22 @@ The available flags are:
   the other HTTP debugging flags (e.g. `requests`, `bodies`). By
   default the auth will be masked - use with `auth` to have the curl
   commands with authentication too.
+- `errors` only dumps the HTTP transactions which fail with a retryable
+  error - that is a transport error, an HTTP 429 (too many requests) or an
+  HTTP 5xx server error. The other dump flags control what is dumped, so
+  for example use `--dump errors,bodies` to dump the headers and bodies of
+  failed transactions only. On its own `--dump errors` dumps the headers.
+  This lets you capture first-failure diagnostics without the noise of
+  dumping every transaction. May contain sensitive info.
+- `trace` logs connection level events for each HTTP transaction using Go's
+  `net/http/httptrace` - DNS resolution, TCP connect, TLS handshake (including
+  the negotiated TLS version, cipher, ALPN protocol and server certificate),
+  connection reuse, request write and time to first response byte. Each line is
+  tagged with the time elapsed since the start of the transaction so you can see
+  where the time goes. This is complementary to the other dump flags: it shows
+  how the connection behaved rather than what was sent, so it is useful for
+  debugging connectivity, DNS, TLS, proxy and keep-alive problems. It does not
+  dump headers or bodies - combine it with `headers` or `bodies` for that.
 
 ## Filtering
 
@@ -3304,6 +3322,7 @@ For the filtering options
 - `--include-from`
 - `--files-from`
 - `--files-from-raw`
+- `--files-from0`
 - `--min-size`
 - `--max-size`
 - `--min-age`

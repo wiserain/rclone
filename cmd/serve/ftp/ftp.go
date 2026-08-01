@@ -5,6 +5,7 @@ package ftp
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,6 @@ import (
 	"github.com/rclone/rclone/cmd/serve/proxy/proxyflags"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
-	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/fs/log"
@@ -96,19 +96,19 @@ func init() {
 	serve.AddRc("ftp", func(ctx context.Context, f fs.Fs, in rc.Params) (serve.Handle, error) {
 		// Read VFS Opts
 		var vfsOpt = vfscommon.Opt // set default opts
-		err := configstruct.SetAny(in, &vfsOpt)
+		err := rc.ParseOptions(in, "vfsOpt", &vfsOpt)
 		if err != nil {
 			return nil, err
 		}
 		// Read Proxy Opts
 		var proxyOpt = proxy.Opt // set default opts
-		err = configstruct.SetAny(in, &proxyOpt)
+		err = rc.ParseOptions(in, "proxyOpt", &proxyOpt)
 		if err != nil {
 			return nil, err
 		}
 		// Read opts
 		var opt = Opt // set default opts
-		err = configstruct.SetAny(in, &opt)
+		err = rc.ParseOptions(in, "opt", &opt)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +334,13 @@ func (d *driver) CheckPasswd(sctx *ftp.Context, user, pass string) (ok bool, err
 		d.userPass[user] = oPass
 		d.userPassMu.Unlock()
 	} else {
-		ok = d.opt.User == user && (d.opt.Pass == "" || d.opt.Pass == pass)
+		userOK := subtle.ConstantTimeCompare([]byte(d.opt.User), []byte(user))
+		// No password configured means any password is accepted
+		passOK := 1
+		if d.opt.Pass != "" {
+			passOK = subtle.ConstantTimeCompare([]byte(d.opt.Pass), []byte(pass))
+		}
+		ok = (userOK & passOK) == 1
 		if !ok {
 			fs.Infof(nil, "login failed: bad credentials")
 			return false, nil

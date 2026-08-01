@@ -10,22 +10,25 @@ import (
 	"context"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	_ "github.com/rclone/rclone/backend/local"
 	"github.com/rclone/rclone/cmd/serve/proxy"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/vfs"
 	"github.com/rclone/rclone/vfs/vfscommon"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
 
-// startTestServer starts an sftp server serving a temporary local directory
-// with the given VFS options and returns a connected sftp client.
-func startTestServer(t *testing.T, vfsOpt *vfscommon.Options) *sftp.Client {
+// startTestSSHClient starts an sftp server serving a temporary local directory
+// with the given VFS options and returns an ssh client connected to it.
+func startTestSSHClient(t *testing.T, vfsOpt *vfscommon.Options) *ssh.Client {
 	ctx := context.Background()
 
 	f, err := fs.NewFs(ctx, t.TempDir())
@@ -56,7 +59,13 @@ func startTestServer(t *testing.T, vfsOpt *vfscommon.Options) *sftp.Client {
 		_ = conn.Close()
 	})
 
-	client, err := sftp.NewClient(conn)
+	return conn
+}
+
+// startTestServer starts an sftp server as startTestSSHClient does and
+// returns a connected sftp client.
+func startTestServer(t *testing.T, vfsOpt *vfscommon.Options) *sftp.Client {
+	client, err := sftp.NewClient(startTestSSHClient(t, vfsOpt))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = client.Close()
@@ -166,6 +175,124 @@ func TestSetstatTruncate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rd.Close())
 	assert.Equal(t, strings.Repeat("A", 10), string(got))
+}
+
+// Test that the statvfs@openssh.com extension returns filesystem usage from
+// the VFS rather than an unsupported status.
+func TestStatVFS(t *testing.T) {
+	vfsOpt := vfscommon.Opt
+	vfsOpt.CacheMode = vfscommon.CacheModeWrites
+	client := startTestServer(t, &vfsOpt)
+
+	st, err := client.StatVFS("/")
+	require.NoError(t, err)
+
+	assert.Greater(t, st.TotalSpace(), uint64(0), "expected non-zero total space")
+	assert.LessOrEqual(t, st.FreeSpace(), st.TotalSpace(), "free space should not exceed total")
+	assert.Equal(t, uint64(255), st.Namemax)
+}
+
+// Test that a SETSTAT request setting the modification time is honoured, even
+// when the time happens to be the Unix epoch
+func TestSetstatMtime(t *testing.T) {
+	vfsOpt := vfscommon.Opt
+	vfsOpt.CacheMode = vfscommon.CacheModeOff
+	client := startTestServer(t, &vfsOpt)
+
+	const fileName = "file.bin"
+	require.NoError(t, writeFile(client, fileName, "hello"))
+
+	epoch := time.Unix(0, 0)
+	require.NoError(t, client.Chtimes(fileName, epoch, epoch))
+
+	fi, err := client.Stat(fileName)
+	require.NoError(t, err)
+	assert.True(t, fi.ModTime().Equal(epoch), "mtime not applied: got %v want %v", fi.ModTime(), epoch)
+}
+
+// Test that a panic in a request handler is recovered and returned as an
+// error to the client rather than crashing the whole server.
+func TestHandlerRecoversPanic(t *testing.T) {
+	// A nil VFS makes every handler panic with a nil pointer dereference
+	// inside the vfs package, standing in for a panicking backend.
+	v := vfsHandler{}
+
+	_, err := v.Fileread(&sftp.Request{Filepath: "/file"})
+	assert.ErrorContains(t, err, "request handler")
+
+	_, err = v.Filewrite(&sftp.Request{Filepath: "/file"})
+	assert.ErrorContains(t, err, "request handler")
+
+	err = v.Filecmd(&sftp.Request{Method: "Mkdir", Filepath: "/dir"})
+	assert.ErrorContains(t, err, "request handler")
+
+	_, err = v.Filelist(&sftp.Request{Method: "List", Filepath: "/"})
+	assert.ErrorContains(t, err, "request handler")
+
+	_, err = v.StatVFS(&sftp.Request{Filepath: "/"})
+	assert.ErrorContains(t, err, "request handler")
+}
+
+// panickingHandle panics on ReadAt and WriteAt, standing in for a backend
+// which panics during data transfer.
+type panickingHandle struct {
+	vfs.Handle
+}
+
+func (panickingHandle) ReadAt([]byte, int64) (int, error)  { panic("boom") }
+func (panickingHandle) WriteAt([]byte, int64) (int, error) { panic("boom") }
+func (panickingHandle) Close() error                       { panic("boom") }
+
+// Test that a panic during data transfer on a handle returned from
+// Fileread/Filewrite is recovered and returned as an error.
+func TestRecoveringHandle(t *testing.T) {
+	h := recoveringHandle{panickingHandle{}}
+
+	_, err := h.ReadAt(make([]byte, 16), 0)
+	assert.ErrorContains(t, err, "boom")
+
+	_, err = h.WriteAt(make([]byte, 16), 0)
+	assert.ErrorContains(t, err, "boom")
+
+	assert.ErrorContains(t, h.Close(), "boom")
+}
+
+// Test that a session request with a truncated payload is rejected rather
+// than panicking the out-of-band request goroutine, which would kill the
+// whole server. The subsystem payload is a length-prefixed string, so an
+// empty one used to be sliced out of range.
+func TestShortSubsystemRequest(t *testing.T) {
+	vfsOpt := vfscommon.Opt
+	conn := startTestSSHClient(t, &vfsOpt)
+
+	// Rejecting the request must not leak the goroutine waiting to find out
+	// what kind of channel this is, or a client could exhaust the server by
+	// opening bad channels in a loop.
+	before := runtime.NumGoroutine()
+	const channels = 50
+	for range channels {
+		channel, requests, err := conn.OpenChannel("session", nil)
+		require.NoError(t, err)
+		go ssh.DiscardRequests(requests)
+
+		// Empty payload: no 4-byte length prefix at all
+		_, err = channel.SendRequest("subsystem", true, []byte{})
+		require.NoError(t, err)
+		require.NoError(t, channel.Close())
+	}
+
+	assert.Eventually(t, func() bool {
+		return runtime.NumGoroutine() < before+channels/2
+	}, 10*time.Second, 50*time.Millisecond,
+		"goroutines leaked: started at %d, now %d after %d rejected channels",
+		before, runtime.NumGoroutine(), channels)
+
+	// The server must still be alive and serving
+	client, err := sftp.NewClient(conn)
+	require.NoError(t, err, "server died after a truncated subsystem request")
+	defer func() { _ = client.Close() }()
+	_, err = client.Stat("/")
+	assert.NoError(t, err)
 }
 
 // writeFile writes contents to fileName via the client truncating any existing

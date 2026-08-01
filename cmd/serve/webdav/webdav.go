@@ -22,7 +22,6 @@ import (
 	"github.com/rclone/rclone/cmd/serve/proxy"
 	"github.com/rclone/rclone/cmd/serve/proxy/proxyflags"
 	"github.com/rclone/rclone/fs"
-	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/rc"
@@ -81,19 +80,19 @@ func init() {
 	cmdserve.AddRc("webdav", func(ctx context.Context, f fs.Fs, in rc.Params) (cmdserve.Handle, error) {
 		// Read VFS Opts
 		var vfsOpt = vfscommon.Opt // set default opts
-		err := configstruct.SetAny(in, &vfsOpt)
+		err := rc.ParseOptions(in, "vfsOpt", &vfsOpt)
 		if err != nil {
 			return nil, err
 		}
 		// Read Proxy Opts
 		var proxyOpt = proxy.Opt // set default opts
-		err = configstruct.SetAny(in, &proxyOpt)
+		err = rc.ParseOptions(in, "proxyOpt", &proxyOpt)
 		if err != nil {
 			return nil, err
 		}
 		// Read opts
 		var opt = Opt // set default opts
-		err = configstruct.SetAny(in, &opt)
+		err = rc.ParseOptions(in, "opt", &opt)
 		if err != nil {
 			return nil, err
 		}
@@ -121,6 +120,13 @@ If this flag is set to "auto" then rclone will choose the first
 supported hash on the backend or you can use a named hash such as
 "MD5" or "SHA-1". Use the [hashsum](/commands/rclone_hashsum/) command
 to see the full list.
+
+### Gzip compression
+
+The server will compress certain response bodies (text and XML, including
+WebDAV PROPFIND responses) using gzip when the client advertises gzip
+support via the ` + "`Accept-Encoding: gzip`" + ` request header. This reduces
+bandwidth usage.
 
 ### Access WebDAV on Windows
 
@@ -236,6 +242,20 @@ type WebDAV struct {
 	etagHashType  hash.Type
 }
 
+func webDAVCompressMiddleware() func(http.Handler) http.Handler {
+	compress := middleware.Compress(5, "text/*", "application/xml")
+	return func(next http.Handler) http.Handler {
+		compressedNext := compress(next)
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Range") != "" {
+				next.ServeHTTP(rw, r)
+				return
+			}
+			compressedNext.ServeHTTP(rw, r)
+		})
+	}
+}
+
 // check interface
 var _ webdav.FileSystem = (*WebDAV)(nil)
 
@@ -288,6 +308,7 @@ func newWebDAV(ctx context.Context, f fs.Fs, opt *Options, vfsOpt *vfscommon.Opt
 
 	router := w.server.Router()
 	router.Use(
+		webDAVCompressMiddleware(),
 		middleware.SetHeader("Accept-Ranges", "bytes"),
 		middleware.SetHeader("Server", "rclone/"+fs.Version),
 	)

@@ -69,6 +69,8 @@ type Node interface {
 	Truncate(size int64) error
 	Path() string
 	SetSys(any)
+	Aux(owner any) any
+	SetAux(owner, value any)
 }
 
 // Check interfaces
@@ -285,6 +287,7 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) *VFS {
 
 // refresh the directory cache for all directories
 func (vfs *VFS) refresh() {
+	defer vfscommon.RecoverPanic(vfs.f, nil)
 	fs.Debugf(vfs.f, "Refreshing VFS directory cache")
 	err := vfs.root.readDirTree()
 	if err != nil {

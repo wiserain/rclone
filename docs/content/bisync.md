@@ -1053,20 +1053,6 @@ encodings.)
 The following backends have known issues that need more investigation:
 
 <!--- start list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
-- `TestGoogleCloudStorage,directory_markers` (`googlecloudstorage`)
-  - [`TestBisyncRemoteLocal/all_changed`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
-  - [`TestBisyncRemoteLocal/backupdir`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
-  - [`TestBisyncRemoteLocal/basic`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
-  - [`TestBisyncRemoteLocal/changes`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
-  - [`TestBisyncRemoteLocal/check_access`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage,directory_markers-1.txt)
-  - [79 more](https://pub.rclone.org/integration-tests/current/)
-- `TestGoogleCloudStorage` (`googlecloudstorage`)
-  - [`TestBisyncRemoteLocal/all_changed`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
-  - [`TestBisyncRemoteLocal/backupdir`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
-  - [`TestBisyncRemoteLocal/basic`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
-  - [`TestBisyncRemoteLocal/changes`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
-  - [`TestBisyncRemoteLocal/check_access`](https://pub.rclone.org/integration-tests/current/googlecloudstorage-cmd.bisync-TestGoogleCloudStorage-1.txt)
-  - [79 more](https://pub.rclone.org/integration-tests/current/)
 - `TestHuaweiDrive` (`huaweidrive`)
   - [`TestBisyncRemoteLocal/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncRemoteLocal/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
@@ -1074,7 +1060,10 @@ The following backends have known issues that need more investigation:
   - [`TestBisyncLocalRemote/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncLocalRemote/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [4 more](https://pub.rclone.org/integration-tests/current/)
-- Updated: 2026-07-08-010014
+- `TestPcloud` (`pcloud`)
+  - [`TestBisyncRemoteRemote/check_access`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
+  - [`TestBisyncRemoteRemote/rmdirs`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
+- Updated: 2026-07-31-010017
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -1084,6 +1073,10 @@ that are deemed unfixable for the time being:
 - `TestArchive` (`archive`)
 - `TestCache` (`cache`)
 - `TestDrime` (`drime`)
+- `TestDropbox` (`dropbox`)
+  - `TestBisyncRemoteLocal/normalization`
+  - `TestBisyncLocalRemote/normalization`
+  - `TestBisyncRemoteRemote/normalization`
 - `TestFileLu` (`filelu`)
 - `TestFilesCom` (`filescom`)
 - `TestImageKit` (`imagekit`)
@@ -1103,7 +1096,6 @@ that are deemed unfixable for the time being:
 - `TestS3Rclone` (`s3`)
 - `TestSFTPRsyncNet` (`sftp`)
 - `TestStorj` (`storj`)
-- `TestWebdavInfiniteScale` (`webdav`)
 - `TestWebdavNextcloud` (`webdav`)
 - `TestWebdavOwncloud` (`webdav`)
 - `TestnStorage` (`netstorage`)

@@ -81,6 +81,21 @@ func TestPathTraversal(t *testing.T) {
 		assert.True(t, os.IsNotExist(statErr), "no directory must be created outside the bucket")
 	})
 
+	// Multipart uploads stream straight to the backing Fs, bypassing the VFS,
+	// so the key must be rejected before any directory or stream is created.
+	t.Run("Multipart", func(t *testing.T) {
+		b, root := newTestBackend(t)
+		_, err := b.CreateMultipartUpload(ctx, "bucket", "../mp-secret.txt", map[string]string{})
+		assert.Error(t, err, "multipart upload with dot-dot key must be rejected")
+		entries, readErr := os.ReadDir(root)
+		require.NoError(t, readErr)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		assert.ElementsMatch(t, []string{"bucket", "root-secret.txt"}, names, "no extra entries must be created at the serve root")
+	})
+
 	// A legitimate object inside the bucket must still be readable.
 	t.Run("LegitimateObject", func(t *testing.T) {
 		b, _ := newTestBackend(t)
