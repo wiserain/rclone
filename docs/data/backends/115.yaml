@@ -1,0 +1,28 @@
+backend: '115'
+name: '115'
+tier: Tier 4
+maintainers: Core
+features_score: 5
+integration_tests: Passing
+data_integrity: Hash
+performance: Medium
+adoption: Some use
+docs: Basic
+security: High
+virtual: false
+remote: 'Test115:'
+features:
+- About
+- CanHaveEmptyDirectories
+- Command
+- Copy
+- DirCacheFlush
+- DirMove
+- MergeDirs
+- Move
+- NoMultiThreading
+- Purge
+- PutUnchecked
+hashes:
+- sha1
+precision: 3153600000000000000
