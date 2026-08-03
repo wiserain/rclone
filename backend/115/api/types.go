@@ -380,9 +380,9 @@ func (u *DownloadURL) expired() bool {
 	return expiry.Round(0).Add(-expiryDelta).Before(time.Now())
 }
 
-// Valid reports whether u is non-nil and is not expired.
+// Valid reports whether u has a non-empty URL which is not expired.
 func (u *DownloadURL) Valid() bool {
-	return u != nil && !u.expired()
+	return u != nil && u.URL != "" && !u.expired()
 }
 
 // Cookie returns the cookies as a string.
