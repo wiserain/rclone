@@ -361,21 +361,36 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 		return false, err
 	}
 	if err == nil && info != nil {
+		var base *api.Base
 		switch apiInfo := info.(type) {
 		case *api.Base:
-			if apiInfo.ErrCode() == 990009 {
-				// 删除[subdir]操作尚未执行完成，请稍后再试！ (990009)
-				time.Sleep(time.Second)
-				return true, fserrors.RetryError(apiInfo.Err())
-			}
+			base = apiInfo
 		case *api.StringInfo:
 			if apiInfo.ErrCode() == 50038 {
 				if apiInfo.ErrMsg() != "" {
 					// 下载失败，含违规内容
+					// Download failed because the content violates policy.
 					return false, fserrors.NoRetryError(apiInfo.Err())
 				}
 				// can't download: API Error:  (50038)
 				return true, fserrors.RetryError(apiInfo.Err())
+			}
+			base = &apiInfo.Base
+		}
+		if base != nil {
+			classification := classifyAPIError(base.ErrCode())
+			switch classification.action {
+			case apiErrorRetry:
+				if classification.delay > 0 {
+					time.Sleep(classification.delay)
+				}
+				return true, fserrors.RetryError(base.Err())
+			case apiErrorFatal:
+				return false, fserrors.FatalError(base.Err())
+			case apiErrorObjectNotFound:
+				return false, fs.ErrorObjectNotFound
+			case apiErrorNoRetry:
+				return false, fserrors.NoRetryError(base.Err())
 			}
 		}
 		return false, nil
