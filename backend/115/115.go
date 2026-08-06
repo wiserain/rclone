@@ -366,11 +366,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 		return true, err
 	}
 	if err == nil && info != nil {
-		var base *api.Base
-		switch apiInfo := info.(type) {
-		case *api.Base:
-			base = apiInfo
-		case *api.StringInfo:
+		if apiInfo, ok := info.(*api.StringInfo); ok {
 			if apiInfo.ErrCode() == 50038 {
 				if apiInfo.ErrMsg() != "" {
 					// 下载失败，含违规内容
@@ -380,8 +376,8 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 				// can't download: API Error:  (50038)
 				return true, fserrors.RetryError(apiInfo.Err())
 			}
-			base = &apiInfo.Base
 		}
+		base := getAPIBase(info)
 		if base != nil {
 			classification := classifyAPIError(base.ErrCode())
 			switch classification.action {
@@ -562,21 +558,44 @@ func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int
 	}
 }
 
-func (p *poolClient) checkCooldown(index int, resp *http.Response, err error) error {
-	if resp == nil || resp.StatusCode != http.StatusMethodNotAllowed {
-		return err
+func getAPIBase(info any) *api.Base {
+	switch info := info.(type) {
+	case *api.Base:
+		return info
+	case **api.Base:
+		if info != nil {
+			return *info
+		}
+	case *api.StringInfo:
+		return &info.Base
+	case **api.StringInfo:
+		if info != nil && *info != nil {
+			return &(*info).Base
+		}
 	}
-	p.mu.Lock()
-	until := time.Now().Add(cookieCooldown)
-	if until.After(p.nextAvailable[index]) {
-		p.nextAvailable[index] = until
+	return nil
+}
+
+func (p *poolClient) checkResponse(index int, resp *http.Response, info any, err error) error {
+	if resp != nil && resp.StatusCode == http.StatusMethodNotAllowed {
+		p.mu.Lock()
+		until := time.Now().Add(cookieCooldown)
+		if until.After(p.nextAvailable[index]) {
+			p.nextAvailable[index] = until
+		}
+		p.mu.Unlock()
+		fs.Debugf(nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
+		if err == nil {
+			err = errors.New(resp.Status)
+		}
+		return &cookieCooldownError{error: err}
 	}
-	p.mu.Unlock()
-	fs.Debugf(nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
 	if err == nil {
-		err = errors.New(resp.Status)
+		if base := getAPIBase(info); base != nil && classifyAPIError(base.ErrCode()).action == apiErrorFatal {
+			return fserrors.FatalError(fmt.Errorf("API authentication failed for cookie UID %q: %w", p.credentials[index].UID, base.Err()))
+		}
 	}
-	return &cookieCooldownError{error: err}
+	return err
 }
 
 // resetAPIResponse prevents fields omitted by a retry response from retaining values from the previous attempt.
@@ -594,7 +613,7 @@ func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request any,
 		return nil, err
 	}
 	resp, err = client.CallJSON(ctx, opts, request, response)
-	return resp, p.checkCooldown(index, resp, err)
+	return resp, p.checkResponse(index, resp, response, err)
 }
 
 func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) {
@@ -654,7 +673,7 @@ func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Resp
 			return false, clientErr
 		}
 		resp, err = client.Call(ctx, opts)
-		err = p.checkCooldown(index, resp, err)
+		err = p.checkResponse(index, resp, nil, err)
 		return shouldRetry(ctx, resp, nil, err)
 	})
 	return

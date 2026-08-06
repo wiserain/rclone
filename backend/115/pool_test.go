@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/lib/rest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,29 @@ func TestPoolClientCallBASECoolDownsHTTP405(t *testing.T) {
 	require.NoError(t, pool.CallBASE(ctx, &rest.Opts{Method: http.MethodGet}))
 	assert.Equal(t, int32(2), firstCalls.Load())
 	assert.Equal(t, int32(3), secondCalls.Load())
+}
+
+func TestPoolClientCallBASEReportsAuthenticationFailureUID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":false,"errno":40101032,"msg":"Please log in again"}`))
+	}))
+	defer server.Close()
+
+	ctx, ci := fs.AddConfig(context.Background())
+	ci.LowLevelRetries = 2
+	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2}, fs.CommaSepList{
+		"UID=1_A; CID=A; SEID=A;",
+		"UID=1_B; CID=B; SEID=B;",
+	})
+	require.NoError(t, err)
+	pool.clients[0].SetRoot(server.URL)
+
+	err = pool.CallBASE(ctx, &rest.Opts{Method: http.MethodGet})
+	require.Error(t, err)
+	assert.True(t, fserrors.IsFatalError(err))
+	assert.Contains(t, err.Error(), `cookie UID "1_A"`)
+	assert.Contains(t, err.Error(), "API Error(40101032)")
 }
 
 func TestPoolClientAllCookiesCoolingDownHonorsContext(t *testing.T) {
