@@ -73,9 +73,6 @@ const (
 	maxChunkSize        = 5 * fs.Gibi
 	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
 	maxUploadCutoff     = 20 * fs.Gibi // maximum allowed size for singlepart uploads
-
-	downloadAPIChrome  = "chrome"
-	downloadAPIAndroid = "android"
 )
 
 // Register with Fs
@@ -249,18 +246,6 @@ this may help to speed up the transfers.`,
 			Advanced: true,
 			Help:     `If set, uploaded files will appear in the recent upload history in the web UI.`,
 		}, {
-			Name:     "download_api",
-			Default:  downloadAPIChrome,
-			Advanced: true,
-			Help:     "API to use when requesting download URLs.",
-			Examples: []fs.OptionExample{{
-				Value: downloadAPIChrome,
-				Help:  "Use the Chrome API.",
-			}, {
-				Value: downloadAPIAndroid,
-				Help:  "Use the Android API.",
-			}},
-		}, {
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
@@ -320,7 +305,6 @@ type Options struct {
 	DualStack           bool                 `config:"dual_stack"`
 	CheckUpload         bool                 `config:"check_upload"`
 	UploadHistory       bool                 `config:"upload_history"`
-	DownloadAPI         string               `config:"download_api"`
 	DownloadCookie      fs.CommaSepList      `config:"download_cookie"`
 	DownloadNoProxy     bool                 `config:"download_no_proxy"`
 	Enc                 encoder.MultiEncoder `config:"encoding"`
@@ -841,10 +825,6 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	if err != nil {
 		return nil, fmt.Errorf("115: upload cutoff: %w", err)
 	}
-	if err = checkDownloadAPI(opt.DownloadAPI); err != nil {
-		return nil, fmt.Errorf("115: download API: %w", err)
-	}
-
 	// mod - override rootID from path remote:{ID}
 	if rootID, _, _ := parseRootID(path); rootID != "" {
 		name += rootID

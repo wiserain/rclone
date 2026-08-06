@@ -388,9 +388,9 @@ func (f *Fs) indexInfo(ctx context.Context) (data *api.IndexData, err error) {
 }
 
 func (f *Fs) _getDownloadURL(ctx context.Context, request any, response any) (resp *http.Response, err error) {
-	rootURL := "https://proapi.115.com/app/share/downurl"
-	if !f.isShare {
-		rootURL, _ = downloadAPIEndpoint(f.opt.DownloadAPI)
+	rootURL := "https://proapi.115.com/app/chrome/downurl"
+	if f.isShare {
+		rootURL = "https://proapi.115.com/app/share/downurl"
 	}
 	t := strconv.Itoa(int(time.Now().Unix()))
 	opts := rest.Opts{
@@ -401,35 +401,8 @@ func (f *Fs) _getDownloadURL(ctx context.Context, request any, response any) (re
 	return f.dsrv.CallDATA(ctx, &opts, request, response)
 }
 
-func checkDownloadAPI(downloadAPI string) error {
-	switch downloadAPI {
-	case downloadAPIChrome, downloadAPIAndroid:
-		return nil
-	default:
-		return fmt.Errorf("unknown value %q", downloadAPI)
-	}
-}
-
-func downloadAPIEndpoint(downloadAPI string) (rootURL, pickCodeKey string) {
-	if downloadAPI == downloadAPIAndroid {
-		return "https://proapi.115.com/android/2.0/ufile/download", "pick_code"
-	}
-	return "https://proapi.115.com/app/chrome/downurl", "pickcode"
-}
-
 func (f *Fs) getDownloadURL(ctx context.Context, pickCode string) (durl *api.DownloadURL, err error) {
-	_, pickCodeKey := downloadAPIEndpoint(f.opt.DownloadAPI)
-	req := map[string]string{pickCodeKey: pickCode}
-	if f.opt.DownloadAPI == downloadAPIAndroid {
-		downInfo := struct {
-			URL string `json:"url"`
-		}{}
-		resp, err := f._getDownloadURL(ctx, req, &downInfo)
-		if err != nil {
-			return nil, err
-		}
-		return checkDownloadURL(&api.DownloadURL{URL: downInfo.URL}, resp)
-	}
+	req := map[string]string{"pickcode": pickCode}
 	downData := api.DownloadData{}
 	resp, err := f._getDownloadURL(ctx, req, &downData)
 	if err != nil {
