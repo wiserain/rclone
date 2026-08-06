@@ -159,6 +159,13 @@ Fill in for rclone to use a non root folder as its starting point.
 			Help:     "Minimum time to sleep between API calls.",
 			Advanced: true,
 		}, {
+			Name:    "wait_for_cooldown",
+			Default: true,
+			Help: `Wait for the earliest API cookie to leave cooldown when all cookies are unavailable.
+
+If disabled, return an error immediately instead.`,
+			Advanced: true,
+		}, {
 			Name:     "contimeout",
 			Default:  defaultConTimeout,
 			Help:     "Connect timeout.",
@@ -294,6 +301,7 @@ type Options struct {
 	ListChunk           int                  `config:"list_chunk"`
 	CensoredOnly        bool                 `config:"censored_only"`
 	PacerMinSleep       fs.Duration          `config:"pacer_min_sleep"`
+	WaitForCooldown     bool                 `config:"wait_for_cooldown"`
 	ConTimeout          fs.Duration          `config:"contimeout"`
 	Timeout             fs.Duration          `config:"timeout"`
 	HashMemoryThreshold fs.SizeSuffix        `config:"hash_memory_limit"`
@@ -502,13 +510,14 @@ func getClient(ctx context.Context, opt *Options, noProxy bool) *http.Client {
 
 // poolClient wraps a pool of rest.Client for load-balancing requests
 type poolClient struct {
-	clients        []*rest.Client
-	currentIndex   uint32
-	credentials    []*Credential
-	pacer          *fs.Pacer
-	mu             sync.Mutex
-	nextAvailable  []time.Time
-	clientMinSleep time.Duration
+	clients         []*rest.Client
+	currentIndex    uint32
+	credentials     []*Credential
+	pacer           *fs.Pacer
+	mu              sync.Mutex
+	nextAvailable   []time.Time
+	clientMinSleep  time.Duration
+	waitForCooldown bool
 }
 
 type cookieCooldownError struct {
@@ -544,8 +553,9 @@ func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int
 		}
 		p.mu.Unlock()
 
-		// TODO: Decide the policy when all clients are unavailable: wait until the earliest (current),
-		// return a retry-after error immediately, or cap the wait before returning an error.
+		if !p.waitForCooldown {
+			return nil, 0, fserrors.NoRetryError(errors.New("all API cookies are in cooldown"))
+		}
 		timer := time.NewTimer(time.Until(earliest))
 		select {
 		case <-ctx.Done():
@@ -718,11 +728,12 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
 	}
 	return &poolClient{
-		clients:        clients,
-		credentials:    creds,
-		pacer:          fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
-		nextAvailable:  make([]time.Time, len(clients)),
-		clientMinSleep: time.Duration(opt.PacerMinSleep),
+		clients:         clients,
+		credentials:     creds,
+		pacer:           fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		nextAvailable:   make([]time.Time, len(clients)),
+		clientMinSleep:  time.Duration(opt.PacerMinSleep),
+		waitForCooldown: opt.WaitForCooldown,
 	}, nil
 }
 

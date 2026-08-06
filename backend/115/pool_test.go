@@ -117,7 +117,7 @@ func TestPoolClientCallBASEReportsAuthenticationFailureUID(t *testing.T) {
 
 func TestPoolClientAllCookiesCoolingDownHonorsContext(t *testing.T) {
 	ctx := context.Background()
-	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2}, fs.CommaSepList{
+	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2, WaitForCooldown: true}, fs.CommaSepList{
 		"UID=1_A; CID=A; SEID=A;",
 		"UID=1_B; CID=B; SEID=B;",
 	})
@@ -132,9 +132,25 @@ func TestPoolClientAllCookiesCoolingDownHonorsContext(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }
 
-func TestPoolClientMaintainsMinSleepDuringCooldown(t *testing.T) {
+func TestPoolClientAllCookiesCoolingDownReturnsImmediately(t *testing.T) {
 	ctx := context.Background()
 	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2}, fs.CommaSepList{
+		"UID=1_A; CID=A; SEID=A;",
+		"UID=1_B; CID=B; SEID=B;",
+	})
+	require.NoError(t, err)
+	pool.nextAvailable[0] = time.Now().Add(time.Second)
+	pool.nextAvailable[1] = time.Now().Add(time.Second)
+
+	_, err = pool.CallJSON(ctx, &rest.Opts{Method: http.MethodGet}, nil, nil)
+	require.Error(t, err)
+	assert.EqualError(t, err, "all API cookies are in cooldown")
+	assert.True(t, fserrors.IsNoRetryError(err))
+}
+
+func TestPoolClientMaintainsMinSleepDuringCooldown(t *testing.T) {
+	ctx := context.Background()
+	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2, WaitForCooldown: true}, fs.CommaSepList{
 		"UID=1_A; CID=A; SEID=A;",
 		"UID=1_B; CID=B; SEID=B;",
 	})
