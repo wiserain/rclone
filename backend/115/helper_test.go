@@ -2,16 +2,33 @@ package _115 // nolint:revive
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/lib/rest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetClientProxyScope(t *testing.T) {
+	ctx, ci := fs.AddConfig(context.Background())
+	ci.HTTPProxy = "http://127.0.0.1:8080"
+	req := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+
+	apiTransport := getClient(ctx, &Options{}, false).Transport.(*fshttp.Transport)
+	proxyURL, err := apiTransport.Proxy(req)
+	require.NoError(t, err)
+	require.NotNil(t, proxyURL)
+	assert.Equal(t, ci.HTTPProxy, proxyURL.String())
+
+	downloadTransport := getClient(ctx, &Options{}, true).Transport.(*fshttp.Transport)
+	assert.Nil(t, downloadTransport.Proxy)
+}
 
 func TestCheckDownloadURL(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
@@ -70,7 +87,7 @@ func TestDownloadURLUserAgentMatchesDownload(t *testing.T) {
 
 			ctx, ci := fs.AddConfig(context.Background())
 			ci.UserAgent = test.userAgent
-			client := rest.NewClient(getClient(ctx, &Options{})).SetRoot(server.URL)
+			client := rest.NewClient(getClient(ctx, &Options{}, false)).SetRoot(server.URL)
 
 			var info api.Base
 			_, err := client.CallJSON(ctx, &rest.Opts{
@@ -91,6 +108,40 @@ func TestDownloadURLUserAgentMatchesDownload(t *testing.T) {
 			assert.Equal(t, apiUserAgent, downloadUserAgent)
 		})
 	}
+}
+
+func TestObjectOpenUsesRawClient(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer server.Close()
+
+	ctx, ci := fs.AddConfig(context.Background())
+	ci.UserAgent = defaultUserAgent
+	o := &Object{
+		fs: &Fs{dclient: getClient(ctx, &Options{}, false)},
+		durl: &api.DownloadURL{
+			URL:     server.URL,
+			Cookies: []*http.Cookie{{Name: "download_token", Value: "token"}},
+		},
+		size: 4,
+	}
+
+	in, err := o.open(ctx)
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, in)
+	require.NoError(t, err)
+	require.NoError(t, in.Close())
+
+	req := <-requests
+	assert.Equal(t, defaultUserAgent, req.UserAgent())
+	cookie, err := req.Cookie("download_token")
+	require.NoError(t, err)
+	assert.Equal(t, "token", cookie.Value)
+	_, err = req.Cookie("UID")
+	assert.ErrorIs(t, err, http.ErrNoCookie)
 }
 
 func TestCheckDownloadAPI(t *testing.T) {

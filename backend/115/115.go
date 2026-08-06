@@ -32,7 +32,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pierrec/lz4/v4"
@@ -60,6 +59,7 @@ const (
 	defaultUserAgent = "Mozilla/5.0 115Browser/27.0.7.5"
 
 	defaultMinSleep = fs.Duration(1032 * time.Millisecond)
+	cookieCooldown  = 11 * time.Minute
 	maxSleep        = 2 * time.Second
 	decayConstant   = 2 // bigger for slower decay, exponential
 
@@ -264,16 +264,16 @@ this may help to speed up the transfers.`,
 			Name:      "download_cookie",
 			Sensitive: true,
 			Advanced:  true,
-			Help: `Set a comma-separated list of cookies for the download-only clients. 
+			Help: `Set a comma-separated list of cookies used to request download URLs.
 
-This enables separate client instances dedicated to downloading files`,
+The credentials are not sent to the CDN; file downloads use cookies returned by the download URL API.`,
 		}, {
 			Name:     "download_no_proxy",
 			Default:  false,
 			Advanced: true,
-			Help: `Disable proxy settings for the download-only client.
-			
-Use this flag with the "--115-download-cookie" option to bypass proxy settings for downloads.`,
+			Help: `Disable proxy settings for file downloads from the CDN.
+
+This does not affect API requests, including requests for download URLs.`,
 		}, {
 			Name:     config.ConfigEncoding,
 			Help:     config.ConfigEncodingHelp,
@@ -334,6 +334,7 @@ type Fs struct {
 	features     *fs.Features
 	srv          *poolClient        // authorized client
 	dsrv         *poolClient        // download-only client
+	dclient      *http.Client       // anonymous CDN download client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolder   string // path of the absolute root
@@ -375,6 +376,10 @@ var retryErrorCodes = []int{
 func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) (bool, error) {
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
+	}
+	var cooldownErr *cookieCooldownError
+	if errors.As(err, &cooldownErr) {
+		return true, err
 	}
 	if err == nil && info != nil {
 		var base *api.Base
@@ -501,12 +506,12 @@ func (cr *Credential) UserID() string {
 	return userID
 }
 
-// getClient makes an http client according to the options
-func getClient(ctx context.Context, opt *Options) *http.Client {
+// getClient makes an HTTP client according to the options.
+func getClient(ctx context.Context, opt *Options, noProxy bool) *http.Client {
 	t := fshttp.NewTransportCustom(ctx, func(t *http.Transport) {
 		t.TLSHandshakeTimeout = time.Duration(opt.ConTimeout)
 		t.ResponseHeaderTimeout = time.Duration(opt.Timeout)
-		if len(opt.DownloadCookie) != 0 && opt.DownloadNoProxy {
+		if noProxy {
 			t.Proxy = nil
 		}
 	})
@@ -517,30 +522,102 @@ func getClient(ctx context.Context, opt *Options) *http.Client {
 
 // poolClient wraps a pool of rest.Client for load-balancing requests
 type poolClient struct {
-	clients      []*rest.Client
-	currentIndex uint32
-	credentials  []*Credential
-	pacer        *fs.Pacer
+	clients        []*rest.Client
+	currentIndex   uint32
+	credentials    []*Credential
+	pacer          *fs.Pacer
+	mu             sync.Mutex
+	nextAvailable  []time.Time
+	clientMinSleep time.Duration
 }
 
-func (p *poolClient) client() *rest.Client {
-	if len(p.clients) == 1 {
-		return p.clients[0]
+type cookieCooldownError struct {
+	error
+}
+
+func (e *cookieCooldownError) Unwrap() error {
+	return e.error
+}
+
+// _nextClient returns the next client in rotation. Call with p.mu held.
+func (p *poolClient) _nextClient() (client *rest.Client, index int) {
+	index = int(p.currentIndex % uint32(len(p.clients)))
+	p.currentIndex++
+	return p.clients[index], index
+}
+
+func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int, err error) {
+	for {
+		var earliest time.Time
+		p.mu.Lock()
+		for range p.clients {
+			client, index = p._nextClient()
+			until := p.nextAvailable[index]
+			if !time.Now().Before(until) {
+				p.nextAvailable[index] = time.Now().Add(p.clientMinSleep)
+				p.mu.Unlock()
+				return client, index, nil
+			}
+			if earliest.IsZero() || until.Before(earliest) {
+				earliest = until
+			}
+		}
+		p.mu.Unlock()
+
+		// TODO: Decide the policy when all clients are unavailable: wait until the earliest (current),
+		// return a retry-after error immediately, or cap the wait before returning an error.
+		timer := time.NewTimer(time.Until(earliest))
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, 0, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	index := atomic.AddUint32(&p.currentIndex, 1) - 1
-	return p.clients[index%uint32(len(p.clients))]
+}
+
+func (p *poolClient) checkCooldown(index int, resp *http.Response, err error) error {
+	if resp == nil || resp.StatusCode != http.StatusMethodNotAllowed {
+		return err
+	}
+	p.mu.Lock()
+	until := time.Now().Add(cookieCooldown)
+	if until.After(p.nextAvailable[index]) {
+		p.nextAvailable[index] = until
+	}
+	p.mu.Unlock()
+	fs.Debugf(nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
+	if err == nil {
+		err = errors.New(resp.Status)
+	}
+	return &cookieCooldownError{error: err}
+}
+
+// resetAPIResponse prevents fields omitted by a retry response from retaining values from the previous attempt.
+func resetAPIResponse(response any) {
+	value := reflect.ValueOf(response)
+	if value.IsValid() && value.Kind() == reflect.Pointer && !value.IsNil() {
+		value.Elem().SetZero()
+	}
 }
 
 func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request any, response any) (resp *http.Response, err error) {
-	return p.client().CallJSON(ctx, opts, request, response)
+	resetAPIResponse(response)
+	client, index, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err = client.CallJSON(ctx, opts, request, response)
+	return resp, p.checkCooldown(index, resp, err)
 }
 
 func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) {
-	client := p.client()
 	var info *api.Base
 	var resp *http.Response
 	err = p.pacer.Call(func() (bool, error) {
-		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		resp, err = p.CallJSON(ctx, opts, nil, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
@@ -560,9 +637,8 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request any,
 
 	// Perform API call
 	var info *api.StringInfo
-	client := p.client()
 	err = p.pacer.Call(func() (bool, error) {
-		resp, err = client.CallJSON(ctx, opts, nil, &info)
+		resp, err = p.CallJSON(ctx, opts, nil, &info)
 		return shouldRetry(ctx, resp, info, err)
 	})
 	if err != nil {
@@ -588,18 +664,13 @@ func (p *poolClient) CallDATA(ctx context.Context, opts *rest.Opts, request any,
 }
 
 func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Response, err error) {
-	client := p.client()
 	err = p.pacer.Call(func() (bool, error) {
+		client, index, clientErr := p.client(ctx)
+		if clientErr != nil {
+			return false, clientErr
+		}
 		resp, err = client.Call(ctx, opts)
-		return shouldRetry(ctx, resp, nil, err)
-	})
-	return
-}
-
-func (p *poolClient) Do(ctx context.Context, req *http.Request) (resp *http.Response, err error) {
-	client := p.client()
-	err = p.pacer.Call(func() (bool, error) {
-		resp, err = client.Do(req)
+		err = p.checkCooldown(index, resp, err)
 		return shouldRetry(ctx, resp, nil, err)
 	})
 	return
@@ -635,7 +706,7 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 	// credentials -> rest clients
 	var clients []*rest.Client
 	for _, cred := range creds {
-		cli := rest.NewClient(getClient(ctx, opt)).SetRoot(rootURL).SetErrorHandler(errorHandler)
+		cli := rest.NewClient(getClient(ctx, opt, false)).SetRoot(rootURL).SetErrorHandler(errorHandler)
 		clients = append(clients, cli.SetCookie(cred.Cookie()...))
 	}
 	minSleep := time.Duration(opt.PacerMinSleep)
@@ -644,9 +715,11 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
 	}
 	return &poolClient{
-		clients:     clients,
-		credentials: creds,
-		pacer:       fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		clients:        clients,
+		credentials:    creds,
+		pacer:          fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
+		nextAvailable:  make([]time.Time, len(clients)),
+		clientMinSleep: time.Duration(opt.PacerMinSleep),
 	}, nil
 }
 
@@ -675,6 +748,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	// Override few config settings and create a client
 	newCtx, ci := fs.AddConfig(ctx)
 	ci.UserAgent = opt.UserAgent
+	f.dclient = getClient(newCtx, opt, opt.DownloadNoProxy)
 
 	var remoteCookies fs.CommaSepList
 	for _, remote := range opt.CookieFrom {
@@ -1848,7 +1922,7 @@ func (o *Object) open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		// Don't supply range requests for 0 length objects as they always fail
 		delete(req.Header, "Range")
 	}
-	res, err := o.fs.dsrv.Do(ctx, req)
+	res, err := o.fs.dclient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("open file failed: %w", err)
 	}
