@@ -124,6 +124,8 @@ func TestPoolClientAllCookiesCoolingDownHonorsContext(t *testing.T) {
 	require.NoError(t, err)
 	pool.nextAvailable[0] = time.Now().Add(time.Second)
 	pool.nextAvailable[1] = time.Now().Add(time.Second)
+	pool.cooldownUntil[0] = pool.nextAvailable[0]
+	pool.cooldownUntil[1] = pool.nextAvailable[1]
 
 	callCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
 	defer cancel()
@@ -141,11 +143,27 @@ func TestPoolClientAllCookiesCoolingDownReturnsImmediately(t *testing.T) {
 	require.NoError(t, err)
 	pool.nextAvailable[0] = time.Now().Add(time.Second)
 	pool.nextAvailable[1] = time.Now().Add(time.Second)
+	pool.cooldownUntil[0] = pool.nextAvailable[0]
+	pool.cooldownUntil[1] = pool.nextAvailable[1]
 
 	_, err = pool.CallJSON(ctx, &rest.Opts{Method: http.MethodGet}, nil, nil)
 	require.Error(t, err)
 	assert.EqualError(t, err, "all API cookies are in cooldown")
 	assert.True(t, fserrors.IsNoRetryError(err))
+}
+
+func TestPoolClientWaitsForMinSleepWhenCooldownWaitIsDisabled(t *testing.T) {
+	ctx := context.Background()
+	pool, err := newPoolClient(ctx, &Options{PacerMinSleep: 2}, fs.CommaSepList{
+		"UID=1_A; CID=A; SEID=A;",
+	})
+	require.NoError(t, err)
+	pool.nextAvailable[0] = time.Now().Add(20 * time.Millisecond)
+
+	start := time.Now()
+	_, _, err = pool.client(ctx)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, time.Since(start), 15*time.Millisecond)
 }
 
 func TestPoolClientMaintainsMinSleepDuringCooldown(t *testing.T) {
@@ -156,6 +174,7 @@ func TestPoolClientMaintainsMinSleepDuringCooldown(t *testing.T) {
 	})
 	require.NoError(t, err)
 	pool.nextAvailable[0] = time.Now().Add(time.Second)
+	pool.cooldownUntil[0] = pool.nextAvailable[0]
 	pool.clientMinSleep = 20 * time.Millisecond
 
 	_, firstIndex, err := pool.client(ctx)

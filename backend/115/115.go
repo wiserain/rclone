@@ -516,6 +516,7 @@ type poolClient struct {
 	pacer           *fs.Pacer
 	mu              sync.Mutex
 	nextAvailable   []time.Time
+	cooldownUntil   []time.Time
 	clientMinSleep  time.Duration
 	waitForCooldown bool
 }
@@ -528,24 +529,24 @@ func (e *cookieCooldownError) Unwrap() error {
 	return e.error
 }
 
-// _nextClient returns the next client in rotation. Call with p.mu held.
-func (p *poolClient) _nextClient() (client *rest.Client, index int) {
-	index = int(p.currentIndex % uint32(len(p.clients)))
-	p.currentIndex++
-	return p.clients[index], index
-}
-
 func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int, err error) {
 	for {
 		var earliest time.Time
+		allCoolingDown := true
 		p.mu.Lock()
 		for range p.clients {
-			client, index = p._nextClient()
+			index = int(p.currentIndex % uint32(len(p.clients)))
+			p.currentIndex++
+			client = p.clients[index]
+			now := time.Now()
 			until := p.nextAvailable[index]
-			if !time.Now().Before(until) {
-				p.nextAvailable[index] = time.Now().Add(p.clientMinSleep)
+			if !now.Before(until) {
+				p.nextAvailable[index] = now.Add(p.clientMinSleep)
 				p.mu.Unlock()
 				return client, index, nil
+			}
+			if !now.Before(p.cooldownUntil[index]) {
+				allCoolingDown = false
 			}
 			if earliest.IsZero() || until.Before(earliest) {
 				earliest = until
@@ -553,7 +554,7 @@ func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int
 		}
 		p.mu.Unlock()
 
-		if !p.waitForCooldown {
+		if !p.waitForCooldown && allCoolingDown {
 			return nil, 0, fserrors.NoRetryError(errors.New("all API cookies are in cooldown"))
 		}
 		timer := time.NewTimer(time.Until(earliest))
@@ -593,6 +594,7 @@ func (p *poolClient) checkResponse(index int, resp *http.Response, info any, err
 		if until.After(p.nextAvailable[index]) {
 			p.nextAvailable[index] = until
 		}
+		p.cooldownUntil[index] = until
 		p.mu.Unlock()
 		fs.Debugf(nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
 		if err == nil {
@@ -732,6 +734,7 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 		credentials:     creds,
 		pacer:           fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant))),
 		nextAvailable:   make([]time.Time, len(clients)),
+		cooldownUntil:   make([]time.Time, len(clients)),
 		clientMinSleep:  time.Duration(opt.PacerMinSleep),
 		waitForCooldown: opt.WaitForCooldown,
 	}, nil
