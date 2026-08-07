@@ -60,6 +60,7 @@ func TestShouldRetryAPIErrorResponseTypes(t *testing.T) {
 	}{
 		{name: "base", info: &api.Base{Errno: 590075}},
 		{name: "string info", info: &api.StringInfo{Base: api.Base{Errno: 40110000}}},
+		{name: "embedded base", info: &api.FileList{Base: api.Base{Errno: 590075}}},
 	}
 
 	for _, test := range tests {
@@ -72,6 +73,11 @@ func TestShouldRetryAPIErrorResponseTypes(t *testing.T) {
 	}
 }
 
+func TestGetAPIErrorInfoNil(t *testing.T) {
+	var info *api.FileList
+	assert.Nil(t, getAPIErrorInfo(&info))
+}
+
 func TestShouldRetryFatalAPIError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -79,6 +85,7 @@ func TestShouldRetryFatalAPIError(t *testing.T) {
 	}{
 		{name: "base", info: &api.Base{Errno: 40101032}},
 		{name: "string info", info: &api.StringInfo{Base: api.Base{Errno: 40101032}}},
+		{name: "embedded base", info: &api.IndexInfo{Base: api.Base{Errno: 40101032}}},
 	}
 
 	for _, test := range tests {

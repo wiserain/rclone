@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rclone/rclone/backend/115/api"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/lib/rest"
@@ -92,7 +93,7 @@ func TestPoolClientCallBASECoolDownsHTTP405(t *testing.T) {
 	assert.Equal(t, int32(3), secondCalls.Load())
 }
 
-func TestPoolClientCallBASEReportsAuthenticationFailureUID(t *testing.T) {
+func TestPoolClientCallJSONReportsAuthenticationFailureUID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"state":false,"errno":40101032,"msg":"Please log in again"}`))
@@ -108,7 +109,8 @@ func TestPoolClientCallBASEReportsAuthenticationFailureUID(t *testing.T) {
 	require.NoError(t, err)
 	pool.clients[0].SetRoot(server.URL)
 
-	err = pool.CallBASE(ctx, &rest.Opts{Method: http.MethodGet})
+	var info *api.FileList
+	_, err = pool.CallJSON(ctx, &rest.Opts{Method: http.MethodGet}, nil, &info)
 	require.Error(t, err)
 	assert.True(t, fserrors.IsFatalError(err))
 	assert.Contains(t, err.Error(), `cookie UID "1_A"`)

@@ -385,21 +385,21 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 				return true, fserrors.RetryError(apiInfo.Err())
 			}
 		}
-		base := getAPIBase(info)
-		if base != nil {
-			classification := classifyAPIError(base.ErrCode())
+		apiError := getAPIErrorInfo(info)
+		if apiError != nil {
+			classification := classifyAPIError(apiError.ErrCode())
 			switch classification.action {
 			case apiErrorRetry:
 				if classification.delay > 0 {
 					time.Sleep(classification.delay)
 				}
-				return true, fserrors.RetryError(base.Err())
+				return true, fserrors.RetryError(apiError.Err())
 			case apiErrorFatal:
-				return false, fserrors.FatalError(base.Err())
+				return false, fserrors.FatalError(apiError.Err())
 			case apiErrorObjectNotFound:
 				return false, fs.ErrorObjectNotFound
 			case apiErrorNoRetry:
-				return false, fserrors.NoRetryError(base.Err())
+				return false, fserrors.NoRetryError(apiError.Err())
 			}
 		}
 		return false, nil
@@ -569,20 +569,24 @@ func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int
 	}
 }
 
-func getAPIBase(info any) *api.Base {
-	switch info := info.(type) {
-	case *api.Base:
-		return info
-	case **api.Base:
-		if info != nil {
-			return *info
+type apiErrorInfo interface {
+	ErrCode() api.Int
+	Err() error
+}
+
+func getAPIErrorInfo(info any) apiErrorInfo {
+	value := reflect.ValueOf(info)
+	for value.IsValid() {
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			return nil
 		}
-	case *api.StringInfo:
-		return &info.Base
-	case **api.StringInfo:
-		if info != nil && *info != nil {
-			return &(*info).Base
+		if apiError, ok := value.Interface().(apiErrorInfo); ok {
+			return apiError
 		}
+		if value.Kind() != reflect.Pointer {
+			break
+		}
+		value = value.Elem()
 	}
 	return nil
 }
@@ -603,8 +607,8 @@ func (p *poolClient) checkResponse(index int, resp *http.Response, info any, err
 		return &cookieCooldownError{error: err}
 	}
 	if err == nil {
-		if base := getAPIBase(info); base != nil && classifyAPIError(base.ErrCode()).action == apiErrorFatal {
-			return fserrors.FatalError(fmt.Errorf("API authentication failed for cookie UID %q: %w", p.credentials[index].UID, base.Err()))
+		if apiError := getAPIErrorInfo(info); apiError != nil && classifyAPIError(apiError.ErrCode()).action == apiErrorFatal {
+			return fserrors.FatalError(fmt.Errorf("API authentication failed for cookie UID %q: %w", p.credentials[index].UID, apiError.Err()))
 		}
 	}
 	return err
