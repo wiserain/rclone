@@ -161,7 +161,7 @@ Fill in for rclone to use a non root folder as its starting point.
 		}, {
 			Name:    "wait_for_cooldown",
 			Default: true,
-			Help: `Wait for the earliest API cookie to leave cooldown when all cookies are unavailable.
+			Help: `Wait for the first API cookie to leave cooldown when all cookies are unavailable.
 
 If disabled, return an error immediately instead.`,
 			Advanced: true,
@@ -286,7 +286,7 @@ This does not affect API requests, including requests for download URLs.`,
 	})
 }
 
-// Options defines the configguration of this backend
+// Options defines the configuration of this backend
 type Options struct {
 	UID                 string               `config:"uid"`
 	CID                 string               `config:"cid"`
@@ -324,9 +324,9 @@ type Fs struct {
 	root         string
 	opt          Options
 	features     *fs.Features
-	srv          *poolClient        // authorized client
-	dsrv         *poolClient        // download-only client
-	dclient      *http.Client       // anonymous CDN download client
+	srv          *poolClient        // authorized API client
+	dsrv         *poolClient        // download URL API client
+	dclient      *http.Client       // CDN download client
 	dirCache     *dircache.DirCache // Map of directory path to directory id
 	pacer        *fs.Pacer
 	rootFolder   string // path of the absolute root
@@ -555,7 +555,7 @@ func (p *poolClient) client(ctx context.Context) (client *rest.Client, index int
 		p.mu.Unlock()
 
 		if !p.waitForCooldown && allCoolingDown {
-			return nil, 0, fserrors.NoRetryError(errors.New("all API cookies are in cooldown"))
+			return nil, 0, fserrors.NoRetryError(errors.New("all API cookies are on cooldown"))
 		}
 		timer := time.NewTimer(time.Until(earliest))
 		select {
@@ -801,7 +801,7 @@ func (f *Fs) newClientWithPacer(ctx context.Context, opt *Options) (err error) {
 	f.pacer = f.srv.pacer // share same pacer
 	f.userID = f.srv.credentials[0].UserID()
 
-	// download-only clients
+	// Download URL API clients
 	if f.dsrv, err = newPoolClient(newCtx, opt, opt.DownloadCookie); err != nil {
 		return err
 	} else if f.dsrv == nil {
@@ -862,6 +862,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	if err != nil {
 		return nil, fmt.Errorf("115: upload cutoff: %w", err)
 	}
+
 	// mod - override rootID from path remote:{ID}
 	if rootID, _, _ := parseRootID(path); rootID != "" {
 		name += rootID
@@ -878,7 +879,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	f.features = (&fs.Features{
 		DuplicateFiles:          false, // duplicatefiles are only possible via web
 		CanHaveEmptyDirectories: true,  // can have empty directories
-		NoMultiThreading:        true,  // set if can't have multiplethreads on one download open
+		NoMultiThreading:        true,  // set if one download can't use multiple threads
 	}).Fill(ctx, f)
 
 	// setting appVer

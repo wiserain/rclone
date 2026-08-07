@@ -49,7 +49,7 @@ func TestPoolClientCallBASERotatesClientForRetries(t *testing.T) {
 	assert.Equal(t, int32(1), secondCalls.Load())
 }
 
-func TestPoolClientCallBASECoolDownsHTTP405(t *testing.T) {
+func TestPoolClientCallBASECoolsDownOnHTTP405(t *testing.T) {
 	var firstCalls atomic.Int32
 	firstServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		firstCalls.Add(1)
@@ -150,7 +150,7 @@ func TestPoolClientAllCookiesCoolingDownReturnsImmediately(t *testing.T) {
 
 	_, err = pool.CallJSON(ctx, &rest.Opts{Method: http.MethodGet}, nil, nil)
 	require.Error(t, err)
-	assert.EqualError(t, err, "all API cookies are in cooldown")
+	assert.EqualError(t, err, "all API cookies are on cooldown")
 	assert.True(t, fserrors.IsNoRetryError(err))
 }
 
