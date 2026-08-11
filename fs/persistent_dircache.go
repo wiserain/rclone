@@ -17,16 +17,22 @@ type PersistentDirCacheCodec interface {
 	DecodePersistentDirEntry(ctx context.Context, remote string, isDir bool, data []byte) (DirEntry, error)
 }
 
+// PersistentDirCacher is implemented by backends which can safely persist and
+// restore concrete directory entries for the same storage identity.
+type PersistentDirCacher interface {
+	PersistentDirCacheCodec
+	PersistentDirCacheIdentityer
+}
+
+// GetPersistentDirCacher returns the persistent directory cache capability of f.
+func GetPersistentDirCacher(f Fs) (PersistentDirCacher, bool) {
+	persistent, ok := f.(PersistentDirCacher)
+	return persistent, ok
+}
+
 // PersistentDirCacheIdentityer optionally supplies a stable backend/account
 // identity for the persistent VFS directory cache. It should exclude rotating
 // credentials such as access tokens or refreshed cookies.
 type PersistentDirCacheIdentityer interface {
 	PersistentDirCacheIdentity() string
-}
-
-// PersistentObjectResolver is implemented by objects restored from the
-// generic persistent VFS directory cache. Operations which require a concrete
-// backend object, such as a server-side move, can resolve the object first.
-type PersistentObjectResolver interface {
-	ResolvePersistentObject(ctx context.Context) (Object, error)
 }

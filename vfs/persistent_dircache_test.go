@@ -4,17 +4,64 @@ package vfs
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/vfs/vfscommon"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type persistentTestFs struct {
+	fs.Fs
+}
+
+type persistentTestRecord struct {
+	IsDir   bool
+	Size    int64
+	ModTime time.Time
+	ID      string
+	Parent  string
+}
+
+func (f *persistentTestFs) PersistentDirCacheIdentity() string {
+	return "vfs-persistent-test"
+}
+
+func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
+	record := persistentTestRecord{
+		Size:    entry.Size(),
+		ModTime: entry.ModTime(ctx),
+	}
+	if ider, ok := entry.(fs.IDer); ok {
+		record.ID = ider.ID()
+	}
+	if parentIDer, ok := entry.(fs.ParentIDer); ok {
+		record.Parent = parentIDer.ParentID()
+	}
+	_, record.IsDir = entry.(fs.Directory)
+	return json.Marshal(record)
+}
+
+func (f *persistentTestFs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bool, data []byte) (fs.DirEntry, error) {
+	var record persistentTestRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, err
+	}
+	if isDir {
+		return fs.NewDir(remote, record.ModTime).
+			SetSize(record.Size).
+			SetID(record.ID).
+			SetParentID(record.Parent), nil
+	}
+	return object.NewMemoryObject(remote, record.ModTime, make([]byte, record.Size)).SetFs(f), nil
+}
 
 func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
@@ -32,7 +79,8 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	opt.DirCacheTime = fs.Duration(24 * time.Hour)
 	opt.CacheMode = vfscommon.CacheModeOff
 
-	vfs1 := New(ctx, r.Fremote, &opt)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	vfs1 := New(ctx, persistentFs, &opt)
 	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	databasePath := vfs1.dirCache.Path()
@@ -47,7 +95,7 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, remoteObject.Remove(ctx))
 
-	vfs2 := New(ctx, r.Fremote, &opt)
+	vfs2 := New(ctx, persistentFs, &opt)
 	t.Cleanup(vfs2.Shutdown)
 
 	root, err := vfs2.Root()
@@ -101,7 +149,8 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	opt.DirCacheTime = fs.Duration(24 * time.Hour)
 	opt.CacheMode = vfscommon.CacheModeOff
 
-	vfs1 := New(ctx, r.Fremote, &opt)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	vfs1 := New(ctx, persistentFs, &opt)
 	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	vfs1.Shutdown()
@@ -111,7 +160,7 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	require.NoError(t, remoteObject.Remove(ctx))
 	require.NoError(t, r.Fremote.Rmdir(ctx, "dir"))
 
-	vfs2 := New(ctx, r.Fremote, &opt)
+	vfs2 := New(ctx, persistentFs, &opt)
 	require.NotNil(t, vfs2.dirCache)
 	// Saving the parent without "dir" must remove the old child's records.
 	require.NoError(t, vfs2.root.readDir())
@@ -120,7 +169,7 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	require.NoError(t, vfs2.root.readDir())
 	vfs2.Shutdown()
 
-	vfs3 := New(ctx, r.Fremote, &opt)
+	vfs3 := New(ctx, persistentFs, &opt)
 	t.Cleanup(vfs3.Shutdown)
 	root, err := vfs3.Root()
 	require.NoError(t, err)

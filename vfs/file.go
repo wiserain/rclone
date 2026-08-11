@@ -257,17 +257,6 @@ func (f *File) rename(ctx context.Context, destDir *Dir, newName string) error {
 				return nil // no need to rename
 			}
 
-			// Objects restored by the generic persistent directory cache are
-			// lightweight wrappers. Server-side Move implementations commonly
-			// require their concrete backend object type, so resolve it first.
-			if resolver, ok := o.(fs.PersistentObjectResolver); ok {
-				o, err = resolver.ResolvePersistentObject(ctx)
-				if err != nil {
-					fs.Errorf(f.Path(), "File.Rename failed to resolve persistent object: %v", err)
-					return err
-				}
-			}
-
 			// do the move of the remote object
 			dstOverwritten, _ := d.Fs().NewObject(ctx, newPath)
 			newObject, err = operations.Move(ctx, d.Fs(), dstOverwritten, newPath, o)

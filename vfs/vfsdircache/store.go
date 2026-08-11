@@ -63,6 +63,7 @@ var (
 // Store is an on-disk VFS directory listing cache.
 type Store struct {
 	f        fs.Fs
+	codec    fs.PersistentDirCacheCodec
 	root     string
 	path     string
 	identity string
@@ -106,6 +107,10 @@ type encodedDirectory struct {
 
 // New opens or creates the persistent VFS directory cache for f.
 func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) (*Store, error) {
+	persistent, ok := fs.GetPersistentDirCacher(f)
+	if !ok {
+		return nil, fmt.Errorf("backend %q does not support persistent VFS directory caching", f.Name())
+	}
 	root, dbPath, err := cachePaths(f)
 	if err != nil {
 		return nil, err
@@ -119,9 +124,10 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) (*Store, error) {
 
 	s := &Store{
 		f:        f,
+		codec:    persistent,
 		root:     root,
 		path:     dbPath,
-		identity: makeIdentity(ctx, f, opt),
+		identity: makeIdentity(ctx, f, opt, persistent.PersistentDirCacheIdentity()),
 	}
 	if err = s.openCurrent(); err == nil {
 		// A previous process may have stopped after installing and validating a
@@ -198,13 +204,9 @@ func cleanRemotePath(name string) string {
 	return name
 }
 
-func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options) string {
+func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options, backendIdentity string) string {
 	ci := fs.GetConfig(ctx)
 	filterConfig := filter.GetConfig(ctx)
-	backendIdentity := ""
-	if identityer, ok := f.(fs.PersistentDirCacheIdentityer); ok {
-		backendIdentity = identityer.PersistentDirCacheIdentity()
-	}
 
 	hasher := sha256.New()
 	_, _ = fmt.Fprintf(
@@ -837,7 +839,6 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 		RefreshedAtUnixNano: refreshedAt.UnixNano(),
 		Entries:             make([]entryRecord, 0, len(entries)),
 	}
-	codec, hasCodec := s.f.(fs.PersistentDirCacheCodec)
 	for _, entry := range entries {
 		item := entryRecord{
 			Remote: entry.Remote(),
@@ -862,13 +863,14 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 		if parentIDer, ok := entry.(fs.ParentIDer); ok {
 			item.ParentID = parentIDer.ParentID()
 		}
-		if hasCodec {
-			backendData, err := codec.EncodePersistentDirEntry(ctx, entry)
-			if err != nil {
-				return nil, fmt.Errorf("backend failed to encode %q for persistent directory cache: %w", entry.Remote(), err)
-			}
-			item.BackendData = backendData
+		backendData, err := s.codec.EncodePersistentDirEntry(ctx, entry)
+		if err != nil {
+			return nil, fmt.Errorf("backend failed to encode %q for persistent directory cache: %w", entry.Remote(), err)
 		}
+		if len(backendData) == 0 {
+			return nil, fmt.Errorf("backend returned no persistent directory cache data for %q", entry.Remote())
+		}
+		item.BackendData = backendData
 		record.Entries = append(record.Entries, item)
 	}
 	var buf bytes.Buffer
@@ -891,41 +893,29 @@ func decodeDirectoryRecord(data []byte) (directoryRecord, error) {
 
 func (s *Store) restoreEntries(ctx context.Context, records []entryRecord) (fs.DirEntries, error) {
 	entries := make(fs.DirEntries, 0, len(records))
-	codec, hasCodec := s.f.(fs.PersistentDirCacheCodec)
 	for _, record := range records {
 		isDir := record.Kind == entryDir
 		if record.Kind != entryObject && record.Kind != entryDir {
 			return nil, fmt.Errorf("unknown persistent entry kind %d for %q", record.Kind, record.Remote)
 		}
-		if hasCodec && len(record.BackendData) != 0 {
-			entry, err := codec.DecodePersistentDirEntry(ctx, record.Remote, isDir, record.BackendData)
-			if err != nil {
-				return nil, fmt.Errorf("backend failed to decode %q from persistent directory cache: %w", record.Remote, err)
-			}
-			if entry == nil {
-				return nil, fmt.Errorf("backend returned nil while decoding %q from persistent directory cache", record.Remote)
-			}
-			if isDir {
-				if _, ok := entry.(fs.Directory); !ok {
-					return nil, fmt.Errorf("backend decoded directory %q as %T", record.Remote, entry)
-				}
-			} else if _, ok := entry.(fs.Object); !ok {
-				return nil, fmt.Errorf("backend decoded object %q as %T", record.Remote, entry)
-			}
-			entries = append(entries, entry)
-			continue
+		if len(record.BackendData) == 0 {
+			return nil, fmt.Errorf("persistent entry %q has no backend data", record.Remote)
 		}
-
+		entry, err := s.codec.DecodePersistentDirEntry(ctx, record.Remote, isDir, record.BackendData)
+		if err != nil {
+			return nil, fmt.Errorf("backend failed to decode %q from persistent directory cache: %w", record.Remote, err)
+		}
+		if entry == nil {
+			return nil, fmt.Errorf("backend returned nil while decoding %q from persistent directory cache", record.Remote)
+		}
 		if isDir {
-			dir := fs.NewDir(record.Remote, decodeTime(record.ModTimeUnixNano, record.ModTimeValid)).
-				SetSize(record.Size).
-				SetItems(record.Items).
-				SetID(record.ID).
-				SetParentID(record.ParentID)
-			entries = append(entries, dir)
-		} else {
-			entries = append(entries, newPersistentObject(s.f, record))
+			if _, ok := entry.(fs.Directory); !ok {
+				return nil, fmt.Errorf("backend decoded directory %q as %T", record.Remote, entry)
+			}
+		} else if _, ok := entry.(fs.Object); !ok {
+			return nil, fmt.Errorf("backend decoded object %q as %T", record.Remote, entry)
 		}
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
