@@ -248,12 +248,16 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) *VFS {
 
 	// Open the persistent directory cache before creating the root directory.
 	if vfs.Opt.DirCachePersist {
-		dirCache, err := vfsdircache.New(vfs.ctx, vfs.f, &vfs.Opt)
-		if err != nil {
-			fs.Errorf(vfs.f, "Failed to open persistent VFS directory cache - disabling: %v", err)
+		if _, supported := fs.GetPersistentDirCacher(vfs.f); !supported {
+			fs.Infof(vfs.f, "Persistent VFS directory cache is not supported by this backend")
 		} else {
-			vfs.dirCache = dirCache
-			fs.Infof(vfs.f, "Persistent VFS directory cache is enabled at %q", dirCache.Path())
+			dirCache, err := vfsdircache.New(vfs.ctx, vfs.f, &vfs.Opt)
+			if err != nil {
+				fs.Errorf(vfs.f, "Failed to open persistent VFS directory cache - disabling: %v", err)
+			} else {
+				vfs.dirCache = dirCache
+				fs.Infof(vfs.f, "Persistent VFS directory cache is enabled at %q", dirCache.Path())
+			}
 		}
 	}
 

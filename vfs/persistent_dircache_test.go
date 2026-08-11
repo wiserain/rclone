@@ -180,3 +180,92 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	_, err = dir.Stat("stale.txt")
 	assert.ErrorIs(t, err, ENOENT)
 }
+
+func TestPersistentDirCacheUnsupportedBackendIsDisabled(t *testing.T) {
+	r := fstest.NewRun(t)
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs := New(context.Background(), r.Fremote, &opt)
+	t.Cleanup(vfs.Shutdown)
+	assert.Nil(t, vfs.dirCache)
+}
+
+func TestPersistentDirCacheChangeNotifyInvalidatesParent(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "dir/file.txt", "contents", t1)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	require.NoError(t, vfs1.root.readDirTree())
+	root, err := vfs1.Root()
+	require.NoError(t, err)
+	dirNode, err := root.Stat("dir")
+	require.NoError(t, err)
+	dir := dirNode.(*Dir)
+
+	remoteObject, err := r.Fremote.NewObject(ctx, "dir/file.txt")
+	require.NoError(t, err)
+	require.NoError(t, remoteObject.Remove(ctx))
+	root.changeNotify("dir/file.txt", fs.EntryObject)
+	_, err = dir.Stat("file.txt")
+	assert.ErrorIs(t, err, ENOENT)
+	vfs1.Shutdown()
+
+	// The remote result read after notification must replace the disk record.
+	vfs2 := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs2.Shutdown)
+	root, err = vfs2.Root()
+	require.NoError(t, err)
+	dirNode, err = root.Stat("dir")
+	require.NoError(t, err)
+	dir = dirNode.(*Dir)
+	_, err = dir.Stat("file.txt")
+	assert.ErrorIs(t, err, ENOENT)
+}
+
+func TestPersistentDirCacheCleanUpPurgesListings(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "file.txt", "contents", t1)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	require.NoError(t, vfs1.root.readDirTree())
+	require.NoError(t, vfs1.CleanUp())
+	vfs1.Shutdown()
+
+	remoteObject, err := r.Fremote.NewObject(ctx, "file.txt")
+	require.NoError(t, err)
+	require.NoError(t, remoteObject.Remove(ctx))
+	vfs2 := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs2.Shutdown)
+	root, err := vfs2.Root()
+	require.NoError(t, err)
+	_, err = root.Stat("file.txt")
+	assert.ErrorIs(t, err, ENOENT)
+}
