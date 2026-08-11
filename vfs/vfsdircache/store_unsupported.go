@@ -54,6 +54,9 @@ func (*Store) InvalidateDirectory(string) error { return errUnsupported }
 // InvalidateSubtree reports that persistence is unsupported.
 func (*Store) InvalidateSubtree(string) error { return errUnsupported }
 
+// Purge reports that persistence is unsupported.
+func (*Store) Purge() error { return errUnsupported }
+
 // Stats returns an unsupported status.
 func (*Store) Stats() rc.Params {
 	return rc.Params{"open": false, "supported": false}

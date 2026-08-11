@@ -23,6 +23,7 @@ package vfs
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -424,6 +425,9 @@ func (vfs *VFS) Shutdown() {
 	}
 	activeMu.Unlock()
 
+	// Stop poll notifications before closing the store they may invalidate.
+	vfs.cancel()
+
 	vfs.shutdownCache()
 
 	if vfs.dirCache != nil {
@@ -437,16 +441,19 @@ func (vfs *VFS) Shutdown() {
 		vfs.pollChan = nil
 	}
 
-	// Cancel any background go routines
-	vfs.cancel()
 }
 
 // CleanUp deletes the contents of the on disk cache
 func (vfs *VFS) CleanUp() error {
-	if vfs.Opt.CacheMode == vfscommon.CacheModeOff {
-		return nil
+	var cacheErr error
+	if vfs.Opt.CacheMode != vfscommon.CacheModeOff {
+		cacheErr = vfs.cache.CleanUp()
 	}
-	return vfs.cache.CleanUp()
+	var dirCacheErr error
+	if vfs.dirCache != nil {
+		dirCacheErr = vfs.dirCache.Purge()
+	}
+	return errors.Join(cacheErr, dirCacheErr)
 }
 
 // FlushDirCache empties the directory cache

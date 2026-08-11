@@ -719,6 +719,11 @@ func (s *Store) InvalidateSubtree(dir string) error {
 	return nil
 }
 
+// Purge removes every persistent directory record while keeping the store open.
+func (s *Store) Purge() error {
+	return s.InvalidateSubtree("")
+}
+
 func deleteSubtree(bucket *bolt.Bucket, root string) error {
 	root = cleanRemotePath(root)
 	if root == "" {

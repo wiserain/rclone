@@ -302,8 +302,9 @@ func (d *Dir) forgetDirPath(relativePath string) {
 	d.invalidatePersistentSubtree(absPath)
 }
 
-// invalidateDirMemory marks a materialized in-memory directory as stale.
-func (d *Dir) invalidateDirMemory(absPath string) {
+// invalidateDirCache invalidates a materialized directory in memory and on
+// disk while holding its directory lock.
+func (d *Dir) invalidateDirCache(absPath string, subtree bool) {
 	node := d.vfs.root.cachedNode(absPath)
 	if dir, ok := node.(*Dir); ok {
 		dir.mu.Lock()
@@ -311,17 +312,24 @@ func (d *Dir) invalidateDirMemory(absPath string) {
 			fs.Debugf(dir.path, "invalidating directory cache")
 			dir.read = time.Time{}
 		}
+		if subtree {
+			dir.invalidatePersistentSubtree(absPath)
+		} else {
+			dir.invalidatePersistentDirectory(absPath)
+		}
 		dir.mu.Unlock()
+		return
+	}
+	if subtree {
+		d.invalidatePersistentSubtree(absPath)
+	} else {
+		d.invalidatePersistentDirectory(absPath)
 	}
 }
 
 // invalidateDir invalidates the directory cache for absPath relative to the root.
 func (d *Dir) invalidateDir(absPath string) {
-	// Mark memory stale before removing the disk record. If a remote read is
-	// already in progress, waiting for its directory lock prevents that read
-	// from writing a fresh-looking record after this invalidation.
-	d.invalidateDirMemory(absPath)
-	d.invalidatePersistentDirectory(absPath)
+	d.invalidateDirCache(absPath, false)
 }
 
 // changeNotify invalidates the directory cache for the relativePath
@@ -338,8 +346,7 @@ func (d *Dir) changeNotify(relativePath string, entryType fs.EntryType) {
 		// A directory deletion or replacement must not leave persistent child
 		// records which could be reused if a directory with the same name is
 		// created later.
-		d.invalidateDirMemory(absPath)
-		d.invalidatePersistentSubtree(absPath)
+		d.invalidateDirCache(absPath, true)
 	}
 }
 
