@@ -12,6 +12,7 @@ import (
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/object"
+	"github.com/rclone/rclone/fs/rc"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/vfs/vfscommon"
 	"github.com/stretchr/testify/assert"
@@ -267,5 +268,44 @@ func TestPersistentDirCacheCleanUpPurgesListings(t *testing.T) {
 	root, err := vfs2.Root()
 	require.NoError(t, err)
 	_, err = root.Stat("file.txt")
+	assert.ErrorIs(t, err, ENOENT)
+}
+
+func TestPersistentDirCacheRCRefreshReplacesSnapshot(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "stale.txt", "contents", t1)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	require.NoError(t, vfs1.root.readDirTree())
+	remoteObject, err := r.Fremote.NewObject(ctx, "stale.txt")
+	require.NoError(t, err)
+	require.NoError(t, remoteObject.Remove(ctx))
+
+	out, err := rcRefresh(ctx, rc.Params{
+		"fs":        fs.ConfigString(persistentFs),
+		"recursive": "true",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "OK", out["result"].(map[string]string)[""])
+	vfs1.Shutdown()
+
+	vfs2 := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs2.Shutdown)
+	root, err := vfs2.Root()
+	require.NoError(t, err)
+	_, err = root.Stat("stale.txt")
 	assert.ErrorIs(t, err, ENOENT)
 }
