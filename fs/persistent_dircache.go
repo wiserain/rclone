@@ -6,9 +6,9 @@ import "context"
 // persist and restore its concrete directory entries without an additional
 // metadata request after the VFS directory cache is restored from disk.
 //
-// EncodePersistentDirEntry should return nil, nil when the backend does not
-// need any private data for entry. The returned byte slice is opaque to the
-// VFS and is passed back unchanged to DecodePersistentDirEntry.
+// EncodePersistentDirEntry must return enough backend-private data to restore
+// a concrete entry. The returned byte slice is opaque to the VFS and is passed
+// back unchanged to DecodePersistentDirEntry.
 //
 // DecodePersistentDirEntry is only called when non-empty backend data was
 // stored. It must return either an Object or Directory matching isDir.

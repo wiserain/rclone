@@ -1097,8 +1097,7 @@ func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([
 			record.ParentID = parentIDer.ParentID()
 		}
 	default:
-		// Unknown wrappers can still be restored by the VFS generic record.
-		return nil, nil
+		return nil, fmt.Errorf("can't persist unsupported 115 directory entry type %T", entry)
 	}
 
 	return json.Marshal(record)
