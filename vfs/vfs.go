@@ -44,6 +44,7 @@ import (
 	"github.com/rclone/rclone/fs/walk"
 	"github.com/rclone/rclone/vfs/vfscache"
 	"github.com/rclone/rclone/vfs/vfscommon"
+	"github.com/rclone/rclone/vfs/vfsdircache"
 )
 
 //go:embed vfs.md
@@ -183,6 +184,7 @@ type VFS struct {
 	root        *Dir
 	Opt         vfscommon.Options
 	cache       *vfscache.Cache
+	dirCache    *vfsdircache.Store
 	cancel      context.CancelFunc
 	cancelCache context.CancelFunc
 	usageMu     sync.Mutex
@@ -242,6 +244,17 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) *VFS {
 	}
 	// Put the VFS into the active cache
 	active[configName] = append(active[configName], vfs)
+
+	// Open the persistent directory cache before creating the root directory.
+	if vfs.Opt.DirCachePersist {
+		dirCache, err := vfsdircache.New(vfs.ctx, vfs.f, &vfs.Opt)
+		if err != nil {
+			fs.Errorf(vfs.f, "Failed to open persistent VFS directory cache - disabling: %v", err)
+		} else {
+			vfs.dirCache = dirCache
+			fs.Infof(vfs.f, "Persistent VFS directory cache is enabled at %q", dirCache.Path())
+		}
+	}
 
 	// Create root directory
 	vfs.root = newDir(vfs, f, nil, fsDir)
@@ -339,6 +352,9 @@ func (vfs *VFS) Stats() (out rc.Params) {
 	if vfs.cache != nil {
 		out["diskCache"] = vfs.cache.Stats()
 	}
+	if vfs.dirCache != nil {
+		out["persistentDirCache"] = vfs.dirCache.Stats()
+	}
 	return out
 }
 
@@ -409,6 +425,12 @@ func (vfs *VFS) Shutdown() {
 	activeMu.Unlock()
 
 	vfs.shutdownCache()
+
+	if vfs.dirCache != nil {
+		if err := vfs.dirCache.Close(); err != nil {
+			fs.Errorf(vfs.f, "Failed to close persistent VFS directory cache: %v", err)
+		}
+	}
 
 	if vfs.pollChan != nil {
 		close(vfs.pollChan)

@@ -353,6 +353,24 @@ type Object struct {
 	durlMu      *sync.Mutex
 }
 
+const persistentDirCacheRecordVersion = 1
+
+// persistentDirCacheRecord contains the backend-private values needed to
+// reconstruct a concrete 115 object or directory without another metadata API
+// call after the VFS directory cache has been restored from disk.
+type persistentDirCacheRecord struct {
+	Version          int    `json:"version"`
+	Kind             string `json:"kind"`
+	ID               string `json:"id"`
+	ParentID         string `json:"parent_id"`
+	Size             int64  `json:"size"`
+	Items            int64  `json:"items,omitempty"`
+	SHA1             string `json:"sha1,omitempty"`
+	PickCode         string `json:"pick_code,omitempty"`
+	ModTimeUnixNano  int64  `json:"mod_time_unix_nano,omitempty"`
+	ModTimeIsPresent bool   `json:"mod_time_is_present,omitempty"`
+}
+
 // retryErrorCodes is a slice of error codes that we will retry
 var retryErrorCodes = []int{
 	429, // Too Many Requests.
@@ -1027,6 +1045,116 @@ func (f *Fs) DirCacheFlush() {
 // Hashes returns the supported hash types of the filesystem
 func (f *Fs) Hashes() hash.Set {
 	return hash.Set(hash.SHA1)
+}
+
+// PersistentDirCacheIdentity implements fs.PersistentDirCacheIdentityer.
+// userID stays stable when the user rotates cookies, but changes when the
+// configured remote is pointed at a different 115 account.
+func (f *Fs) PersistentDirCacheIdentity() string {
+	return fmt.Sprintf(
+		"user_id=%s;root_folder_id=%s;share=%t;share_code=%s",
+		f.userID,
+		f.rootFolderID,
+		f.isShare,
+		f.opt.ShareCode,
+	)
+}
+
+// EncodePersistentDirEntry implements fs.PersistentDirCacheCodec.
+//
+// Directory IDs are saved as well as object IDs, SHA1 and pickcode. Restoring
+// directory IDs also repopulates the backend's own path-to-ID cache, which
+// avoids a path traversal API call when a later operation needs that directory.
+func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
+	record := persistentDirCacheRecord{
+		Version: persistentDirCacheRecordVersion,
+	}
+	modTime := entry.ModTime(ctx)
+	if !modTime.IsZero() {
+		record.ModTimeUnixNano = modTime.UnixNano()
+		record.ModTimeIsPresent = true
+	}
+
+	switch item := entry.(type) {
+	case *Object:
+		if err := item.readMetaData(ctx); err != nil {
+			return nil, err
+		}
+		record.Kind = "object"
+		record.ID = item.id
+		record.ParentID = item.parent
+		record.Size = item.size
+		record.SHA1 = item.sha1sum
+		record.PickCode = item.pickCode
+		record.ModTimeUnixNano = item.modTime.UnixNano()
+		record.ModTimeIsPresent = !item.modTime.IsZero()
+	case fs.Directory:
+		record.Kind = "directory"
+		record.ID = item.ID()
+		record.Size = item.Size()
+		record.Items = item.Items()
+		if parentIDer, ok := item.(fs.ParentIDer); ok {
+			record.ParentID = parentIDer.ParentID()
+		}
+	default:
+		// Unknown wrappers can still be restored by the VFS generic record.
+		return nil, nil
+	}
+
+	return json.Marshal(record)
+}
+
+// DecodePersistentDirEntry implements fs.PersistentDirCacheCodec.
+func (f *Fs) DecodePersistentDirEntry(ctx context.Context, remote string, isDir bool, data []byte) (fs.DirEntry, error) {
+	var record persistentDirCacheRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, fmt.Errorf("failed to decode 115 persistent directory cache record: %w", err)
+	}
+	if record.Version != persistentDirCacheRecordVersion {
+		return nil, fmt.Errorf("unsupported 115 persistent directory cache record version %d", record.Version)
+	}
+
+	modTime := time.Time{}
+	if record.ModTimeIsPresent {
+		modTime = time.Unix(0, record.ModTimeUnixNano)
+	}
+
+	if isDir {
+		if record.Kind != "directory" {
+			return nil, fmt.Errorf("115 persistent directory cache kind mismatch for %q: %q", remote, record.Kind)
+		}
+		if record.ID == "" {
+			return nil, fmt.Errorf("115 persistent directory cache record for %q has no directory ID", remote)
+		}
+		f.dirCache.Put(remote, record.ID)
+		return fs.NewDir(remote, modTime).
+			SetSize(record.Size).
+			SetItems(record.Items).
+			SetID(record.ID).
+			SetParentID(record.ParentID), nil
+	}
+
+	if record.Kind != "object" {
+		return nil, fmt.Errorf("115 persistent object cache kind mismatch for %q: %q", remote, record.Kind)
+	}
+	if record.ID == "" {
+		return nil, fmt.Errorf("115 persistent object cache record for %q has no file ID", remote)
+	}
+	if !f.isShare && record.Size != 0 && record.PickCode == "" {
+		return nil, fmt.Errorf("115 persistent object cache record for %q has no pickcode", remote)
+	}
+	return &Object{
+		fs:          f,
+		remote:      remote,
+		hasMetaData: true,
+		id:          record.ID,
+		parent:      record.ParentID,
+		size:        record.Size,
+		sha1sum:     strings.ToLower(record.SHA1),
+		pickCode:    record.PickCode,
+		modTime:     modTime,
+		durlMu:      new(sync.Mutex),
+	}, nil
 }
 
 // NewObject finds the Object at remote.  If it can't be found
@@ -2067,18 +2195,20 @@ var (
 	// _ fs.CleanUpper      = (*Fs)(nil)
 	// _ fs.UserInfoer      = (*Fs)(nil)
 	// _ fs.MimeTyper = (*Object)(nil)
-	_ fs.Fs              = (*Fs)(nil)
-	_ fs.Purger          = (*Fs)(nil)
-	_ fs.Copier          = (*Fs)(nil)
-	_ fs.Mover           = (*Fs)(nil)
-	_ fs.DirMover        = (*Fs)(nil)
-	_ fs.DirCacheFlusher = (*Fs)(nil)
-	_ fs.MergeDirser     = (*Fs)(nil)
-	_ fs.PutUncheckeder  = (*Fs)(nil)
-	_ fs.Abouter         = (*Fs)(nil)
-	_ fs.Commander       = (*Fs)(nil)
-	_ fs.Object          = (*Object)(nil)
-	_ fs.ObjectInfo      = (*Object)(nil)
-	_ fs.IDer            = (*Object)(nil)
-	_ fs.ParentIDer      = (*Object)(nil)
+	_ fs.Fs                           = (*Fs)(nil)
+	_ fs.Purger                       = (*Fs)(nil)
+	_ fs.Copier                       = (*Fs)(nil)
+	_ fs.Mover                        = (*Fs)(nil)
+	_ fs.DirMover                     = (*Fs)(nil)
+	_ fs.DirCacheFlusher              = (*Fs)(nil)
+	_ fs.PersistentDirCacheCodec      = (*Fs)(nil)
+	_ fs.PersistentDirCacheIdentityer = (*Fs)(nil)
+	_ fs.MergeDirser                  = (*Fs)(nil)
+	_ fs.PutUncheckeder               = (*Fs)(nil)
+	_ fs.Abouter                      = (*Fs)(nil)
+	_ fs.Commander                    = (*Fs)(nil)
+	_ fs.Object                       = (*Object)(nil)
+	_ fs.ObjectInfo                   = (*Object)(nil)
+	_ fs.IDer                         = (*Object)(nil)
+	_ fs.ParentIDer                   = (*Object)(nil)
 )
