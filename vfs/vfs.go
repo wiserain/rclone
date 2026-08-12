@@ -23,7 +23,6 @@ package vfs
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,7 +44,6 @@ import (
 	"github.com/rclone/rclone/fs/walk"
 	"github.com/rclone/rclone/vfs/vfscache"
 	"github.com/rclone/rclone/vfs/vfscommon"
-	"github.com/rclone/rclone/vfs/vfsdircache"
 )
 
 //go:embed vfs.md
@@ -185,7 +183,6 @@ type VFS struct {
 	root        *Dir
 	Opt         vfscommon.Options
 	cache       *vfscache.Cache
-	dirCache    *vfsdircache.Store
 	cancel      context.CancelFunc
 	cancelCache context.CancelFunc
 	usageMu     sync.Mutex
@@ -193,6 +190,8 @@ type VFS struct {
 	usage       *fs.Usage
 	pollChan    chan time.Duration
 	inUse       atomic.Int32 // count of number of opens
+
+	dirDB persistentDirCache // mod: restart-safe directory listings
 }
 
 // Keep track of active VFS keyed on fs.ConfigString(f)
@@ -246,20 +245,7 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) *VFS {
 	// Put the VFS into the active cache
 	active[configName] = append(active[configName], vfs)
 
-	// Open the persistent directory cache before creating the root directory.
-	if vfs.Opt.DirCachePersist {
-		if _, supported := fs.GetPersistentDirCacher(vfs.f); !supported {
-			fs.Infof(vfs.f, "Persistent VFS directory cache is not supported by this backend")
-		} else {
-			dirCache, err := vfsdircache.New(vfs.ctx, vfs.f, &vfs.Opt)
-			if err != nil {
-				fs.Errorf(vfs.f, "Failed to open persistent VFS directory cache - disabling: %v", err)
-			} else {
-				vfs.dirCache = dirCache
-				fs.Infof(vfs.f, "Persistent VFS directory cache is enabled at %q", dirCache.Path())
-			}
-		}
-	}
+	vfs.initPersistentDirCache() // mod
 
 	// Create root directory
 	vfs.root = newDir(vfs, f, nil, fsDir)
@@ -357,9 +343,7 @@ func (vfs *VFS) Stats() (out rc.Params) {
 	if vfs.cache != nil {
 		out["diskCache"] = vfs.cache.Stats()
 	}
-	if vfs.dirCache != nil {
-		out["persistentDirCache"] = vfs.dirCache.Stats()
-	}
+	vfs.addPersistentDirCacheStats(out) // mod
 	return out
 }
 
@@ -429,35 +413,24 @@ func (vfs *VFS) Shutdown() {
 	}
 	activeMu.Unlock()
 
-	// Stop poll notifications before closing the store they may invalidate.
-	vfs.cancel()
-
 	vfs.shutdownCache()
-
-	if vfs.dirCache != nil {
-		if err := vfs.dirCache.Close(); err != nil {
-			fs.Errorf(vfs.f, "Failed to close persistent VFS directory cache: %v", err)
-		}
-	}
 
 	if vfs.pollChan != nil {
 		close(vfs.pollChan)
 		vfs.pollChan = nil
 	}
 
+	// Cancel any background go routines
+	vfs.cancel()
+	vfs.closePersistentDirCache() // mod
 }
 
 // CleanUp deletes the contents of the on disk cache
 func (vfs *VFS) CleanUp() error {
-	var cacheErr error
-	if vfs.Opt.CacheMode != vfscommon.CacheModeOff {
-		cacheErr = vfs.cache.CleanUp()
+	if vfs.Opt.CacheMode == vfscommon.CacheModeOff {
+		return vfs.cleanUpPersistentDirCache(nil) // mod
 	}
-	var dirCacheErr error
-	if vfs.dirCache != nil {
-		dirCacheErr = vfs.dirCache.Purge()
-	}
-	return errors.Join(cacheErr, dirCacheErr)
+	return vfs.cleanUpPersistentDirCache(vfs.cache.CleanUp()) // mod
 }
 
 // FlushDirCache empties the directory cache

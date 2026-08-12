@@ -30,8 +30,8 @@ var OptionsInfo = fs.Options{{
 	Default: fs.Duration(5 * 60 * time.Second),
 	Help:    "Time to cache directory entries for",
 	Groups:  "VFS",
-}, {
-	Name:    "vfs_dir_cache_persist",
+}, { // mod
+	Name:    "dir_cache_persist",
 	Default: false,
 	Help:    "Persist VFS directory listings under --cache-dir so they survive restarts",
 	Groups:  "VFS",
@@ -188,14 +188,13 @@ func init() {
 
 // Options is options for creating the vfs
 type Options struct {
-	NoSeek             bool          `config:"no_seek"`               // don't allow seeking if set
-	NoChecksum         bool          `config:"no_checksum"`           // don't check checksums if set
-	ReadOnly           bool          `config:"read_only"`             // if set VFS is read only
-	Links              bool          `config:"vfs_links"`             // if set interpret link files
-	NoModTime          bool          `config:"no_modtime"`            // don't read mod times for files
-	DirCacheTime       fs.Duration   `config:"dir_cache_time"`        // how long to consider directory listing cache valid
-	DirCachePersist    bool          `config:"vfs_dir_cache_persist"` // persist directory listings under --cache-dir
-	Refresh            bool          `config:"vfs_refresh"`           // refreshes the directory listing recursively on start
+	NoSeek             bool          `config:"no_seek"`        // don't allow seeking if set
+	NoChecksum         bool          `config:"no_checksum"`    // don't check checksums if set
+	ReadOnly           bool          `config:"read_only"`      // if set VFS is read only
+	Links              bool          `config:"vfs_links"`      // if set interpret link files
+	NoModTime          bool          `config:"no_modtime"`     // don't read mod times for files
+	DirCacheTime       fs.Duration   `config:"dir_cache_time"` // how long to consider directory listing cache valid
+	Refresh            bool          `config:"vfs_refresh"`    // refreshes the directory listing recursively on start
 	PollInterval       fs.Duration   `config:"poll_interval"`
 	Umask              FileMode      `config:"umask"`
 	UID                uint32        `config:"uid"`
@@ -222,6 +221,7 @@ type Options struct {
 	DiskSpaceTotalSize fs.SizeSuffix `config:"vfs_disk_space_total_size"`
 	HandleCaching      fs.Duration   `config:"vfs_handle_caching"`     // time to keep handle alive after last close
 	MetadataExtension  string        `config:"vfs_metadata_extension"` // if set respond to files with this extension with metadata
+	DirCachePersist    bool          `config:"dir_cache_persist"`      // mod: persist directory listings under --cache-dir
 }
 
 // Opt is the default options modified by the environment variables and command line flags
