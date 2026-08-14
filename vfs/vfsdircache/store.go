@@ -140,8 +140,11 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) (*Store, error) {
 		return nil, err
 	}
 
-	// Preserve an incompatible cache for diagnosis, then start with a clean DB.
-	stalePath := fmt.Sprintf("%s.incompatible-%d", s.path, time.Now().UnixNano())
+	// Preserve the latest incompatible cache for diagnosis, then start clean.
+	stalePath := s.path + ".incompatible"
+	if removeErr := os.Remove(stalePath); removeErr != nil && !os.IsNotExist(removeErr) {
+		return nil, fmt.Errorf("failed to remove previous incompatible persistent VFS directory cache: %w", removeErr)
+	}
 	if renameErr := os.Rename(s.path, stalePath); renameErr != nil && !os.IsNotExist(renameErr) {
 		return nil, fmt.Errorf("failed to move incompatible persistent VFS directory cache aside: %w", renameErr)
 	}
