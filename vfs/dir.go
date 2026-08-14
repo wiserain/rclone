@@ -827,9 +827,7 @@ func (d *Dir) readDirTree() error {
 	fs.Debugf(d.path, "Reading directory tree done in %s", time.Since(when))
 	d.read = when
 	d.cleanupTimer.Reset(time.Duration(d.vfs.Opt.DirCacheTime * 2))
-	if err = d.replacePersistentTree(path, dt, when, cacheMutation); err != nil { // mod
-		return err
-	}
+	d.replacePersistentTree(path, dt, when, cacheMutation) // mod
 	return nil
 }
 

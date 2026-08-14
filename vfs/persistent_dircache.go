@@ -3,7 +3,6 @@ package vfs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/rclone/rclone/fs"
@@ -164,15 +163,15 @@ func (d *Dir) persistentTreeMutation() uint64 {
 	return d.vfs.dirCache.MutationVersion()
 }
 
-func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, mutation uint64) error {
+func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, mutation uint64) {
 	if d.vfs.dirCache == nil {
-		return nil
+		return
 	}
 	if d.hasVirtual() {
-		return errors.New("can't save persistent VFS directory tree while virtual entries are pending")
+		fs.Debugf(d.path, "Not saving persistent VFS directory tree while virtual entries are pending")
+		return
 	}
 	if err := d.vfs.dirCache.ReplaceTree(d.vfs.ctx, dirPath, tree, refreshedAt, mutation); err != nil {
-		return fmt.Errorf("failed to save persistent VFS directory tree: %w", err)
+		fs.Errorf(d.path, "Failed to save persistent VFS directory tree: %v", err)
 	}
-	return nil
 }
