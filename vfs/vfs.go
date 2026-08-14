@@ -426,11 +426,15 @@ func (vfs *VFS) Shutdown() {
 }
 
 // CleanUp deletes the contents of the on disk cache
-func (vfs *VFS) CleanUp() error {
+func (vfs *VFS) CleanUp() (err error) {
+	defer func() {
+		err = vfs.cleanUpPersistentDirCache(err)
+	}() // mod
+
 	if vfs.Opt.CacheMode == vfscommon.CacheModeOff {
-		return vfs.cleanUpPersistentDirCache(nil) // mod
+		return nil
 	}
-	return vfs.cleanUpPersistentDirCache(vfs.cache.CleanUp()) // mod
+	return vfs.cache.CleanUp()
 }
 
 // FlushDirCache empties the directory cache
