@@ -191,7 +191,7 @@ type VFS struct {
 	pollChan    chan time.Duration
 	inUse       atomic.Int32 // count of number of opens
 
-	dirDB persistentDirCache // mod: restart-safe directory listings
+	dirCache persistentDirCache // mod: restart-safe directory listings
 }
 
 // Keep track of active VFS keyed on fs.ConfigString(f)

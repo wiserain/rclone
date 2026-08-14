@@ -39,46 +39,46 @@ func (vfs *VFS) initPersistentDirCache() {
 		fs.Errorf(vfs.f, "Failed to open persistent VFS directory cache - disabling: %v", err)
 		return
 	}
-	vfs.dirDB = dirCache
+	vfs.dirCache = dirCache
 	fs.Infof(vfs.f, "Persistent VFS directory cache is enabled at %q", dirCache.Path())
 }
 
 func (vfs *VFS) addPersistentDirCacheStats(out rc.Params) {
-	if vfs.dirDB != nil {
-		out["persistentDirCache"] = vfs.dirDB.Stats()
+	if vfs.dirCache != nil {
+		out["persistentDirCache"] = vfs.dirCache.Stats()
 	}
 }
 
 func (vfs *VFS) closePersistentDirCache() {
-	if vfs.dirDB == nil {
+	if vfs.dirCache == nil {
 		return
 	}
-	if err := vfs.dirDB.Close(); err != nil {
+	if err := vfs.dirCache.Close(); err != nil {
 		fs.Errorf(vfs.f, "Failed to close persistent VFS directory cache: %v", err)
 	}
 }
 
 func (vfs *VFS) cleanUpPersistentDirCache(cacheErr error) error {
-	if vfs.dirDB == nil {
+	if vfs.dirCache == nil {
 		return cacheErr
 	}
-	return errors.Join(cacheErr, vfs.dirDB.Purge())
+	return errors.Join(cacheErr, vfs.dirCache.Purge())
 }
 
 func (d *Dir) invalidatePersistentDirectory(dirPath string) {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return
 	}
-	if err := d.vfs.dirDB.InvalidateDirectory(dirPath); err != nil {
+	if err := d.vfs.dirCache.InvalidateDirectory(dirPath); err != nil {
 		fs.Errorf(dirPath, "Failed to invalidate persistent VFS directory cache: %v", err)
 	}
 }
 
 func (d *Dir) invalidatePersistentSubtree(dirPath string) {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return
 	}
-	if err := d.vfs.dirDB.InvalidateSubtree(dirPath); err != nil {
+	if err := d.vfs.dirCache.InvalidateSubtree(dirPath); err != nil {
 		fs.Errorf(dirPath, "Failed to invalidate persistent VFS directory subtree: %v", err)
 	}
 }
@@ -103,10 +103,10 @@ func (d *Dir) invalidateDirSubtree(absPath string) {
 // restorePersistentDirLocked restores d after an in-memory cache miss.
 // d.mu must be held.
 func (d *Dir) restorePersistentDirLocked() bool {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return false
 	}
-	entries, refreshedAt, found, err := d.vfs.dirDB.LoadDirectory(
+	entries, refreshedAt, found, err := d.vfs.dirCache.LoadDirectory(
 		d.vfs.ctx, d.path, time.Duration(d.vfs.Opt.DirCacheTime),
 	)
 	if err != nil {
@@ -130,33 +130,33 @@ func (d *Dir) restorePersistentDirLocked() bool {
 
 // savePersistentDirLocked saves a remote-confirmed listing. d.mu must be held.
 func (d *Dir) savePersistentDirLocked(entries fs.DirEntries) {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return
 	}
 	if len(d.virtual) != 0 {
 		fs.Debugf(d.path, "Not saving persistent VFS directory cache while virtual entries are pending")
 		return
 	}
-	if err := d.vfs.dirDB.SaveDirectory(d.vfs.ctx, d.path, entries, d.read); err != nil {
+	if err := d.vfs.dirCache.SaveDirectory(d.vfs.ctx, d.path, entries, d.read); err != nil {
 		fs.Errorf(d.path, "Failed to save persistent VFS directory cache: %v", err)
 	}
 }
 
 func (d *Dir) persistentTreeMutation() uint64 {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return 0
 	}
-	return d.vfs.dirDB.MutationVersion()
+	return d.vfs.dirCache.MutationVersion()
 }
 
 func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, mutation uint64) error {
-	if d.vfs.dirDB == nil {
+	if d.vfs.dirCache == nil {
 		return nil
 	}
 	if d.hasVirtual() {
 		return errors.New("can't save persistent VFS directory tree while virtual entries are pending")
 	}
-	if err := d.vfs.dirDB.ReplaceTree(d.vfs.ctx, dirPath, tree, refreshedAt, mutation); err != nil {
+	if err := d.vfs.dirCache.ReplaceTree(d.vfs.ctx, dirPath, tree, refreshedAt, mutation); err != nil {
 		return fmt.Errorf("failed to save persistent VFS directory tree: %w", err)
 	}
 	return nil

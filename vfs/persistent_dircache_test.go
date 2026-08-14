@@ -82,9 +82,9 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 
 	persistentFs := &persistentTestFs{Fs: r.Fremote}
 	vfs1 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs1.dirDB)
+	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
-	databasePath := vfs1.dirDB.Stats()["path"].(string)
+	databasePath := vfs1.dirCache.Stats()["path"].(string)
 	require.FileExists(t, databasePath)
 	assert.Equal(t, "dircache.db", filepath.Base(databasePath))
 	assert.Contains(t, filepath.ToSlash(databasePath), "/vfsDirCache/")
@@ -109,7 +109,7 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(len("persistent contents")), fileNode.Size())
 
-	stats := vfs2.dirDB.Stats()
+	stats := vfs2.dirCache.Stats()
 	assert.GreaterOrEqual(t, stats["hits"].(uint64), uint64(2))
 
 	// Automatic memory cleanup must not erase the restart-safe records.
@@ -152,7 +152,7 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 
 	persistentFs := &persistentTestFs{Fs: r.Fremote}
 	vfs1 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs1.dirDB)
+	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	vfs1.Shutdown()
 
@@ -162,7 +162,7 @@ func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	require.NoError(t, r.Fremote.Rmdir(ctx, "dir"))
 
 	vfs2 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs2.dirDB)
+	require.NotNil(t, vfs2.dirCache)
 	// Saving the parent without "dir" must remove the old child's records.
 	require.NoError(t, vfs2.root.readDir())
 	require.NoError(t, r.Fremote.Mkdir(ctx, "dir"))
@@ -190,7 +190,7 @@ func TestPersistentDirCacheUnsupportedBackendIsDisabled(t *testing.T) {
 
 	vfs := New(context.Background(), r.Fremote, &opt)
 	t.Cleanup(vfs.Shutdown)
-	assert.Nil(t, vfs.dirDB)
+	assert.Nil(t, vfs.dirCache)
 }
 
 func TestPersistentDirCacheChangeNotifyInvalidatesParent(t *testing.T) {
@@ -210,7 +210,7 @@ func TestPersistentDirCacheChangeNotifyInvalidatesParent(t *testing.T) {
 	opt.CacheMode = vfscommon.CacheModeOff
 
 	vfs1 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs1.dirDB)
+	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	root, err := vfs1.Root()
 	require.NoError(t, err)
@@ -255,7 +255,7 @@ func TestPersistentDirCacheCleanUpPurgesListings(t *testing.T) {
 	opt.CacheMode = vfscommon.CacheModeOff
 
 	vfs1 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs1.dirDB)
+	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	require.NoError(t, vfs1.CleanUp())
 	vfs1.Shutdown()
@@ -288,7 +288,7 @@ func TestPersistentDirCacheRCRefreshReplacesSnapshot(t *testing.T) {
 	opt.CacheMode = vfscommon.CacheModeOff
 
 	vfs1 := New(ctx, persistentFs, &opt)
-	require.NotNil(t, vfs1.dirDB)
+	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
 	remoteObject, err := r.Fremote.NewObject(ctx, "stale.txt")
 	require.NoError(t, err)
