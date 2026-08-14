@@ -811,23 +811,24 @@ func (d *Dir) readDirTree() error {
 	d.mu.RUnlock()
 	cacheMutation := d.persistentTreeMutation() // mod
 
-	when := time.Now()
+	started := time.Now()
 	fs.Debugf(path, "Reading directory tree")
 	dt, err := walk.NewDirTree(d.vfs.ctx, f, path, false, -1)
 	if err != nil {
 		return err
 	}
+	refreshedAt := time.Now() // mod: freshness starts when the remote walk completes
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.read = time.Time{}
-	err = d._readDirFromDirTree(dt, when)
+	err = d._readDirFromDirTree(dt, refreshedAt)
 	if err != nil {
 		return err
 	}
-	fs.Debugf(d.path, "Reading directory tree done in %s", time.Since(when))
-	d.read = when
+	fs.Debugf(d.path, "Reading directory tree done in %s", time.Since(started))
+	d.read = refreshedAt
 	d.cleanupTimer.Reset(time.Duration(d.vfs.Opt.DirCacheTime * 2))
-	d.replacePersistentTree(path, dt, when, cacheMutation) // mod
+	d.replacePersistentTree(path, dt, refreshedAt, cacheMutation) // mod
 	return nil
 }
 
