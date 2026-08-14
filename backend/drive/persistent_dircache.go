@@ -180,13 +180,13 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 		return nil, fmt.Errorf("unsupported Google Drive persistent directory cache record version %d", record.Version)
 	}
 	if record.ID == "" {
-		return nil, fmt.Errorf("Google Drive persistent directory cache record for %q has no ID", remote)
+		return nil, fmt.Errorf("google drive persistent directory cache record for %q has no ID", remote)
 	}
 	base := f.restorePersistentDriveBase(remote, &record)
 	switch record.Kind {
 	case persistentDriveDirectory:
 		if !isDir {
-			return nil, fmt.Errorf("Google Drive persistent directory cache kind mismatch for %q", remote)
+			return nil, fmt.Errorf("google drive persistent directory cache kind mismatch for %q", remote)
 		}
 		f.dirCache.Put(remote, record.ID)
 		if record.ResourceKey != "" {
@@ -195,7 +195,7 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 		return &Directory{baseObject: base}, nil
 	case persistentDriveObject:
 		if isDir {
-			return nil, fmt.Errorf("Google Drive persistent object cache kind mismatch for %q", remote)
+			return nil, fmt.Errorf("google drive persistent object cache kind mismatch for %q", remote)
 		}
 		return &Object{
 			baseObject: base,
@@ -207,7 +207,7 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 		}, nil
 	case persistentDriveDocument:
 		if isDir {
-			return nil, fmt.Errorf("Google Drive persistent document cache kind mismatch for %q", remote)
+			return nil, fmt.Errorf("google drive persistent document cache kind mismatch for %q", remote)
 		}
 		return &documentObject{
 			baseObject:       base,
@@ -217,7 +217,7 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 		}, nil
 	case persistentDriveLink:
 		if isDir {
-			return nil, fmt.Errorf("Google Drive persistent link cache kind mismatch for %q", remote)
+			return nil, fmt.Errorf("google drive persistent link cache kind mismatch for %q", remote)
 		}
 		return &linkObject{
 			baseObject: base,

@@ -30,6 +30,7 @@ import (
 	"github.com/rclone/rclone/lib/file"
 	"github.com/rclone/rclone/vfs/vfscommon"
 	bolt "go.etcd.io/bbolt"
+	berrors "go.etcd.io/bbolt/errors"
 )
 
 const (
@@ -704,7 +705,7 @@ func (s *Store) InvalidateSubtree(dir string) error {
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketDirs)
 		if dir == "" {
-			if err := tx.DeleteBucket(bucketDirs); err != nil && !errors.Is(err, bolt.ErrBucketNotFound) {
+			if err := tx.DeleteBucket(bucketDirs); err != nil && !errors.Is(err, berrors.ErrBucketNotFound) {
 				return err
 			}
 			if _, err := tx.CreateBucket(bucketDirs); err != nil {
@@ -933,13 +934,6 @@ func encodeTime(t time.Time) (unixNano int64, valid bool) {
 		return 0, false
 	}
 	return t.UnixNano(), true
-}
-
-func decodeTime(unixNano int64, valid bool) time.Time {
-	if !valid {
-		return time.Time{}
-	}
-	return time.Unix(0, unixNano)
 }
 
 func directoryKey(dir string) []byte {
