@@ -65,7 +65,22 @@ func (vfs *VFS) cleanUpPersistentDirCache(cacheErr error) error {
 	return errors.Join(cacheErr, vfs.dirCache.Purge())
 }
 
-func (d *Dir) invalidatePersistentDirectory(dirPath string) {
+// ForgetAll forgets directory entries for this directory and any children.
+//
+// It does not invalidate or clear the cache of the parent directory. The
+// matching persistent directory cache subtree is also invalidated.
+//
+// It returns true if the directory or any of its children had virtual
+// entries so could not be forgotten. Children which didn't have virtual
+// entries will be forgotten even if true is returned.
+func (d *Dir) ForgetAll() (hasVirtual bool) {
+	dirPath := d.Path()
+	hasVirtual = d.forgetAllMemory()
+	d.invalidatePersistentSubtree(dirPath)
+	return hasVirtual
+}
+
+func (d *Dir) invalidatePersistentDir(dirPath string) {
 	if d.vfs.dirCache == nil {
 		return
 	}

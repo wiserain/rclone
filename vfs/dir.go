@@ -87,10 +87,7 @@ func (d *Dir) cacheCleanup() {
 	d.mu.Unlock()
 
 	if stale {
-		// The cleanup timer is only a memory pressure mechanism. Keep the
-		// persistent directory records so they can be restored after cleanup
-		// or a process restart.
-		d.forgetAllMemory()
+		d.ForgetAll()
 	}
 }
 
@@ -207,30 +204,37 @@ func (d *Dir) addVirtual(n int32) {
 	}
 }
 
-// forgetAllMemory forgets in-memory directory entries for this directory
-// and its children without changing the persistent directory cache.
+// ForgetAll forgets directory entries for this directory and any children.
 //
-// It returns true if this directory or any child has virtual entries and
-// therefore could not be fully forgotten.
-func (d *Dir) forgetAllMemory() (hasVirtual bool) {
-	// Recurse with RLock only to preserve the existing lock ordering.
+// It does not invalidate or clear the cache of the parent directory.
+//
+// It returns true if the directory or any of its children had virtual
+// entries so could not be forgotten. Children which didn't have
+// virtual entries will be forgotten even if true is returned.
+func (d *Dir) forgetAllMemory() (hasVirtual bool) { // mod
+	// We run this part with RLock only to avoid deadlocks in the recursion
+
 	d.mu.RLock()
-	fs.Debugf(d.path, "forgetting in-memory directory cache")
+
+	fs.Debugf(d.path, "forgetting directory cache")
 	for _, node := range d.items {
 		if dir, ok := node.(*Dir); ok {
-			dir.forgetAllMemory()
+			dir.forgetAllMemory() // mod
 		}
 	}
+
 	d.mu.RUnlock()
+
+	// We run this part with Lock so we can modify the Dir
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// Purge any unnecessary virtual entries.
+	// Purge any unnecessary virtual entries
 	d._purgeVirtual()
 
 	// Don't clear directory entries if there are virtual entries in this
-	// directory or any children.
+	// directory or any children
 	hasVirtual = d.hasVirtual()
 	if !hasVirtual {
 		d.read = time.Time{}
@@ -243,22 +247,6 @@ func (d *Dir) forgetAllMemory() (hasVirtual bool) {
 	return hasVirtual
 }
 
-// ForgetAll forgets directory entries for this directory and any children.
-//
-// It does not invalidate or clear the cache of the parent directory. When the
-// persistent directory cache is enabled, the matching on-disk subtree is also
-// invalidated so a deliberate vfs/forget or SIGHUP still forces a remote read.
-//
-// It returns true if the directory or any of its children had virtual
-// entries so could not be forgotten. Children which didn't have virtual
-// entries will be forgotten even if true is returned.
-func (d *Dir) ForgetAll() (hasVirtual bool) {
-	dirPath := d.Path()
-	hasVirtual = d.forgetAllMemory()
-	d.invalidatePersistentSubtree(dirPath)
-	return hasVirtual
-}
-
 // forgetDirPath clears the cache for itself and all subdirectories if
 // they match the given path. The path is specified relative from the
 // directory it is called from.
@@ -266,12 +254,12 @@ func (d *Dir) ForgetAll() (hasVirtual bool) {
 // It does not invalidate or clear the cache of the parent directory.
 func (d *Dir) forgetDirPath(relativePath string) {
 	dir := d.cachedDir(relativePath)
-	if dir != nil {
-		dir.ForgetAll()
+	if dir != nil { // mod
+		dir.ForgetAll() // mod
 		return
 	}
 
-	// The directory may not currently be materialized in memory, but an
+	// mod: The directory may not currently be materialized in memory, but an
 	// on-disk record can still exist for it.
 	d.mu.RLock()
 	absPath := path.Join(d.path, relativePath)
@@ -288,11 +276,11 @@ func (d *Dir) invalidateDir(absPath string) {
 			fs.Debugf(dir.path, "invalidating directory cache")
 			dir.read = time.Time{}
 		}
-		dir.invalidatePersistentDirectory(absPath) // mod
+		dir.invalidatePersistentDir(absPath) // mod
 		dir.mu.Unlock()
-		return
+		return // mod
 	}
-	d.invalidatePersistentDirectory(absPath) // mod
+	d.invalidatePersistentDir(absPath) // mod
 }
 
 // changeNotify invalidates the directory cache for the relativePath
@@ -306,10 +294,10 @@ func (d *Dir) changeNotify(relativePath string, entryType fs.EntryType) {
 	d.mu.RUnlock()
 	d.invalidateDir(vfscommon.FindParent(absPath))
 	if entryType == fs.EntryDirectory {
-		// A directory deletion or replacement must not leave persistent child
+		// mod: A directory deletion or replacement must not leave persistent child
 		// records which could be reused if a directory with the same name is
 		// created later.
-		d.invalidateDirSubtree(absPath)
+		d.invalidateDirSubtree(absPath) // mod
 	}
 }
 
@@ -474,7 +462,7 @@ func (d *Dir) addObject(node Node) {
 	d.virtual[leaf] = vAdd
 	fs.Debugf(d.path, "Added virtual directory entry %v: %q", vAdd, leaf)
 	d.mu.Unlock()
-	d.invalidatePersistentDirectory(d.Path()) // mod
+	d.invalidatePersistentDir(d.Path()) // mod
 }
 
 // AddVirtual adds a virtual object of name and size to the directory
@@ -531,7 +519,7 @@ func (d *Dir) delObject(leaf string) {
 	d.virtual[leaf] = vDel
 	fs.Debugf(d.path, "Added virtual directory entry %v: %q", vDel, leaf)
 	d.mu.Unlock()
-	d.invalidatePersistentDirectory(d.Path()) // mod
+	d.invalidatePersistentDir(d.Path()) // mod
 }
 
 // DelVirtual removes an object from the directory listing
@@ -547,12 +535,12 @@ func (d *Dir) DelVirtual(leaf string) {
 
 // read the directory and sets d.items - must be called with the lock held
 func (d *Dir) _readDir() error {
-	return d._readDirPersistent(true)
+	return d._readDirPersistent(true) // mod
 }
 
-// _readDirPersistent reads the directory, optionally restoring it from disk.
+// mod: _readDirPersistent reads the directory, optionally restoring it from disk.
 // It must be called with the lock held.
-func (d *Dir) _readDirPersistent(allowPersistent bool) error {
+func (d *Dir) _readDirPersistent(allowPersistent bool) error { // mod
 	when := time.Now()
 	if age, stale := d._age(when); stale {
 		if age != 0 {

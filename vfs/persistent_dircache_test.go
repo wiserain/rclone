@@ -112,7 +112,7 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	stats := vfs2.dirCache.Stats()
 	assert.GreaterOrEqual(t, stats["hits"].(uint64), uint64(2))
 
-	// Automatic memory cleanup must not erase the restart-safe records.
+	// A memory-only eviction can restore entries from the persistent cache.
 	root.forgetAllMemory()
 	dirNode, err = root.Stat("dir")
 	require.NoError(t, err)
@@ -121,9 +121,12 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(len("persistent contents")), fileNode.Size())
 
-	// An explicit forget must invalidate the on-disk snapshot and force the
-	// next lookup to observe the changed remote.
-	root.ForgetAll()
+	// Automatic cleanup of a stale listing must invalidate the on-disk snapshot
+	// and force the next lookup to observe the changed remote.
+	root.mu.Lock()
+	root.read = time.Now().Add(-2 * time.Duration(opt.DirCacheTime))
+	root.mu.Unlock()
+	root.cacheCleanup()
 	dirNode, err = root.Stat("dir")
 	require.NoError(t, err)
 	dir = dirNode.(*Dir)
