@@ -1098,6 +1098,15 @@ func (s *Store) Stats() rc.Params {
 		return out
 	}
 	out["open"] = true
+	if s.treeRefresh != nil {
+		out["refreshActive"] = true
+		out["refreshRoot"] = s.treeRefresh.root
+		out["refreshMutations"] = len(s.treeRefresh.mutations)
+		out["refreshJournalBytes"] = s.treeRefresh.dataBytes
+		out["refreshOverflow"] = s.treeRefresh.overflow
+	} else {
+		out["refreshActive"] = false
+	}
 	_ = s.db.View(func(tx *bolt.Tx) error {
 		if bucket := tx.Bucket(bucketDirs); bucket != nil {
 			out["directories"] = bucket.Stats().KeyN

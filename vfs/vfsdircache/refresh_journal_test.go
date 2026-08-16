@@ -87,6 +87,21 @@ func TestTreeRefreshRejectsConcurrentRefresh(t *testing.T) {
 	require.ErrorIs(t, err, errTreeRefreshAlreadyRunning)
 }
 
+func TestTreeRefreshStats(t *testing.T) {
+	store := newRefreshJournalTestStore(t)
+	token, err := store.BeginTreeRefresh("subtree")
+	require.NoError(t, err)
+	defer store.AbortTreeRefresh(token)
+	require.NoError(t, store.InvalidateDirectory("subtree/dir"))
+
+	stats := store.Stats()
+	require.Equal(t, true, stats["refreshActive"])
+	require.Equal(t, "subtree", stats["refreshRoot"])
+	require.Equal(t, 1, stats["refreshMutations"])
+	require.Equal(t, 0, stats["refreshJournalBytes"])
+	require.Equal(t, false, stats["refreshOverflow"])
+}
+
 func TestTreeRefreshAbortAllowsAnotherRefresh(t *testing.T) {
 	store := newRefreshJournalTestStore(t)
 	token, err := store.BeginTreeRefresh("one")
@@ -127,4 +142,55 @@ func TestTreeRefreshReplaysRootInvalidation(t *testing.T) {
 	require.Equal(t, []string{""}, result.StaleSubtrees)
 	require.Equal(t, 0, store.Stats()["directories"])
 	require.NotContains(t, store.Stats(), "snapshotTime")
+}
+
+func TestTreeRefreshReplaysSubtreeMutations(t *testing.T) {
+	store := newRefreshJournalTestStore(t)
+	ctx := context.Background()
+	oldTime := time.Now().Add(-time.Hour).Truncate(time.Nanosecond)
+	refreshTime := oldTime.Add(30 * time.Minute)
+	concurrentTime := refreshTime.Add(time.Minute)
+	require.NoError(t, store.SaveDirectory(ctx, "tree/updated", nil, oldTime))
+	require.NoError(t, store.SaveDirectory(ctx, "tree/removed", nil, oldTime))
+	require.NoError(t, store.SaveDirectory(ctx, "outside", nil, oldTime))
+
+	token, err := store.BeginTreeRefresh("tree")
+	require.NoError(t, err)
+	t.Cleanup(func() { store.AbortTreeRefresh(token) })
+	require.NoError(t, store.SaveDirectory(ctx, "tree/updated", nil, concurrentTime))
+	require.NoError(t, store.InvalidateDirectory("tree/removed"))
+	require.NoError(t, store.SaveDirectory(ctx, "outside", nil, concurrentTime))
+
+	tree := dirtree.DirTree{
+		"tree":         nil,
+		"tree/updated": nil,
+		"tree/removed": nil,
+		"tree/fresh":   nil,
+	}
+	_, err = store.ReplaceTree(ctx, "tree", tree, refreshTime, token)
+	require.NoError(t, err)
+	requireDirectoryState(t, store, "tree/updated", true, concurrentTime)
+	requireDirectoryState(t, store, "tree/removed", false, time.Time{})
+	requireDirectoryState(t, store, "tree/fresh", true, refreshTime)
+	requireDirectoryState(t, store, "outside", true, concurrentTime)
+}
+
+func TestTreeRefreshJournalOverflowPreservesCurrentDatabase(t *testing.T) {
+	store := newRefreshJournalTestStore(t)
+	ctx := context.Background()
+	oldTime := time.Now().Add(-time.Hour).Truncate(time.Nanosecond)
+	refreshTime := oldTime.Add(30 * time.Minute)
+	require.NoError(t, store.SaveDirectory(ctx, "current", nil, oldTime))
+
+	token, err := store.BeginTreeRefresh("")
+	require.NoError(t, err)
+	t.Cleanup(func() { store.AbortTreeRefresh(token) })
+	store.mu.Lock()
+	store.treeRefresh.overflow = true
+	store.mu.Unlock()
+
+	_, err = store.ReplaceTree(ctx, "", dirtree.DirTree{"": nil, "replacement": nil}, refreshTime, token)
+	require.ErrorIs(t, err, errTreeRefreshJournalOverflow)
+	requireDirectoryState(t, store, "current", true, oldTime)
+	requireDirectoryState(t, store, "replacement", false, time.Time{})
 }

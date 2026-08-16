@@ -199,6 +199,29 @@ func TestPersistentDirCacheRecursiveRefreshReplaysChangeNotify(t *testing.T) {
 	require.True(t, dir.read.IsZero())
 }
 
+func TestPersistentDirCacheRejectsConcurrentRecursiveRefresh(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.CacheMode = vfscommon.CacheModeOff
+	vfs := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs.Shutdown)
+
+	token, err := vfs.dirCache.BeginTreeRefresh("")
+	require.NoError(t, err)
+	defer vfs.dirCache.AbortTreeRefresh(token)
+	err = vfs.root.readDirTree()
+	require.ErrorContains(t, err, "tree refresh is already running")
+}
+
 func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	ctx := context.Background()
 	oldCacheDir := config.GetCacheDir()
