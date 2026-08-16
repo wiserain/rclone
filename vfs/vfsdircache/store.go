@@ -57,8 +57,7 @@ var (
 var errIncompatibleDatabase = errors.New("incompatible persistent VFS directory cache")
 
 var (
-	errStoreClosed              = errors.New("persistent VFS directory cache is closed")
-	errChangedDuringTreeRefresh = errors.New("persistent VFS directory cache changed during recursive refresh")
+	errStoreClosed = errors.New("persistent VFS directory cache is closed")
 )
 
 // Store is an on-disk VFS directory listing cache.
@@ -73,6 +72,9 @@ type Store struct {
 	mu     sync.RWMutex
 	db     *bolt.DB
 	closed bool
+
+	treeRefresh       *treeRefreshSession
+	nextTreeRefreshID uint64
 
 	hits      atomic.Uint64
 	misses    atomic.Uint64
@@ -309,15 +311,6 @@ func (s *Store) Close() error {
 	return err
 }
 
-// MutationVersion returns a process-local version which changes whenever a
-// directory record is written, invalidated, or replaced. A recursive refresh
-// captures this before walking the remote so that it cannot later overwrite a
-// newer directory read or local VFS change which happened during a long
-// traversal.
-func (s *Store) MutationVersion() uint64 {
-	return s.mutations.Load()
-}
-
 // Path returns the database path.
 func (s *Store) Path() string {
 	return s.path
@@ -328,18 +321,6 @@ func (s *Store) checkOpen() error {
 	defer s.mu.RUnlock()
 	if s.closed || s.db == nil {
 		return errStoreClosed
-	}
-	return nil
-}
-
-func (s *Store) checkRefreshVersion(expectedMutation uint64) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed || s.db == nil {
-		return errStoreClosed
-	}
-	if s.mutations.Load() != expectedMutation {
-		return errChangedDuringTreeRefresh
 	}
 	return nil
 }
@@ -412,62 +393,58 @@ func (s *Store) SaveDirectory(ctx context.Context, dir string, entries fs.DirEnt
 		s.errors.Add(1)
 		return err
 	}
-	newRecord, err := decodeStoredDirectoryRecord(data)
-	if err != nil {
-		s.errors.Add(1)
-		return fmt.Errorf("failed to verify encoded persistent directory %q: %w", dir, err)
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return errStoreClosed
 	}
 	if err = s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(bucketDirs)
-		key := directoryKey(dir)
-		if oldData := bucket.Get(key); oldData != nil {
-			oldRecord, decodeErr := decodeStoredDirectoryRecord(oldData)
-			if decodeErr != nil || oldRecord.Path != newRecord.Path {
-				// Without a valid parent record it isn't possible to decide which
-				// descendants still belong to the current directory.
-				if err := deleteDescendants(bucket, dir); err != nil {
-					return err
-				}
-			} else {
-				if _, err := deleteReplacedChildSubtrees(bucket, oldRecord, newRecord); err != nil {
-					return err
-				}
-			}
-		}
-		return bucket.Put(key, data)
+		return putDirectoryRecord(tx.Bucket(bucketDirs), dir, data)
 	}); err != nil {
 		s.errors.Add(1)
 		return fmt.Errorf("failed to save persistent directory %q: %w", dir, err)
 	}
 	s.writes.Add(1)
-	// Any independently refreshed directory may be newer than a recursive
-	// walk which started earlier, even when its child directory structure did
-	// not change. Prevent that older walk from replacing this record.
+	s.appendRefreshMutationLocked(refreshMutationSaveDirectory, dir, data)
 	s.mutations.Add(1)
 	return nil
+}
+
+func putDirectoryRecord(bucket *bolt.Bucket, dir string, data []byte) error {
+	newRecord, err := decodeStoredDirectoryRecord(data)
+	if err != nil {
+		return fmt.Errorf("failed to decode new persistent directory record: %w", err)
+	}
+	key := directoryKey(dir)
+	if oldData := bucket.Get(key); oldData != nil {
+		oldRecord, decodeErr := decodeStoredDirectoryRecord(oldData)
+		if decodeErr != nil || oldRecord.Path != newRecord.Path {
+			// Without a valid parent record it isn't possible to decide which
+			// descendants still belong to the current directory.
+			if err := deleteDescendants(bucket, dir); err != nil {
+				return err
+			}
+		} else {
+			if _, err := deleteReplacedChildSubtrees(bucket, oldRecord, newRecord); err != nil {
+				return err
+			}
+		}
+	}
+	return bucket.Put(key, data)
 }
 
 // ReplaceTree saves a recursively refreshed tree. A root refresh is built in a
 // new database and swapped into place only after it is complete. A subtree
 // refresh is replaced atomically in the current database.
-func (s *Store) ReplaceTree(ctx context.Context, root string, tree dirtree.DirTree, refreshedAt time.Time, expectedMutation uint64) error {
-	if err := s.checkRefreshVersion(expectedMutation); err != nil {
-		return err
-	}
+func (s *Store) ReplaceTree(ctx context.Context, root string, tree dirtree.DirTree, refreshedAt time.Time, token TreeRefreshToken) (TreeRefreshResult, error) {
 	root = cleanRemotePath(root)
 	if root == "" {
-		return s.replaceAll(ctx, tree, refreshedAt, expectedMutation)
+		return s.replaceAll(ctx, tree, refreshedAt, token)
 	}
-	return s.replaceSubtree(ctx, root, tree, refreshedAt, expectedMutation)
+	return s.replaceSubtree(ctx, root, tree, refreshedAt, token)
 }
 
-func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedAt time.Time, expectedMutation uint64) (err error) {
+func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedAt time.Time, token TreeRefreshToken) (result TreeRefreshResult, err error) {
 	tmpPath := fmt.Sprintf("%s.tmp-%d-%d", s.path, os.Getpid(), time.Now().UnixNano())
 	defer func() {
 		if err != nil {
@@ -477,7 +454,7 @@ func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedA
 
 	tmpDB, err := openDatabase(tmpPath)
 	if err != nil {
-		return err
+		return TreeRefreshResult{}, err
 	}
 	closeTmp := true
 	defer func() {
@@ -486,7 +463,7 @@ func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedA
 		}
 	}()
 	if err = initializeDatabase(tmpDB, s.identity); err != nil {
-		return err
+		return TreeRefreshResult{}, err
 	}
 
 	paths := sortedTreePaths(tree)
@@ -514,94 +491,112 @@ func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedA
 	for _, dir := range paths {
 		data, encodeErr := s.encodeDirectory(ctx, dir, tree[dir], refreshedAt)
 		if encodeErr != nil {
-			return encodeErr
+			return TreeRefreshResult{}, encodeErr
 		}
 		recordBytes := len(dir) + len(data)
 		if len(batch) != 0 && (len(batch) >= writeBatchSize || batchBytes+recordBytes > writeBatchBytes) {
 			if err = flush(); err != nil {
-				return err
+				return TreeRefreshResult{}, err
 			}
 		}
 		batch = append(batch, encodedDirectory{path: dir, data: data})
 		batchBytes += recordBytes
 		if len(batch) >= writeBatchSize || batchBytes >= writeBatchBytes {
 			if err = flush(); err != nil {
-				return err
+				return TreeRefreshResult{}, err
 			}
 		}
 	}
 	if err = flush(); err != nil {
-		return err
+		return TreeRefreshResult{}, err
 	}
 	if err = tmpDB.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketMeta).Put(keySnapshotTime, []byte(strconv.FormatInt(refreshedAt.UnixNano(), 10)))
 	}); err != nil {
-		return fmt.Errorf("failed finalizing persistent directory snapshot: %w", err)
+		return TreeRefreshResult{}, fmt.Errorf("failed finalizing persistent directory snapshot: %w", err)
 	}
-	if err = tmpDB.Sync(); err != nil {
-		return fmt.Errorf("failed syncing persistent directory snapshot: %w", err)
-	}
-	if err = tmpDB.Close(); err != nil {
-		return fmt.Errorf("failed closing persistent directory snapshot: %w", err)
+	result, err = s.commitFullTreeDatabase(tmpPath, tmpDB, token)
+	if err != nil {
+		return TreeRefreshResult{}, err
 	}
 	closeTmp = false
-
-	if err = s.swapDatabase(tmpPath, expectedMutation); err != nil {
-		return err
-	}
 	s.writes.Add(uint64(len(paths)))
-	return nil
+	return result, nil
 }
 
-func (s *Store) replaceSubtree(ctx context.Context, root string, tree dirtree.DirTree, refreshedAt time.Time, expectedMutation uint64) error {
+func (s *Store) replaceSubtree(ctx context.Context, root string, tree dirtree.DirTree, refreshedAt time.Time, token TreeRefreshToken) (TreeRefreshResult, error) {
 	paths := sortedTreePaths(tree)
 	encoded := make([]encodedDirectory, 0, len(paths))
 	for _, dir := range paths {
 		data, err := s.encodeDirectory(ctx, dir, tree[dir], refreshedAt)
 		if err != nil {
-			return err
+			return TreeRefreshResult{}, err
 		}
 		encoded = append(encoded, encodedDirectory{path: dir, data: data})
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.db == nil {
-		return errStoreClosed
+	session, err := s.treeRefreshLocked(token, root)
+	if err != nil {
+		return TreeRefreshResult{}, err
 	}
-	if s.mutations.Load() != expectedMutation {
-		return errChangedDuringTreeRefresh
-	}
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err = s.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketDirs)
 		if err := deleteSubtree(bucket, root); err != nil {
 			return err
 		}
 		for _, item := range encoded {
-			if err := bucket.Put(directoryKey(item.path), item.data); err != nil {
+			if err := putDirectoryRecord(bucket, item.path, item.data); err != nil {
 				return err
 			}
 		}
-		return tx.Bucket(bucketMeta).Put(keySnapshotTime, []byte(strconv.FormatInt(refreshedAt.UnixNano(), 10)))
+		if err := tx.Bucket(bucketMeta).Put(keySnapshotTime, []byte(strconv.FormatInt(refreshedAt.UnixNano(), 10))); err != nil {
+			return err
+		}
+		if err := replayRefreshMutations(tx, session.mutations); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		s.errors.Add(1)
-		return fmt.Errorf("failed replacing persistent directory subtree %q: %w", root, err)
+		return TreeRefreshResult{}, fmt.Errorf("failed replacing persistent directory subtree %q: %w", root, err)
 	}
+	result := treeRefreshResult(session.mutations)
+	s.treeRefresh = nil
 	s.writes.Add(uint64(len(encoded)))
 	s.mutations.Add(1)
-	return nil
+	return result, nil
 }
 
-func (s *Store) swapDatabase(tmpPath string, expectedMutation uint64) error {
+func (s *Store) commitFullTreeDatabase(tmpPath string, tmpDB *bolt.DB, token TreeRefreshToken) (TreeRefreshResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return errStoreClosed
+	session, err := s.treeRefreshLocked(token, "")
+	if err != nil {
+		return TreeRefreshResult{}, err
 	}
-	if s.mutations.Load() != expectedMutation {
-		return errChangedDuringTreeRefresh
+	if err = tmpDB.Update(func(tx *bolt.Tx) error {
+		return replayRefreshMutations(tx, session.mutations)
+	}); err != nil {
+		return TreeRefreshResult{}, fmt.Errorf("failed replaying persistent directory changes: %w", err)
 	}
+	if err = tmpDB.Sync(); err != nil {
+		return TreeRefreshResult{}, fmt.Errorf("failed syncing persistent directory snapshot: %w", err)
+	}
+	if err = tmpDB.Close(); err != nil {
+		return TreeRefreshResult{}, fmt.Errorf("failed closing persistent directory snapshot: %w", err)
+	}
+	if err = s.swapDatabaseLocked(tmpPath); err != nil {
+		return TreeRefreshResult{}, err
+	}
+	result := treeRefreshResult(session.mutations)
+	s.treeRefresh = nil
+	return result, nil
+}
+
+func (s *Store) swapDatabaseLocked(tmpPath string) error {
 
 	if s.db != nil {
 		if err := s.db.Close(); err != nil {
@@ -688,12 +683,23 @@ func (s *Store) InvalidateDirectory(dir string) error {
 		s.errors.Add(1)
 		return fmt.Errorf("failed invalidating persistent directory %q: %w", dir, err)
 	}
+	s.appendRefreshMutationLocked(refreshMutationInvalidateDirectory, dir, nil)
 	s.mutations.Add(1)
 	return nil
 }
 
 // InvalidateSubtree removes dir and every child directory record from disk.
 func (s *Store) InvalidateSubtree(dir string) error {
+	return s.invalidateSubtree(dir, true)
+}
+
+// ExpireSubtree removes stale records without journaling the expiry over a
+// newer remote tree currently being collected.
+func (s *Store) ExpireSubtree(dir string) error {
+	return s.invalidateSubtree(dir, false)
+}
+
+func (s *Store) invalidateSubtree(dir string, journal bool) error {
 	dir = cleanRemotePath(dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -719,6 +725,9 @@ func (s *Store) InvalidateSubtree(dir string) error {
 	if err != nil {
 		s.errors.Add(1)
 		return fmt.Errorf("failed invalidating persistent directory subtree %q: %w", dir, err)
+	}
+	if journal {
+		s.appendRefreshMutationLocked(refreshMutationInvalidateSubtree, dir, nil)
 	}
 	s.mutations.Add(1)
 	return nil
@@ -1089,6 +1098,15 @@ func (s *Store) Stats() rc.Params {
 		return out
 	}
 	out["open"] = true
+	if s.treeRefresh != nil {
+		out["refreshActive"] = true
+		out["refreshRoot"] = s.treeRefresh.root
+		out["refreshMutations"] = len(s.treeRefresh.mutations)
+		out["refreshJournalBytes"] = s.treeRefresh.dataBytes
+		out["refreshOverflow"] = s.treeRefresh.overflow
+	} else {
+		out["refreshActive"] = false
+	}
 	_ = s.db.View(func(tx *bolt.Tx) error {
 		if bucket := tx.Bucket(bucketDirs); bucket != nil {
 			out["directories"] = bucket.Stats().KeyN

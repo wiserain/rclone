@@ -87,7 +87,7 @@ func (d *Dir) cacheCleanup() {
 	d.mu.Unlock()
 
 	if stale {
-		d.ForgetAll()
+		d.expireAll() // mod
 	}
 }
 
@@ -805,11 +805,15 @@ func (d *Dir) _readDirFromEntries(entries fs.DirEntries, dirTree dirtree.DirTree
 }
 
 // readDirTree forces a refresh of the complete directory tree
-func (d *Dir) readDirTree() error {
+func (d *Dir) readDirTree() (err error) {
 	d.mu.RLock()
 	f, path := d.f, d.path
 	d.mu.RUnlock()
-	cacheMutation := d.persistentTreeMutation() // mod
+	refresh, err := d.startPersistentTreeRefresh(path) // mod
+	if err != nil {
+		return err
+	}
+	defer refresh.finish(&err) // mod
 
 	started := time.Now()
 	fs.Debugf(path, "Reading directory tree")
@@ -828,7 +832,7 @@ func (d *Dir) readDirTree() error {
 	fs.Debugf(d.path, "Reading directory tree done in %s", time.Since(started))
 	d.read = refreshedAt
 	d.cleanupTimer.Reset(time.Duration(d.vfs.Opt.DirCacheTime * 2))
-	d.replacePersistentTree(path, dt, refreshedAt, cacheMutation) // mod
+	refresh.complete(dt, refreshedAt) // mod
 	return nil
 }
 

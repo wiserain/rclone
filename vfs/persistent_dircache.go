@@ -3,6 +3,7 @@ package vfs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rclone/rclone/fs"
@@ -16,10 +17,12 @@ import (
 type persistentDirCache interface {
 	LoadDirectory(context.Context, string, time.Duration) (fs.DirEntries, time.Time, bool, error)
 	SaveDirectory(context.Context, string, fs.DirEntries, time.Time) error
-	ReplaceTree(context.Context, string, dirtree.DirTree, time.Time, uint64) error
+	BeginTreeRefresh(string) (vfsdircache.TreeRefreshToken, error)
+	AbortTreeRefresh(vfsdircache.TreeRefreshToken)
+	ReplaceTree(context.Context, string, dirtree.DirTree, time.Time, vfsdircache.TreeRefreshToken) (vfsdircache.TreeRefreshResult, error)
 	InvalidateDirectory(string) error
 	InvalidateSubtree(string) error
-	MutationVersion() uint64
+	ExpireSubtree(string) error
 	Stats() rc.Params
 	Purge() error
 	Close() error
@@ -79,6 +82,19 @@ func (d *Dir) ForgetAll() (hasVirtual bool) {
 	return hasVirtual
 }
 
+// expireAll forgets stale memory and disk listings without superseding a
+// concurrently collected remote snapshot.
+func (d *Dir) expireAll() (hasVirtual bool) {
+	dirPath := d.Path()
+	hasVirtual = d.forgetAllMemory()
+	if d.vfs.dirCache != nil {
+		if err := d.vfs.dirCache.ExpireSubtree(dirPath); err != nil {
+			fs.Errorf(dirPath, "Failed to expire persistent VFS directory subtree: %v", err)
+		}
+	}
+	return hasVirtual
+}
+
 func (d *Dir) invalidatePersistentDir(dirPath string) {
 	if d.vfs.dirCache == nil {
 		return
@@ -112,6 +128,25 @@ func (d *Dir) invalidateDirSubtree(absPath string) {
 		return
 	}
 	d.invalidatePersistentSubtree(absPath)
+}
+
+func (d *Dir) invalidateDirMemory(absPath string) {
+	node := d.vfs.root.cachedNode(absPath)
+	if dir, ok := node.(*Dir); ok {
+		dir.mu.Lock()
+		if !dir.read.IsZero() {
+			fs.Debugf(dir.path, "invalidating directory cache")
+			dir.read = time.Time{}
+		}
+		dir.mu.Unlock()
+	}
+}
+
+func (d *Dir) invalidateDirSubtreeMemory(absPath string) {
+	node := d.vfs.root.cachedNode(absPath)
+	if dir, ok := node.(*Dir); ok {
+		dir.forgetAllMemory()
+	}
 }
 
 // restorePersistentDirLocked restores d after an in-memory cache miss.
@@ -156,22 +191,64 @@ func (d *Dir) savePersistentDirLocked(entries fs.DirEntries) {
 	}
 }
 
-func (d *Dir) persistentTreeMutation() uint64 {
-	if d.vfs.dirCache == nil {
-		return 0
-	}
-	return d.vfs.dirCache.MutationVersion()
+type persistentTreeRefresh struct {
+	dir         *Dir
+	dirPath     string
+	token       vfsdircache.TreeRefreshToken
+	tree        dirtree.DirTree
+	refreshedAt time.Time
 }
 
-func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, mutation uint64) {
+func (d *Dir) startPersistentTreeRefresh(dirPath string) (*persistentTreeRefresh, error) {
+	refresh := &persistentTreeRefresh{
+		dir:     d,
+		dirPath: dirPath,
+	}
 	if d.vfs.dirCache == nil {
+		return refresh, nil
+	}
+	token, err := d.vfs.dirCache.BeginTreeRefresh(dirPath)
+	refresh.token = token
+	return refresh, err
+}
+
+func (r *persistentTreeRefresh) complete(tree dirtree.DirTree, refreshedAt time.Time) {
+	r.tree = tree
+	r.refreshedAt = refreshedAt
+}
+
+func (r *persistentTreeRefresh) finish(refreshErr *error) {
+	if r.dir.vfs.dirCache == nil {
 		return
+	}
+	defer r.dir.vfs.dirCache.AbortTreeRefresh(r.token)
+	if *refreshErr != nil || r.tree == nil {
+		return
+	}
+	result, err := r.dir.replacePersistentTree(r.dirPath, r.tree, r.refreshedAt, r.token)
+	if err != nil {
+		*refreshErr = fmt.Errorf("failed to save persistent VFS directory tree: %w", err)
+		return
+	}
+	r.dir.invalidateTreeRefreshMemory(result)
+}
+
+func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, token vfsdircache.TreeRefreshToken) (vfsdircache.TreeRefreshResult, error) {
+	if d.vfs.dirCache == nil {
+		return vfsdircache.TreeRefreshResult{}, nil
 	}
 	if d.hasVirtual() {
 		fs.Debugf(d.path, "Not saving persistent VFS directory tree while virtual entries are pending")
-		return
+		return vfsdircache.TreeRefreshResult{}, nil
 	}
-	if err := d.vfs.dirCache.ReplaceTree(d.vfs.ctx, dirPath, tree, refreshedAt, mutation); err != nil {
-		fs.Errorf(d.path, "Failed to save persistent VFS directory tree: %v", err)
+	return d.vfs.dirCache.ReplaceTree(d.vfs.ctx, dirPath, tree, refreshedAt, token)
+}
+
+func (d *Dir) invalidateTreeRefreshMemory(result vfsdircache.TreeRefreshResult) {
+	for _, dirPath := range result.StaleSubtrees {
+		d.invalidateDirSubtreeMemory(dirPath)
+	}
+	for _, dirPath := range result.StaleDirectories {
+		d.invalidateDirMemory(dirPath)
 	}
 }
