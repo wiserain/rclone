@@ -49,7 +49,7 @@ var (
 )
 
 func makeBenchmarkDirectoryRecord(entryCount int) ([]byte, []entryRecord) {
-	const dir = "GDRIVE/READING/만화/완결A/가"
+	const dir = "media/library/completed/segment/a"
 	entries := make([]entryRecord, entryCount)
 	for i := range entries {
 		isDir := i%12 == 0
