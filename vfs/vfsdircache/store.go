@@ -379,7 +379,7 @@ func (s *Store) LoadDirectory(ctx context.Context, dir string, maxAge time.Durat
 		return nil, time.Time{}, false, nil
 	}
 
-	record, err := decodeDirectoryRecord(data)
+	record, err := decodeStoredDirectoryRecord(data)
 	if err != nil {
 		s.errors.Add(1)
 		return nil, time.Time{}, false, fmt.Errorf("failed to decode persistent directory %q: %w", dir, err)
@@ -412,7 +412,7 @@ func (s *Store) SaveDirectory(ctx context.Context, dir string, entries fs.DirEnt
 		s.errors.Add(1)
 		return err
 	}
-	newRecord, err := decodeDirectoryRecord(data)
+	newRecord, err := decodeStoredDirectoryRecord(data)
 	if err != nil {
 		s.errors.Add(1)
 		return fmt.Errorf("failed to verify encoded persistent directory %q: %w", dir, err)
@@ -427,7 +427,7 @@ func (s *Store) SaveDirectory(ctx context.Context, dir string, entries fs.DirEnt
 		bucket := tx.Bucket(bucketDirs)
 		key := directoryKey(dir)
 		if oldData := bucket.Get(key); oldData != nil {
-			oldRecord, decodeErr := decodeDirectoryRecord(oldData)
+			oldRecord, decodeErr := decodeStoredDirectoryRecord(oldData)
 			if decodeErr != nil || oldRecord.Path != newRecord.Path {
 				// Without a valid parent record it isn't possible to decide which
 				// descendants still belong to the current directory.
@@ -872,7 +872,11 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 		item.BackendData = backendData
 		record.Entries = append(record.Entries, item)
 	}
-	return encodeDirectoryRecord(record), nil
+	data, err := encodeStoredDirectoryRecord(encodeDirectoryRecord(record))
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode persistent directory %q for storage: %w", dir, err)
+	}
+	return data, nil
 }
 
 func appendRecordBytes(data, value []byte) []byte {

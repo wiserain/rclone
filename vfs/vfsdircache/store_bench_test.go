@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fstest/mockobject"
 )
@@ -46,6 +47,7 @@ func (benchmarkCodec) DecodePersistentDirEntry(_ context.Context, remote string,
 var (
 	benchmarkRecordSink  directoryRecord
 	benchmarkEntriesSink fs.DirEntries
+	benchmarkBytesSink   []byte
 )
 
 func makeBenchmarkDirectoryRecord(entryCount int) ([]byte, []entryRecord) {
@@ -93,6 +95,95 @@ func makeBenchmarkDirectoryRecord(entryCount int) ([]byte, []entryRecord) {
 		Entries:             entries,
 	}
 	return encodeDirectoryRecord(record), entries
+}
+
+func BenchmarkCompressDirectoryRecord(b *testing.B) {
+	benchmarkEntryCounts(b, func(b *testing.B, entryCount int) {
+		data, _ := makeBenchmarkDirectoryRecord(entryCount)
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer func() { _ = encoder.Close() }()
+
+		compressed := encoder.EncodeAll(data, nil)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			benchmarkBytesSink = encoder.EncodeAll(data, nil)
+		}
+		b.ReportMetric(float64(len(compressed))/float64(entryCount), "compressed-bytes/entry")
+		b.ReportMetric(float64(len(compressed))/float64(len(data)), "compressed/raw")
+	})
+}
+
+func BenchmarkDecompressDirectoryRecord(b *testing.B) {
+	benchmarkEntryCounts(b, func(b *testing.B, entryCount int) {
+		data, _ := makeBenchmarkDirectoryRecord(entryCount)
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
+		if err != nil {
+			b.Fatal(err)
+		}
+		compressed := encoder.EncodeAll(data, nil)
+		_ = encoder.Close()
+
+		decoder, err := zstd.NewReader(nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer decoder.Close()
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			decoded, err := decoder.DecodeAll(compressed, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkBytesSink = decoded
+		}
+		b.ReportMetric(float64(len(compressed))/float64(entryCount), "compressed-bytes/entry")
+	})
+}
+
+func BenchmarkEncodeStoredDirectoryRecord(b *testing.B) {
+	benchmarkEntryCounts(b, func(b *testing.B, entryCount int) {
+		data, _ := makeBenchmarkDirectoryRecord(entryCount)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			stored, err := encodeStoredDirectoryRecord(data)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkBytesSink = stored
+		}
+		stored, err := encodeStoredDirectoryRecord(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(float64(len(stored))/float64(entryCount), "stored-bytes/entry")
+	})
+}
+
+func BenchmarkDecodeStoredDirectoryRecord(b *testing.B) {
+	benchmarkEntryCounts(b, func(b *testing.B, entryCount int) {
+		data, _ := makeBenchmarkDirectoryRecord(entryCount)
+		stored, err := encodeStoredDirectoryRecord(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			record, err := decodeStoredDirectoryRecord(stored)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkRecordSink = record
+		}
+		b.ReportMetric(float64(len(stored))/float64(entryCount), "stored-bytes/entry")
+	})
 }
 
 func benchmarkEntryCounts(b *testing.B, fn func(*testing.B, int)) {
