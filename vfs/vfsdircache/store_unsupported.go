@@ -27,9 +27,6 @@ func New(context.Context, fs.Fs, *vfscommon.Options) (*Store, error) {
 // Close closes the persistent cache database.
 func (*Store) Close() error { return nil }
 
-// MutationVersion returns the current invalidation version.
-func (*Store) MutationVersion() uint64 { return 0 }
-
 // Path returns the database path.
 func (*Store) Path() string { return "UNSUPPORTED" }
 
@@ -43,9 +40,17 @@ func (*Store) SaveDirectory(context.Context, string, fs.DirEntries, time.Time) e
 	return errUnsupported
 }
 
+// BeginTreeRefresh reports that persistence is unsupported.
+func (*Store) BeginTreeRefresh(string) (TreeRefreshToken, error) {
+	return TreeRefreshToken{}, errUnsupported
+}
+
+// AbortTreeRefresh discards an unsupported refresh token.
+func (*Store) AbortTreeRefresh(TreeRefreshToken) {}
+
 // ReplaceTree reports that persistence is unsupported.
-func (*Store) ReplaceTree(context.Context, string, dirtree.DirTree, time.Time, uint64) error {
-	return errUnsupported
+func (*Store) ReplaceTree(context.Context, string, dirtree.DirTree, time.Time, TreeRefreshToken) (TreeRefreshResult, error) {
+	return TreeRefreshResult{}, errUnsupported
 }
 
 // InvalidateDirectory reports that persistence is unsupported.
@@ -53,6 +58,9 @@ func (*Store) InvalidateDirectory(string) error { return errUnsupported }
 
 // InvalidateSubtree reports that persistence is unsupported.
 func (*Store) InvalidateSubtree(string) error { return errUnsupported }
+
+// ExpireSubtree reports that persistence is unsupported.
+func (*Store) ExpireSubtree(string) error { return errUnsupported }
 
 // Purge reports that persistence is unsupported.
 func (*Store) Purge() error { return errUnsupported }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,21 @@ import (
 type persistentTestFs struct {
 	fs.Fs
 	lastPolicy fs.PersistentDirCachePolicy
+
+	blockListDir string
+	listStarted  chan struct{}
+	continueList chan struct{}
+	listOnce     sync.Once
+}
+
+func (f *persistentTestFs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
+	if f.listStarted != nil && dir == f.blockListDir {
+		f.listOnce.Do(func() {
+			close(f.listStarted)
+			<-f.continueList
+		})
+	}
+	return f.Fs.List(ctx, dir)
 }
 
 type persistentTestRecord struct {
@@ -134,6 +150,53 @@ func TestPersistentDirCacheSurvivesRestart(t *testing.T) {
 	dir = dirNode.(*Dir)
 	_, err = dir.Stat("file.txt")
 	assert.ErrorIs(t, err, ENOENT)
+}
+
+func TestPersistentDirCacheRecursiveRefreshReplaysChangeNotify(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "dir/file.txt", "contents", t1)
+	persistentFs := &persistentTestFs{
+		Fs:           r.Fremote,
+		blockListDir: "",
+		listStarted:  make(chan struct{}),
+		continueList: make(chan struct{}),
+	}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+	vfs := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs.Shutdown)
+
+	refreshErr := make(chan error, 1)
+	go func() {
+		refreshErr <- vfs.root.readDirTree()
+	}()
+	<-persistentFs.listStarted
+	vfs.root.changeNotify("dir/file.txt", fs.EntryObject)
+	close(persistentFs.continueList)
+	require.NoError(t, <-refreshErr)
+
+	_, _, rootFound, err := vfs.dirCache.LoadDirectory(ctx, "", 24*time.Hour)
+	require.NoError(t, err)
+	require.True(t, rootFound)
+	_, _, dirFound, err := vfs.dirCache.LoadDirectory(ctx, "dir", 24*time.Hour)
+	require.NoError(t, err)
+	require.False(t, dirFound)
+
+	dirNode := vfs.root.cachedNode("dir")
+	dir, ok := dirNode.(*Dir)
+	require.True(t, ok)
+	dir.mu.RLock()
+	defer dir.mu.RUnlock()
+	require.True(t, dir.read.IsZero())
 }
 
 func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
