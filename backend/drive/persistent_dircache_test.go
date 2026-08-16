@@ -2,6 +2,7 @@ package drive
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestPersistentDirCacheRegularObjectRoundTrip(t *testing.T) {
 		v2Download: true,
 	}
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	entry, err := f.DecodePersistentDirEntry(ctx, want.remote, false, data)
 	require.NoError(t, err)
@@ -83,7 +84,7 @@ func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {
 	want := &Directory{baseObject: persistentDriveTestBase(f)}
 	want.mimeType = driveFolderType
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	entry, err := f.DecodePersistentDirEntry(ctx, want.remote, true, data)
 	require.NoError(t, err)
@@ -108,7 +109,7 @@ func TestPersistentDirCacheDocumentRoundTrip(t *testing.T) {
 		extLen:           4,
 	}
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	entry, err := f.DecodePersistentDirEntry(ctx, want.remote, false, data)
 	require.NoError(t, err)
@@ -128,7 +129,7 @@ func TestPersistentDirCacheLinkRoundTrip(t *testing.T) {
 		extLen:     5,
 	}
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	entry, err := f.DecodePersistentDirEntry(ctx, want.remote, false, data)
 	require.NoError(t, err)
@@ -142,8 +143,38 @@ func TestPersistentDirCacheRejectsKindMismatch(t *testing.T) {
 	ctx := context.Background()
 	f := newPersistentDriveTestFs()
 	want := &Directory{baseObject: persistentDriveTestBase(f)}
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	_, err = f.DecodePersistentDirEntry(ctx, want.remote, false, data)
 	assert.ErrorContains(t, err, "kind mismatch")
+}
+
+func TestPersistentDirCachePolicyOmitsObjectMetadata(t *testing.T) {
+	ctx := context.Background()
+	f := newPersistentDriveTestFs()
+	want := &Object{
+		baseObject: persistentDriveTestBase(f),
+		md5sum:     "md5",
+		sha1sum:    "sha1",
+		sha256sum:  "sha256",
+	}
+
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{
+		NoChecksum: true,
+		NoModTime:  true,
+	})
+	require.NoError(t, err)
+	var record persistentDriveRecord
+	require.NoError(t, json.Unmarshal(data, &record))
+	assert.Empty(t, record.ModifiedDate)
+	assert.Empty(t, record.MD5Sum)
+	assert.Empty(t, record.SHA1Sum)
+	assert.Empty(t, record.SHA256Sum)
+	assert.Equal(t, want.id, record.ID)
+
+	directory := &Directory{baseObject: persistentDriveTestBase(f)}
+	data, err = f.EncodePersistentDirEntry(ctx, directory, fs.PersistentDirCachePolicy{NoModTime: true})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &record))
+	assert.Equal(t, directory.modifiedDate, record.ModifiedDate)
 }

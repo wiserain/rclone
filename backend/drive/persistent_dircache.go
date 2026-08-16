@@ -13,30 +13,30 @@ import (
 const persistentDirCacheRecordVersion = 1
 
 const (
-	persistentDriveDirectory = "directory"
-	persistentDriveObject    = "object"
-	persistentDriveDocument  = "document"
-	persistentDriveLink      = "link"
+	persistentDriveDirectory uint8 = iota
+	persistentDriveObject
+	persistentDriveDocument
+	persistentDriveLink
 )
 
 type persistentDriveRecord struct {
-	Version          int         `json:"version"`
-	Kind             string      `json:"kind"`
-	ID               string      `json:"id"`
-	ModifiedDate     string      `json:"modified_date,omitempty"`
-	MimeType         string      `json:"mime_type,omitempty"`
-	Bytes            int64       `json:"bytes"`
-	Parents          []string    `json:"parents,omitempty"`
-	ResourceKey      string      `json:"resource_key,omitempty"`
-	Metadata         fs.Metadata `json:"metadata,omitempty"`
-	MD5Sum           string      `json:"md5,omitempty"`
-	SHA1Sum          string      `json:"sha1,omitempty"`
-	SHA256Sum        string      `json:"sha256,omitempty"`
-	V2Download       bool        `json:"v2_download,omitempty"`
-	URL              string      `json:"url,omitempty"`
-	DocumentMimeType string      `json:"document_mime_type,omitempty"`
-	ExtensionLength  int         `json:"extension_length,omitempty"`
-	Content          []byte      `json:"content,omitempty"`
+	Version          int         `json:"v"`
+	Kind             uint8       `json:"k,omitempty"`
+	ID               string      `json:"i"`
+	ModifiedDate     string      `json:"d,omitempty"`
+	MimeType         string      `json:"m,omitempty"`
+	Bytes            int64       `json:"s"`
+	Parents          []string    `json:"p,omitempty"`
+	ResourceKey      string      `json:"r,omitempty"`
+	Metadata         fs.Metadata `json:"x,omitempty"`
+	MD5Sum           string      `json:"h5,omitempty"`
+	SHA1Sum          string      `json:"h1,omitempty"`
+	SHA256Sum        string      `json:"h256,omitempty"`
+	V2Download       bool        `json:"v2,omitempty"`
+	URL              string      `json:"u,omitempty"`
+	DocumentMimeType string      `json:"dm,omitempty"`
+	ExtensionLength  int         `json:"e,omitempty"`
+	Content          []byte      `json:"c,omitempty"`
 }
 
 type persistentDriveIdentity struct {
@@ -120,24 +120,35 @@ func persistentDriveBaseRecord(base *baseObject) persistentDriveRecord {
 }
 
 // EncodePersistentDirEntry implements fs.PersistentDirCacheCodec.
-func (f *Fs) EncodePersistentDirEntry(_ context.Context, entry fs.DirEntry) ([]byte, error) {
+func (f *Fs) EncodePersistentDirEntry(_ context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
 	var record persistentDriveRecord
 	switch item := entry.(type) {
 	case *Object:
 		record = persistentDriveBaseRecord(&item.baseObject)
 		record.Kind = persistentDriveObject
-		record.MD5Sum = item.md5sum
-		record.SHA1Sum = item.sha1sum
-		record.SHA256Sum = item.sha256sum
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
+		if !policy.NoChecksum {
+			record.MD5Sum = item.md5sum
+			record.SHA1Sum = item.sha1sum
+			record.SHA256Sum = item.sha256sum
+		}
 		record.V2Download = item.v2Download
 	case *documentObject:
 		record = persistentDriveBaseRecord(&item.baseObject)
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
 		record.Kind = persistentDriveDocument
 		record.URL = item.url
 		record.DocumentMimeType = item.documentMimeType
 		record.ExtensionLength = item.extLen
 	case *linkObject:
 		record = persistentDriveBaseRecord(&item.baseObject)
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
 		record.Kind = persistentDriveLink
 		record.Content = slices.Clone(item.content)
 		record.ExtensionLength = item.extLen
@@ -225,7 +236,7 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 			extLen:     record.ExtensionLength,
 		}, nil
 	default:
-		return nil, fmt.Errorf("unknown Google Drive persistent directory cache kind %q for %q", record.Kind, remote)
+		return nil, fmt.Errorf("unknown Google Drive persistent directory cache kind %d for %q", record.Kind, remote)
 	}
 }
 

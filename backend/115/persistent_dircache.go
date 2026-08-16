@@ -13,20 +13,25 @@ import (
 
 const persistentDirCacheRecordVersion = 1
 
+const (
+	persistent115Directory uint8 = iota
+	persistent115Object
+)
+
 // persistentDirCacheRecord contains the backend-private values needed to
 // reconstruct a concrete 115 object or directory without another metadata API
 // call after the VFS directory cache has been restored from disk.
 type persistentDirCacheRecord struct {
-	Version          int    `json:"version"`
-	Kind             string `json:"kind"`
-	ID               string `json:"id"`
-	ParentID         string `json:"parent_id"`
-	Size             int64  `json:"size"`
-	Items            int64  `json:"items,omitempty"`
-	SHA1             string `json:"sha1,omitempty"`
-	PickCode         string `json:"pick_code,omitempty"`
-	ModTimeUnixNano  int64  `json:"mod_time_unix_nano,omitempty"`
-	ModTimeIsPresent bool   `json:"mod_time_is_present,omitempty"`
+	Version          int    `json:"v"`
+	Kind             uint8  `json:"k,omitempty"`
+	ID               string `json:"i"`
+	ParentID         string `json:"p"`
+	Size             int64  `json:"s"`
+	Items            int64  `json:"n,omitempty"`
+	SHA1             string `json:"h,omitempty"`
+	PickCode         string `json:"c,omitempty"`
+	ModTimeUnixNano  int64  `json:"t,omitempty"`
+	ModTimeIsPresent bool   `json:"q,omitempty"`
 }
 
 // PersistentDirCacheIdentity implements fs.PersistentDirCacheIdentityer.
@@ -47,14 +52,9 @@ func (f *Fs) PersistentDirCacheIdentity() string {
 // Directory IDs are saved as well as object IDs, SHA1 and pickcode. Restoring
 // directory IDs also repopulates the backend's own path-to-ID cache, which
 // avoids a path traversal API call when a later operation needs that directory.
-func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
+func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
 	record := persistentDirCacheRecord{
 		Version: persistentDirCacheRecordVersion,
-	}
-	modTime := entry.ModTime(ctx)
-	if !modTime.IsZero() {
-		record.ModTimeUnixNano = modTime.UnixNano()
-		record.ModTimeIsPresent = true
 	}
 
 	switch item := entry.(type) {
@@ -62,21 +62,30 @@ func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([
 		if err := item.readMetaData(ctx); err != nil {
 			return nil, err
 		}
-		record.Kind = "object"
+		record.Kind = persistent115Object
 		record.ID = item.id
 		record.ParentID = item.parent
 		record.Size = item.size
-		record.SHA1 = item.sha1sum
+		if !policy.NoChecksum {
+			record.SHA1 = item.sha1sum
+		}
 		record.PickCode = item.pickCode
-		record.ModTimeUnixNano = item.modTime.UnixNano()
-		record.ModTimeIsPresent = !item.modTime.IsZero()
+		if !policy.NoModTime {
+			record.ModTimeUnixNano = item.modTime.UnixNano()
+			record.ModTimeIsPresent = !item.modTime.IsZero()
+		}
 	case fs.Directory:
-		record.Kind = "directory"
+		record.Kind = persistent115Directory
 		record.ID = item.ID()
 		record.Size = item.Size()
 		record.Items = item.Items()
 		if parentIDer, ok := item.(fs.ParentIDer); ok {
 			record.ParentID = parentIDer.ParentID()
+		}
+		modTime := entry.ModTime(ctx)
+		if !modTime.IsZero() {
+			record.ModTimeUnixNano = modTime.UnixNano()
+			record.ModTimeIsPresent = true
 		}
 	default:
 		return nil, fmt.Errorf("can't persist unsupported 115 directory entry type %T", entry)
@@ -101,8 +110,8 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 	}
 
 	if isDir {
-		if record.Kind != "directory" {
-			return nil, fmt.Errorf("115 persistent directory cache kind mismatch for %q: %q", remote, record.Kind)
+		if record.Kind != persistent115Directory {
+			return nil, fmt.Errorf("115 persistent directory cache kind mismatch for %q: %d", remote, record.Kind)
 		}
 		if record.ID == "" {
 			return nil, fmt.Errorf("115 persistent directory cache record for %q has no directory ID", remote)
@@ -115,8 +124,8 @@ func (f *Fs) DecodePersistentDirEntry(_ context.Context, remote string, isDir bo
 			SetParentID(record.ParentID), nil
 	}
 
-	if record.Kind != "object" {
-		return nil, fmt.Errorf("115 persistent object cache kind mismatch for %q: %q", remote, record.Kind)
+	if record.Kind != persistent115Object {
+		return nil, fmt.Errorf("115 persistent object cache kind mismatch for %q: %d", remote, record.Kind)
 	}
 	if record.ID == "" {
 		return nil, fmt.Errorf("115 persistent object cache record for %q has no file ID", remote)

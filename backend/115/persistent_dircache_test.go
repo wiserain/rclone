@@ -2,6 +2,7 @@ package _115 // nolint:revive
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestPersistentDirCacheObjectRoundTrip(t *testing.T) {
 		modTime:     wantTime,
 	}
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	gotEntry, err := f.DecodePersistentDirEntry(ctx, want.remote, false, data)
 	require.NoError(t, err)
@@ -72,7 +73,7 @@ func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {
 		SetID("dir-1").
 		SetParentID("root-1")
 
-	data, err := f.EncodePersistentDirEntry(ctx, want)
+	data, err := f.EncodePersistentDirEntry(ctx, want, fs.PersistentDirCachePolicy{})
 	require.NoError(t, err)
 	gotEntry, err := f.DecodePersistentDirEntry(ctx, want.Remote(), true, data)
 	require.NoError(t, err)
@@ -91,6 +92,40 @@ func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {
 
 func TestPersistentDirCacheRejectsInvalidRecord(t *testing.T) {
 	f := newPersistentDirCacheTestFs()
-	_, err := f.DecodePersistentDirEntry(context.Background(), "file", false, []byte(`{"version":99}`))
+	_, err := f.DecodePersistentDirEntry(context.Background(), "file", false, []byte(`{"v":99}`))
 	assert.ErrorContains(t, err, "unsupported 115 persistent directory cache record version")
+}
+
+func TestPersistentDirCachePolicyOmitsObjectMetadata(t *testing.T) {
+	ctx := context.Background()
+	f := newPersistentDirCacheTestFs()
+	object := &Object{
+		fs:          f,
+		remote:      "dir/file.bin",
+		hasMetaData: true,
+		id:          "file-1",
+		parent:      "dir-1",
+		size:        42,
+		sha1sum:     "abcdef",
+		pickCode:    "pick-1",
+		modTime:     time.Unix(123, 456),
+	}
+	data, err := object.fs.EncodePersistentDirEntry(ctx, object, fs.PersistentDirCachePolicy{
+		NoChecksum: true,
+		NoModTime:  true,
+	})
+	require.NoError(t, err)
+	var record persistentDirCacheRecord
+	require.NoError(t, json.Unmarshal(data, &record))
+	assert.Empty(t, record.SHA1)
+	assert.False(t, record.ModTimeIsPresent)
+	assert.Zero(t, record.ModTimeUnixNano)
+	assert.Equal(t, object.pickCode, record.PickCode)
+
+	directory := fs.NewDir("dir", time.Unix(123, 456)).SetID("dir-1")
+	data, err = object.fs.EncodePersistentDirEntry(ctx, directory, fs.PersistentDirCachePolicy{NoModTime: true})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &record))
+	assert.True(t, record.ModTimeIsPresent)
+	assert.Equal(t, directory.ModTime(ctx).UnixNano(), record.ModTimeUnixNano)
 }

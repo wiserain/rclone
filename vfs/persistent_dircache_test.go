@@ -21,6 +21,7 @@ import (
 
 type persistentTestFs struct {
 	fs.Fs
+	lastPolicy fs.PersistentDirCachePolicy
 }
 
 type persistentTestRecord struct {
@@ -35,7 +36,8 @@ func (f *persistentTestFs) PersistentDirCacheIdentity() string {
 	return "vfs-persistent-test"
 }
 
-func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
+func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
+	f.lastPolicy = policy
 	record := persistentTestRecord{
 		Size:    entry.Size(),
 		ModTime: entry.ModTime(ctx),
@@ -196,6 +198,37 @@ func TestPersistentDirCacheUnsupportedBackendIsDisabled(t *testing.T) {
 	assert.Nil(t, vfs.dirCache)
 }
 
+func TestPersistentDirCachePolicy(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "file.txt", "contents", t1)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.NoChecksum = true
+	opt.NoModTime = true
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	require.NoError(t, vfs1.root.readDirTree())
+	assert.Equal(t, fs.PersistentDirCachePolicy{NoChecksum: true, NoModTime: true}, persistentFs.lastPolicy)
+	identityWithPolicy := vfs1.dirCache.Stats()["identity"]
+	vfs1.Shutdown()
+
+	opt.NoChecksum = false
+	opt.NoModTime = false
+	vfs2 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs2.dirCache)
+	assert.NotEqual(t, identityWithPolicy, vfs2.dirCache.Stats()["identity"])
+	vfs2.Shutdown()
+}
+
 func TestPersistentDirCacheChangeNotifyInvalidatesParent(t *testing.T) {
 	ctx := context.Background()
 	oldCacheDir := config.GetCacheDir()
@@ -311,4 +344,47 @@ func TestPersistentDirCacheRCRefreshReplacesSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	_, err = root.Stat("stale.txt")
 	assert.ErrorIs(t, err, ENOENT)
+}
+
+func TestPersistentDirCacheRCRefreshPersistsEmptyDirectory(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	require.NoError(t, r.Fremote.Mkdir(ctx, "empty"))
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	out, err := rcRefresh(ctx, rc.Params{
+		"fs":        fs.ConfigString(persistentFs),
+		"recursive": "true",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "OK", out["result"].(map[string]string)[""])
+	assert.Equal(t, 2, vfs1.dirCache.Stats()["directories"])
+	vfs1.Shutdown()
+
+	// A persistent empty listing must hide changes made after the snapshot.
+	r.WriteObject(ctx, "empty/new.txt", "new contents", t1)
+
+	vfs2 := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs2.Shutdown)
+	root, err := vfs2.Root()
+	require.NoError(t, err)
+	dirNode, err := root.Stat("empty")
+	require.NoError(t, err)
+	empty, ok := dirNode.(*Dir)
+	require.True(t, ok)
+	_, err = empty.Stat("new.txt")
+	assert.ErrorIs(t, err, ENOENT)
+	assert.GreaterOrEqual(t, vfs2.dirCache.Stats()["hits"].(uint64), uint64(2))
 }
