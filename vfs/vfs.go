@@ -190,6 +190,8 @@ type VFS struct {
 	usage       *fs.Usage
 	pollChan    chan time.Duration
 	inUse       atomic.Int32 // count of number of opens
+
+	dirCache persistentDirCache // mod: restart-safe directory listings
 }
 
 // Keep track of active VFS keyed on fs.ConfigString(f)
@@ -242,6 +244,8 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) *VFS {
 	}
 	// Put the VFS into the active cache
 	active[configName] = append(active[configName], vfs)
+
+	vfs.initPersistentDirCache() // mod
 
 	// Create root directory
 	vfs.root = newDir(vfs, f, nil, fsDir)
@@ -339,6 +343,7 @@ func (vfs *VFS) Stats() (out rc.Params) {
 	if vfs.cache != nil {
 		out["diskCache"] = vfs.cache.Stats()
 	}
+	vfs.addPersistentDirCacheStats(out) // mod
 	return out
 }
 
@@ -417,10 +422,15 @@ func (vfs *VFS) Shutdown() {
 
 	// Cancel any background go routines
 	vfs.cancel()
+	vfs.closePersistentDirCache() // mod
 }
 
 // CleanUp deletes the contents of the on disk cache
-func (vfs *VFS) CleanUp() error {
+func (vfs *VFS) CleanUp() (err error) {
+	defer func() {
+		err = vfs.cleanUpPersistentDirCache(err)
+	}() // mod
+
 	if vfs.Opt.CacheMode == vfscommon.CacheModeOff {
 		return nil
 	}

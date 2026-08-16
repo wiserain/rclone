@@ -30,6 +30,11 @@ var OptionsInfo = fs.Options{{
 	Default: fs.Duration(5 * 60 * time.Second),
 	Help:    "Time to cache directory entries for",
 	Groups:  "VFS",
+}, { // mod
+	Name:    "dir_cache_persist",
+	Default: false,
+	Help:    "Persist VFS directory listings under --cache-dir so they survive restarts",
+	Groups:  "VFS",
 }, {
 	Name:    "vfs_refresh",
 	Default: false,
@@ -216,6 +221,7 @@ type Options struct {
 	DiskSpaceTotalSize fs.SizeSuffix `config:"vfs_disk_space_total_size"`
 	HandleCaching      fs.Duration   `config:"vfs_handle_caching"`     // time to keep handle alive after last close
 	MetadataExtension  string        `config:"vfs_metadata_extension"` // if set respond to files with this extension with metadata
+	DirCachePersist    bool          `config:"dir_cache_persist"`      // mod: persist directory listings under --cache-dir
 }
 
 // Opt is the default options modified by the environment variables and command line flags
