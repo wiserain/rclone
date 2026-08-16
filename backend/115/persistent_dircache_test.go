@@ -91,6 +91,6 @@ func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {
 
 func TestPersistentDirCacheRejectsInvalidRecord(t *testing.T) {
 	f := newPersistentDirCacheTestFs()
-	_, err := f.DecodePersistentDirEntry(context.Background(), "file", false, []byte(`{"version":99}`))
+	_, err := f.DecodePersistentDirEntry(context.Background(), "file", false, []byte(`{"v":99}`))
 	assert.ErrorContains(t, err, "unsupported 115 persistent directory cache record version")
 }
