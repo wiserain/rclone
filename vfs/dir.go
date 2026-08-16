@@ -805,15 +805,15 @@ func (d *Dir) _readDirFromEntries(entries fs.DirEntries, dirTree dirtree.DirTree
 }
 
 // readDirTree forces a refresh of the complete directory tree
-func (d *Dir) readDirTree() error {
+func (d *Dir) readDirTree() (err error) {
 	d.mu.RLock()
 	f, path := d.f, d.path
 	d.mu.RUnlock()
-	refreshToken, err := d.beginPersistentTreeRefresh(path) // mod
+	refresh, err := d.startPersistentTreeRefresh(path) // mod
 	if err != nil {
 		return err
 	}
-	defer d.abortPersistentTreeRefresh(refreshToken) // mod
+	defer refresh.finish(&err) // mod
 
 	started := time.Now()
 	fs.Debugf(path, "Reading directory tree")
@@ -823,21 +823,16 @@ func (d *Dir) readDirTree() error {
 	}
 	refreshedAt := time.Now() // mod: freshness starts when the remote walk completes
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.read = time.Time{}
 	err = d._readDirFromDirTree(dt, refreshedAt)
 	if err != nil {
-		d.mu.Unlock()
 		return err
 	}
 	fs.Debugf(d.path, "Reading directory tree done in %s", time.Since(started))
 	d.read = refreshedAt
 	d.cleanupTimer.Reset(time.Duration(d.vfs.Opt.DirCacheTime * 2))
-	d.mu.Unlock()
-	refreshResult, err := d.replacePersistentTree(path, dt, refreshedAt, refreshToken) // mod
-	if err != nil {
-		return fmt.Errorf("failed to save persistent VFS directory tree: %w", err) // mod
-	}
-	d.invalidateTreeRefreshMemory(refreshResult) // mod
+	refresh.complete(dt, refreshedAt) // mod
 	return nil
 }
 

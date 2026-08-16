@@ -3,6 +3,7 @@ package vfs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rclone/rclone/fs"
@@ -190,17 +191,46 @@ func (d *Dir) savePersistentDirLocked(entries fs.DirEntries) {
 	}
 }
 
-func (d *Dir) beginPersistentTreeRefresh(dirPath string) (vfsdircache.TreeRefreshToken, error) {
-	if d.vfs.dirCache == nil {
-		return vfsdircache.TreeRefreshToken{}, nil
-	}
-	return d.vfs.dirCache.BeginTreeRefresh(dirPath)
+type persistentTreeRefresh struct {
+	dir         *Dir
+	dirPath     string
+	token       vfsdircache.TreeRefreshToken
+	tree        dirtree.DirTree
+	refreshedAt time.Time
 }
 
-func (d *Dir) abortPersistentTreeRefresh(token vfsdircache.TreeRefreshToken) {
-	if d.vfs.dirCache != nil {
-		d.vfs.dirCache.AbortTreeRefresh(token)
+func (d *Dir) startPersistentTreeRefresh(dirPath string) (*persistentTreeRefresh, error) {
+	refresh := &persistentTreeRefresh{
+		dir:     d,
+		dirPath: dirPath,
 	}
+	if d.vfs.dirCache == nil {
+		return refresh, nil
+	}
+	token, err := d.vfs.dirCache.BeginTreeRefresh(dirPath)
+	refresh.token = token
+	return refresh, err
+}
+
+func (r *persistentTreeRefresh) complete(tree dirtree.DirTree, refreshedAt time.Time) {
+	r.tree = tree
+	r.refreshedAt = refreshedAt
+}
+
+func (r *persistentTreeRefresh) finish(refreshErr *error) {
+	if r.dir.vfs.dirCache == nil {
+		return
+	}
+	defer r.dir.vfs.dirCache.AbortTreeRefresh(r.token)
+	if *refreshErr != nil || r.tree == nil {
+		return
+	}
+	result, err := r.dir.replacePersistentTree(r.dirPath, r.tree, r.refreshedAt, r.token)
+	if err != nil {
+		*refreshErr = fmt.Errorf("failed to save persistent VFS directory tree: %w", err)
+		return
+	}
+	r.dir.invalidateTreeRefreshMemory(result)
 }
 
 func (d *Dir) replacePersistentTree(dirPath string, tree dirtree.DirTree, refreshedAt time.Time, token vfsdircache.TreeRefreshToken) (vfsdircache.TreeRefreshResult, error) {

@@ -222,6 +222,40 @@ func TestPersistentDirCacheRejectsConcurrentRecursiveRefresh(t *testing.T) {
 	require.ErrorContains(t, err, "tree refresh is already running")
 }
 
+func TestPersistentDirCacheRecursiveRefreshReturnsDeferredCommitError(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	r.WriteObject(ctx, "dir/file.txt", "contents", t1)
+	persistentFs := &persistentTestFs{
+		Fs:           r.Fremote,
+		blockListDir: "",
+		listStarted:  make(chan struct{}),
+		continueList: make(chan struct{}),
+	}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.CacheMode = vfscommon.CacheModeOff
+	vfs := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs.Shutdown)
+
+	refreshErr := make(chan error, 1)
+	go func() {
+		refreshErr <- vfs.root.readDirTree()
+	}()
+	<-persistentFs.listStarted
+	require.NoError(t, vfs.dirCache.Close())
+	close(persistentFs.continueList)
+	err := <-refreshErr
+	require.ErrorContains(t, err, "failed to save persistent VFS directory tree")
+	require.ErrorContains(t, err, "closed")
+}
+
 func TestPersistentDirCacheDropsRemovedChildSubtree(t *testing.T) {
 	ctx := context.Background()
 	oldCacheDir := config.GetCacheDir()
