@@ -120,24 +120,35 @@ func persistentDriveBaseRecord(base *baseObject) persistentDriveRecord {
 }
 
 // EncodePersistentDirEntry implements fs.PersistentDirCacheCodec.
-func (f *Fs) EncodePersistentDirEntry(_ context.Context, entry fs.DirEntry) ([]byte, error) {
+func (f *Fs) EncodePersistentDirEntry(_ context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
 	var record persistentDriveRecord
 	switch item := entry.(type) {
 	case *Object:
 		record = persistentDriveBaseRecord(&item.baseObject)
 		record.Kind = persistentDriveObject
-		record.MD5Sum = item.md5sum
-		record.SHA1Sum = item.sha1sum
-		record.SHA256Sum = item.sha256sum
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
+		if !policy.NoChecksum {
+			record.MD5Sum = item.md5sum
+			record.SHA1Sum = item.sha1sum
+			record.SHA256Sum = item.sha256sum
+		}
 		record.V2Download = item.v2Download
 	case *documentObject:
 		record = persistentDriveBaseRecord(&item.baseObject)
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
 		record.Kind = persistentDriveDocument
 		record.URL = item.url
 		record.DocumentMimeType = item.documentMimeType
 		record.ExtensionLength = item.extLen
 	case *linkObject:
 		record = persistentDriveBaseRecord(&item.baseObject)
+		if policy.NoModTime {
+			record.ModifiedDate = ""
+		}
 		record.Kind = persistentDriveLink
 		record.Content = slices.Clone(item.content)
 		record.ExtensionLength = item.extLen

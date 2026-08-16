@@ -83,14 +83,14 @@ func BenchmarkDecodePersistentDriveRecord(b *testing.B) {
 func BenchmarkEncodePersistentDriveEntry(b *testing.B) {
 	ctx := context.Background()
 	object := makeBenchmarkPersistentDriveObject()
-	data, err := object.fs.EncodePersistentDirEntry(ctx, object)
+	data, err := object.fs.EncodePersistentDirEntry(ctx, object, fs.PersistentDirCachePolicy{})
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		benchmarkPersistentDriveData, err = object.fs.EncodePersistentDirEntry(ctx, object)
+		benchmarkPersistentDriveData, err = object.fs.EncodePersistentDirEntry(ctx, object, fs.PersistentDirCachePolicy{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func BenchmarkEncodePersistentDriveEntry(b *testing.B) {
 func BenchmarkDecodePersistentDriveEntry(b *testing.B) {
 	ctx := context.Background()
 	object := makeBenchmarkPersistentDriveObject()
-	data, err := object.fs.EncodePersistentDirEntry(ctx, object)
+	data, err := object.fs.EncodePersistentDirEntry(ctx, object, fs.PersistentDirCachePolicy{})
 	if err != nil {
 		b.Fatal(err)
 	}

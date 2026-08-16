@@ -52,14 +52,9 @@ func (f *Fs) PersistentDirCacheIdentity() string {
 // Directory IDs are saved as well as object IDs, SHA1 and pickcode. Restoring
 // directory IDs also repopulates the backend's own path-to-ID cache, which
 // avoids a path traversal API call when a later operation needs that directory.
-func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
+func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
 	record := persistentDirCacheRecord{
 		Version: persistentDirCacheRecordVersion,
-	}
-	modTime := entry.ModTime(ctx)
-	if !modTime.IsZero() {
-		record.ModTimeUnixNano = modTime.UnixNano()
-		record.ModTimeIsPresent = true
 	}
 
 	switch item := entry.(type) {
@@ -71,10 +66,14 @@ func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([
 		record.ID = item.id
 		record.ParentID = item.parent
 		record.Size = item.size
-		record.SHA1 = item.sha1sum
+		if !policy.NoChecksum {
+			record.SHA1 = item.sha1sum
+		}
 		record.PickCode = item.pickCode
-		record.ModTimeUnixNano = item.modTime.UnixNano()
-		record.ModTimeIsPresent = !item.modTime.IsZero()
+		if !policy.NoModTime {
+			record.ModTimeUnixNano = item.modTime.UnixNano()
+			record.ModTimeIsPresent = !item.modTime.IsZero()
+		}
 	case fs.Directory:
 		record.Kind = persistent115Directory
 		record.ID = item.ID()
@@ -82,6 +81,11 @@ func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([
 		record.Items = item.Items()
 		if parentIDer, ok := item.(fs.ParentIDer); ok {
 			record.ParentID = parentIDer.ParentID()
+		}
+		modTime := entry.ModTime(ctx)
+		if !modTime.IsZero() {
+			record.ModTimeUnixNano = modTime.UnixNano()
+			record.ModTimeIsPresent = true
 		}
 	default:
 		return nil, fmt.Errorf("can't persist unsupported 115 directory entry type %T", entry)
