@@ -312,3 +312,46 @@ func TestPersistentDirCacheRCRefreshReplacesSnapshot(t *testing.T) {
 	_, err = root.Stat("stale.txt")
 	assert.ErrorIs(t, err, ENOENT)
 }
+
+func TestPersistentDirCacheRCRefreshPersistsEmptyDirectory(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	require.NoError(t, r.Fremote.Mkdir(ctx, "empty"))
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+	opt.DirCacheTime = fs.Duration(24 * time.Hour)
+	opt.CacheMode = vfscommon.CacheModeOff
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	out, err := rcRefresh(ctx, rc.Params{
+		"fs":        fs.ConfigString(persistentFs),
+		"recursive": "true",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "OK", out["result"].(map[string]string)[""])
+	assert.Equal(t, 2, vfs1.dirCache.Stats()["directories"])
+	vfs1.Shutdown()
+
+	// A persistent empty listing must hide changes made after the snapshot.
+	r.WriteObject(ctx, "empty/new.txt", "new contents", t1)
+
+	vfs2 := New(ctx, persistentFs, &opt)
+	t.Cleanup(vfs2.Shutdown)
+	root, err := vfs2.Root()
+	require.NoError(t, err)
+	dirNode, err := root.Stat("empty")
+	require.NoError(t, err)
+	empty, ok := dirNode.(*Dir)
+	require.True(t, ok)
+	_, err = empty.Stat("new.txt")
+	assert.ErrorIs(t, err, ENOENT)
+	assert.GreaterOrEqual(t, vfs2.dirCache.Stats()["hits"].(uint64), uint64(2))
+}
