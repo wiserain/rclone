@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	databaseSchema  = 3
-	recordSchema    = 3
+	databaseSchema  = 1
+	recordSchema    = 1
 	databaseName    = "dircache.db"
 	cacheRootName   = "vfsDirCache"
 	writeBatchSize  = 256

@@ -11,7 +11,7 @@ import (
 	"github.com/rclone/rclone/fs"
 )
 
-const persistentDirCacheRecordVersion = 2
+const persistentDirCacheRecordVersion = 1
 
 const (
 	persistent115Directory uint8 = iota
