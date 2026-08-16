@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/gob"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	databaseSchema  = 2
-	recordSchema    = 2
+	databaseSchema  = 3
+	recordSchema    = 3
 	databaseName    = "dircache.db"
 	cacheRootName   = "vfsDirCache"
 	writeBatchSize  = 256
@@ -865,20 +865,151 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 		item.BackendData = backendData
 		record.Entries = append(record.Entries, item)
 	}
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(record); err != nil {
-		return nil, fmt.Errorf("failed encoding persistent directory %q: %w", dir, err)
+	return encodeDirectoryRecord(record), nil
+}
+
+func appendRecordBytes(data, value []byte) []byte {
+	data = binary.AppendUvarint(data, uint64(len(value)))
+	return append(data, value...)
+}
+
+func appendRecordString(data []byte, value string) []byte {
+	return appendRecordBytes(data, []byte(value))
+}
+
+// encodeDirectoryRecord uses length-prefixed fields so backend data remains opaque.
+func encodeDirectoryRecord(record directoryRecord) []byte {
+	data := make([]byte, 0, len(record.Path)+len(record.Entries)*32)
+	data = binary.AppendUvarint(data, uint64(record.Schema))
+	data = binary.AppendVarint(data, record.RefreshedAtUnixNano)
+	data = appendRecordString(data, record.Path)
+	data = binary.AppendUvarint(data, uint64(len(record.Entries)))
+	for _, entry := range record.Entries {
+		data = append(data, entry.Kind)
+		data = appendRecordString(data, entry.Remote)
+		data = appendRecordString(data, entry.ID)
+		data = appendRecordBytes(data, entry.BackendData)
 	}
-	return buf.Bytes(), nil
+	return data
+}
+
+type directoryRecordDecoder struct {
+	data   []byte
+	offset int
+}
+
+func (d *directoryRecordDecoder) readUvarint() (uint64, error) {
+	if d.offset >= len(d.data) {
+		return 0, errors.New("unexpected end of persistent directory record")
+	}
+	value, read := binary.Uvarint(d.data[d.offset:])
+	if read == 0 {
+		return 0, errors.New("truncated integer in persistent directory record")
+	}
+	if read < 0 {
+		return 0, errors.New("integer overflow in persistent directory record")
+	}
+	d.offset += read
+	return value, nil
+}
+
+func (d *directoryRecordDecoder) readVarint() (int64, error) {
+	if d.offset >= len(d.data) {
+		return 0, errors.New("unexpected end of persistent directory record")
+	}
+	value, read := binary.Varint(d.data[d.offset:])
+	if read == 0 {
+		return 0, errors.New("truncated integer in persistent directory record")
+	}
+	if read < 0 {
+		return 0, errors.New("integer overflow in persistent directory record")
+	}
+	d.offset += read
+	return value, nil
+}
+
+func (d *directoryRecordDecoder) readBytes() ([]byte, error) {
+	size, err := d.readUvarint()
+	if err != nil {
+		return nil, err
+	}
+	remaining := len(d.data) - d.offset
+	if size > uint64(remaining) {
+		return nil, errors.New("invalid byte string length in persistent directory record")
+	}
+	value := d.data[d.offset : d.offset+int(size)]
+	d.offset += int(size)
+	return value, nil
+}
+
+func (d *directoryRecordDecoder) readString() (string, error) {
+	value, err := d.readBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(value), nil
+}
+
+func (d *directoryRecordDecoder) readByte() (byte, error) {
+	if d.offset >= len(d.data) {
+		return 0, errors.New("unexpected end of persistent directory record")
+	}
+	value := d.data[d.offset]
+	d.offset++
+	return value, nil
 }
 
 func decodeDirectoryRecord(data []byte) (directoryRecord, error) {
-	var record directoryRecord
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&record); err != nil {
-		return record, err
+	decoder := directoryRecordDecoder{data: data}
+	schema, err := decoder.readUvarint()
+	if err != nil {
+		return directoryRecord{}, err
 	}
-	if record.Schema != recordSchema {
-		return record, fmt.Errorf("unsupported directory record schema %d", record.Schema)
+	if schema != recordSchema {
+		return directoryRecord{}, fmt.Errorf("unsupported directory record schema %d", schema)
+	}
+	refreshedAt, err := decoder.readVarint()
+	if err != nil {
+		return directoryRecord{}, err
+	}
+	dir, err := decoder.readString()
+	if err != nil {
+		return directoryRecord{}, err
+	}
+	entryCount, err := decoder.readUvarint()
+	if err != nil {
+		return directoryRecord{}, err
+	}
+	if entryCount > uint64(len(data)-decoder.offset) {
+		return directoryRecord{}, errors.New("invalid entry count in persistent directory record")
+	}
+	record := directoryRecord{
+		Schema:              uint16(schema),
+		Path:                dir,
+		RefreshedAtUnixNano: refreshedAt,
+		Entries:             make([]entryRecord, int(entryCount)),
+	}
+	for i := range record.Entries {
+		entry := &record.Entries[i]
+		entry.Kind, err = decoder.readByte()
+		if err != nil {
+			return directoryRecord{}, err
+		}
+		entry.Remote, err = decoder.readString()
+		if err != nil {
+			return directoryRecord{}, err
+		}
+		entry.ID, err = decoder.readString()
+		if err != nil {
+			return directoryRecord{}, err
+		}
+		entry.BackendData, err = decoder.readBytes()
+		if err != nil {
+			return directoryRecord{}, err
+		}
+	}
+	if decoder.offset != len(data) {
+		return directoryRecord{}, errors.New("trailing data in persistent directory record")
 	}
 	return record, nil
 }

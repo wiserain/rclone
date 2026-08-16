@@ -3,9 +3,7 @@
 package vfsdircache
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -94,11 +92,7 @@ func makeBenchmarkDirectoryRecord(entryCount int) ([]byte, []entryRecord) {
 		RefreshedAtUnixNano: 1776297600000000000,
 		Entries:             entries,
 	}
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(record); err != nil {
-		panic(err)
-	}
-	return buf.Bytes(), entries
+	return encodeDirectoryRecord(record), entries
 }
 
 func benchmarkEntryCounts(b *testing.B, fn func(*testing.B, int)) {
