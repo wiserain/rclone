@@ -80,16 +80,12 @@ func makeBenchmarkDirectoryRecord(entryCount int) ([]byte, []entryRecord) {
 			panic(err)
 		}
 		entries[i] = entryRecord{
-			Kind:            entryKind,
-			Remote:          remote,
-			ModTimeUnixNano: 1776297600000000000,
-			ModTimeValid:    true,
-			Size:            int64(i+1) * 1024 * 1024,
-			Items:           -1,
-			ID:              fmt.Sprintf("1AbCdEfGhIjKlMnOpQrStUvWxYz%08d", i),
-			ParentID:        "0AParentDriveIdentifier0123456789",
-			Storable:        !isDir,
-			BackendData:     backendData,
+			Kind:        entryKind,
+			Remote:      remote,
+			BackendData: backendData,
+		}
+		if isDir {
+			entries[i].ID = fmt.Sprintf("1AbCdEfGhIjKlMnOpQrStUvWxYz%08d", i)
 		}
 	}
 	record := directoryRecord{
@@ -117,7 +113,6 @@ func benchmarkEntryCounts(b *testing.B, fn func(*testing.B, int)) {
 func BenchmarkDecodeDirectoryRecord(b *testing.B) {
 	benchmarkEntryCounts(b, func(b *testing.B, entryCount int) {
 		data, _ := makeBenchmarkDirectoryRecord(entryCount)
-		b.ReportMetric(float64(len(data))/float64(entryCount), "bytes/entry")
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
@@ -127,6 +122,7 @@ func BenchmarkDecodeDirectoryRecord(b *testing.B) {
 			}
 			benchmarkRecordSink = record
 		}
+		b.ReportMetric(float64(len(data))/float64(entryCount), "bytes/entry")
 	})
 }
 
@@ -152,7 +148,6 @@ func BenchmarkDecodeAndRestoreDirectory(b *testing.B) {
 		data, _ := makeBenchmarkDirectoryRecord(entryCount)
 		store := &Store{codec: benchmarkCodec{}}
 		ctx := context.Background()
-		b.ReportMetric(float64(len(data))/float64(entryCount), "bytes/entry")
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
@@ -166,5 +161,6 @@ func BenchmarkDecodeAndRestoreDirectory(b *testing.B) {
 			}
 			benchmarkEntriesSink = entries
 		}
+		b.ReportMetric(float64(len(data))/float64(entryCount), "bytes/entry")
 	})
 }

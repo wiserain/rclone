@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	databaseSchema  = 1
-	recordSchema    = 1
+	databaseSchema  = 2
+	recordSchema    = 2
 	databaseName    = "dircache.db"
 	cacheRootName   = "vfsDirCache"
 	writeBatchSize  = 256
@@ -89,16 +89,10 @@ type directoryRecord struct {
 }
 
 type entryRecord struct {
-	Kind            uint8
-	Remote          string
-	ModTimeUnixNano int64
-	ModTimeValid    bool
-	Size            int64
-	Items           int64
-	ID              string
-	ParentID        string
-	Storable        bool
-	BackendData     []byte
+	Kind        uint8
+	Remote      string
+	ID          string // directory identity used to detect replacement
+	BackendData []byte
 }
 
 type encodedDirectory struct {
@@ -851,26 +845,15 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 	for _, entry := range entries {
 		item := entryRecord{
 			Remote: entry.Remote(),
-			Size:   entry.Size(),
 		}
-		modTime := entry.ModTime(ctx)
-		item.ModTimeUnixNano, item.ModTimeValid = encodeTime(modTime)
 		switch typed := entry.(type) {
 		case fs.Object:
 			item.Kind = entryObject
-			item.Storable = typed.Storable()
-			if ider, ok := typed.(fs.IDer); ok {
-				item.ID = ider.ID()
-			}
 		case fs.Directory:
 			item.Kind = entryDir
-			item.Items = typed.Items()
 			item.ID = typed.ID()
 		default:
 			return nil, fmt.Errorf("can't persist unsupported directory entry type %T", entry)
-		}
-		if parentIDer, ok := entry.(fs.ParentIDer); ok {
-			item.ParentID = parentIDer.ParentID()
 		}
 		backendData, err := s.codec.EncodePersistentDirEntry(ctx, entry)
 		if err != nil {
@@ -927,13 +910,6 @@ func (s *Store) restoreEntries(ctx context.Context, records []entryRecord) (fs.D
 		entries = append(entries, entry)
 	}
 	return entries, nil
-}
-
-func encodeTime(t time.Time) (unixNano int64, valid bool) {
-	if t.IsZero() {
-		return 0, false
-	}
-	return t.UnixNano(), true
 }
 
 func directoryKey(dir string) []byte {
