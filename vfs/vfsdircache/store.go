@@ -40,6 +40,7 @@ const (
 	cacheRootName   = "vfsDirCache"
 	writeBatchSize  = 256
 	writeBatchBytes = 16 * 1024 * 1024
+	snapshotFill    = 1.0
 
 	entryObject uint8 = 1
 	entryDir    uint8 = 2
@@ -469,6 +470,9 @@ func (s *Store) replaceAll(ctx context.Context, tree dirtree.DirTree, refreshedA
 		}
 		if err = tmpDB.Update(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket(bucketDirs)
+			// The sorted snapshot is immutable until it is installed, so pack its
+			// pages fully; incremental writes keep Bolt's default growth headroom.
+			bucket.FillPercent = snapshotFill
 			for _, item := range batch {
 				if putErr := bucket.Put(directoryKey(item.path), item.data); putErr != nil {
 					return putErr
