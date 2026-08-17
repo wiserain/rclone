@@ -75,6 +75,7 @@ func TestPersistentDirCacheRegularObjectRoundTrip(t *testing.T) {
 	assert.Equal(t, "https://drive.test/files/item-1?alt=media", got.url)
 	assert.Equal(t, *want.resourceKey, *got.resourceKey)
 	assert.Equal(t, *want.metadata, *got.metadata)
+	assert.Equal(t, fs.Fingerprint(ctx, want, false), fs.Fingerprint(ctx, got, false))
 }
 
 func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {

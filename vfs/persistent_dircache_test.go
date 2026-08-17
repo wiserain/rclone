@@ -18,10 +18,12 @@ import (
 	"github.com/rclone/rclone/vfs/vfscommon"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
 
 type persistentTestFs struct {
 	fs.Fs
+	codecVersion int
 
 	blockListDir string
 	listStarted  chan struct{}
@@ -49,6 +51,13 @@ type persistentTestRecord struct {
 
 func (f *persistentTestFs) PersistentDirCacheIdentity() string {
 	return "vfs-persistent-test"
+}
+
+func (f *persistentTestFs) PersistentDirCacheCodecVersion() int {
+	if f.codecVersion != 0 {
+		return f.codecVersion
+	}
+	return 1
 }
 
 func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
@@ -344,6 +353,58 @@ func TestPersistentDirCacheIdentityIgnoresMetadataOptions(t *testing.T) {
 	require.NotNil(t, vfs2.dirCache)
 	assert.Equal(t, identityWithOptions, vfs2.dirCache.Stats()["identity"])
 	vfs2.Shutdown()
+
+	persistentFs.codecVersion = 2
+	vfs3 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs3.dirCache)
+	assert.NotEqual(t, identityWithOptions, vfs3.dirCache.Stats()["identity"])
+	vfs3.Shutdown()
+}
+
+func TestPersistentDirCacheMigratesIncompatibleDatabaseSchema(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	require.NoError(t, config.SetCacheDir(t.TempDir()))
+	t.Cleanup(func() {
+		require.NoError(t, config.SetCacheDir(oldCacheDir))
+	})
+
+	r := fstest.NewRun(t)
+	persistentFs := &persistentTestFs{Fs: r.Fremote}
+	opt := vfscommon.Opt
+	opt.DirCachePersist = true
+
+	vfs1 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs1.dirCache)
+	databasePath := vfs1.dirCache.Stats()["path"].(string)
+	vfs1.Shutdown()
+
+	db, err := bolt.Open(databasePath, 0600, nil)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("meta")).Put([]byte("schema"), []byte("1"))
+	}))
+	require.NoError(t, db.Close())
+
+	vfs2 := New(ctx, persistentFs, &opt)
+	require.NotNil(t, vfs2.dirCache)
+	require.FileExists(t, databasePath+".incompatible")
+	vfs2.Shutdown()
+
+	for path, wantSchema := range map[string]string{
+		databasePath:                   "2",
+		databasePath + ".incompatible": "1",
+	} {
+		db, err = bolt.Open(path, 0600, &bolt.Options{ReadOnly: true})
+		require.NoError(t, err)
+		var schema string
+		require.NoError(t, db.View(func(tx *bolt.Tx) error {
+			schema = string(tx.Bucket([]byte("meta")).Get([]byte("schema")))
+			return nil
+		}))
+		require.NoError(t, db.Close())
+		assert.Equal(t, wantSchema, schema)
+	}
 }
 
 func TestPersistentDirCacheChangeNotifyInvalidatesParent(t *testing.T) {

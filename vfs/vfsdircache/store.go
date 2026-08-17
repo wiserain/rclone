@@ -124,7 +124,7 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) (*Store, error) {
 		codec:    persistent,
 		root:     root,
 		path:     dbPath,
-		identity: makeIdentity(ctx, f, opt, persistent.PersistentDirCacheIdentity()),
+		identity: makeIdentity(ctx, f, opt, persistent.PersistentDirCacheIdentity(), persistent.PersistentDirCacheCodecVersion()),
 	}
 	if err = s.openCurrent(); err == nil {
 		// A previous process may have stopped after installing and validating a
@@ -204,19 +204,20 @@ func cleanRemotePath(name string) string {
 	return name
 }
 
-func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options, backendIdentity string) string {
+func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options, backendIdentity string, codecVersion int) string {
 	ci := fs.GetConfig(ctx)
 	filterConfig := filter.GetConfig(ctx)
 
 	hasher := sha256.New()
 	_, _ = fmt.Fprintf(
 		hasher,
-		"schema=%d\nfs=%s\nname=%s\nroot=%s\nbackend_identity=%q\nfilter_options=%#v\nfilter_rules=%s\nfilter_mod_time_from=%d\nfilter_mod_time_to=%d\nlinks=%t\ncase_insensitive=%t\nblock_norm_dupes=%t\nmetadata_extension=%q\nno_unicode_normalization=%t\nignore_case_sync=%t\n",
+		"schema=%d\nfs=%s\nname=%s\nroot=%s\nbackend_identity=%q\nbackend_codec_version=%d\nfilter_options=%#v\nfilter_rules=%s\nfilter_mod_time_from=%d\nfilter_mod_time_to=%d\nlinks=%t\ncase_insensitive=%t\nblock_norm_dupes=%t\nmetadata_extension=%q\nno_unicode_normalization=%t\nignore_case_sync=%t\n",
 		databaseSchema,
 		fs.ConfigString(f),
 		f.Name(),
 		f.Root(),
 		backendIdentity,
+		codecVersion,
 		filterConfig.Opt,
 		filterConfig.DumpFilters(),
 		filterConfig.ModTimeFrom.UnixNano(),

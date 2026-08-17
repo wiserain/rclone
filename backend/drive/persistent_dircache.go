@@ -40,7 +40,6 @@ type persistentDriveRecord struct {
 }
 
 type persistentDriveIdentity struct {
-	Version               int    `json:"version"`
 	RootFolderID          string `json:"root_folder_id"`
 	TeamDriveID           string `json:"team_drive_id,omitempty"`
 	IsTeamDrive           bool   `json:"is_team_drive"`
@@ -68,7 +67,6 @@ type persistentDriveIdentity struct {
 // PersistentDirCacheIdentity implements fs.PersistentDirCacheIdentityer.
 func (f *Fs) PersistentDirCacheIdentity() string {
 	identity := persistentDriveIdentity{
-		Version:               persistentDirCacheRecordVersion,
 		RootFolderID:          f.rootFolderID,
 		TeamDriveID:           f.opt.TeamDriveID,
 		IsTeamDrive:           f.isTeamDrive,
@@ -117,6 +115,11 @@ func persistentDriveBaseRecord(base *baseObject) persistentDriveRecord {
 		record.Metadata = maps.Clone(*base.metadata)
 	}
 	return record
+}
+
+// PersistentDirCacheCodecVersion returns the persistent entry record version.
+func (f *Fs) PersistentDirCacheCodecVersion() int {
+	return persistentDirCacheRecordVersion
 }
 
 // EncodePersistentDirEntry implements fs.PersistentDirCacheCodec.

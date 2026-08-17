@@ -29,6 +29,10 @@ type benchmarkBackendRecord struct {
 
 type benchmarkCodec struct{}
 
+func (benchmarkCodec) PersistentDirCacheCodecVersion() int {
+	return 1
+}
+
 func (benchmarkCodec) EncodePersistentDirEntry(context.Context, fs.DirEntry) ([]byte, error) {
 	panic("not used by benchmark")
 }

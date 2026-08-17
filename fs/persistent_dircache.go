@@ -13,6 +13,9 @@ import "context"
 // DecodePersistentDirEntry is only called when non-empty backend data was
 // stored. It must return either an Object or Directory matching isDir.
 type PersistentDirCacheCodec interface {
+	// PersistentDirCacheCodecVersion identifies the backend record format.
+	// Changing it invalidates records written by an incompatible codec.
+	PersistentDirCacheCodecVersion() int
 	EncodePersistentDirEntry(ctx context.Context, entry DirEntry) ([]byte, error)
 	DecodePersistentDirEntry(ctx context.Context, remote string, isDir bool, data []byte) (DirEntry, error)
 }

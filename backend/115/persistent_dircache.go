@@ -47,6 +47,11 @@ func (f *Fs) PersistentDirCacheIdentity() string {
 	)
 }
 
+// PersistentDirCacheCodecVersion returns the persistent entry record version.
+func (f *Fs) PersistentDirCacheCodecVersion() int {
+	return persistentDirCacheRecordVersion
+}
+
 // EncodePersistentDirEntry implements fs.PersistentDirCacheCodec.
 //
 // Directory IDs are saved as well as object IDs, SHA1 and pickcode. Restoring

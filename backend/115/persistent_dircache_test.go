@@ -60,6 +60,7 @@ func TestPersistentDirCacheObjectRoundTrip(t *testing.T) {
 	assert.Equal(t, wantTime, got.modTime)
 	assert.True(t, got.hasMetaData)
 	assert.NotNil(t, got.durlMu)
+	assert.Equal(t, fs.Fingerprint(ctx, want, false), fs.Fingerprint(ctx, got, false))
 }
 
 func TestPersistentDirCacheDirectoryRoundTrip(t *testing.T) {
