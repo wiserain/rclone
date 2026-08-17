@@ -52,7 +52,7 @@ func (f *Fs) PersistentDirCacheIdentity() string {
 // Directory IDs are saved as well as object IDs, SHA1 and pickcode. Restoring
 // directory IDs also repopulates the backend's own path-to-ID cache, which
 // avoids a path traversal API call when a later operation needs that directory.
-func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
+func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
 	record := persistentDirCacheRecord{
 		Version: persistentDirCacheRecordVersion,
 	}
@@ -66,14 +66,10 @@ func (f *Fs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, po
 		record.ID = item.id
 		record.ParentID = item.parent
 		record.Size = item.size
-		if !policy.NoChecksum {
-			record.SHA1 = item.sha1sum
-		}
+		record.SHA1 = item.sha1sum
 		record.PickCode = item.pickCode
-		if !policy.NoModTime {
-			record.ModTimeUnixNano = item.modTime.UnixNano()
-			record.ModTimeIsPresent = !item.modTime.IsZero()
-		}
+		record.ModTimeUnixNano = item.modTime.UnixNano()
+		record.ModTimeIsPresent = !item.modTime.IsZero()
 	case fs.Directory:
 		record.Kind = persistent115Directory
 		record.ID = item.ID()

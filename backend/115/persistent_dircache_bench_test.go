@@ -63,7 +63,7 @@ func BenchmarkDecodePersistent115Record(b *testing.B) {
 func BenchmarkDecodePersistent115Entry(b *testing.B) {
 	ctx := context.Background()
 	object := makeBenchmarkPersistent115Object()
-	data, err := object.fs.EncodePersistentDirEntry(ctx, object, fs.PersistentDirCachePolicy{})
+	data, err := object.fs.EncodePersistentDirEntry(ctx, object)
 	if err != nil {
 		b.Fatal(err)
 	}

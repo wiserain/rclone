@@ -22,7 +22,6 @@ import (
 
 type persistentTestFs struct {
 	fs.Fs
-	lastPolicy fs.PersistentDirCachePolicy
 
 	blockListDir string
 	listStarted  chan struct{}
@@ -52,8 +51,7 @@ func (f *persistentTestFs) PersistentDirCacheIdentity() string {
 	return "vfs-persistent-test"
 }
 
-func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry, policy fs.PersistentDirCachePolicy) ([]byte, error) {
-	f.lastPolicy = policy
+func (f *persistentTestFs) EncodePersistentDirEntry(ctx context.Context, entry fs.DirEntry) ([]byte, error) {
 	record := persistentTestRecord{
 		Size:    entry.Size(),
 		ModTime: entry.ModTime(ctx),
@@ -318,7 +316,7 @@ func TestPersistentDirCacheUnsupportedBackendIsDisabled(t *testing.T) {
 	assert.Nil(t, vfs.dirCache)
 }
 
-func TestPersistentDirCachePolicy(t *testing.T) {
+func TestPersistentDirCacheIdentityIgnoresMetadataOptions(t *testing.T) {
 	ctx := context.Background()
 	oldCacheDir := config.GetCacheDir()
 	require.NoError(t, config.SetCacheDir(t.TempDir()))
@@ -337,15 +335,14 @@ func TestPersistentDirCachePolicy(t *testing.T) {
 	vfs1 := New(ctx, persistentFs, &opt)
 	require.NotNil(t, vfs1.dirCache)
 	require.NoError(t, vfs1.root.readDirTree())
-	assert.Equal(t, fs.PersistentDirCachePolicy{NoChecksum: true, NoModTime: true}, persistentFs.lastPolicy)
-	identityWithPolicy := vfs1.dirCache.Stats()["identity"]
+	identityWithOptions := vfs1.dirCache.Stats()["identity"]
 	vfs1.Shutdown()
 
 	opt.NoChecksum = false
 	opt.NoModTime = false
 	vfs2 := New(ctx, persistentFs, &opt)
 	require.NotNil(t, vfs2.dirCache)
-	assert.NotEqual(t, identityWithPolicy, vfs2.dirCache.Stats()["identity"])
+	assert.Equal(t, identityWithOptions, vfs2.dirCache.Stats()["identity"])
 	vfs2.Shutdown()
 }
 

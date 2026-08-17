@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	databaseSchema  = 1
+	databaseSchema  = 2
 	recordSchema    = 1
 	databaseName    = "dircache.db"
 	cacheRootName   = "vfsDirCache"
@@ -64,7 +64,6 @@ var (
 type Store struct {
 	f        fs.Fs
 	codec    fs.PersistentDirCacheCodec
-	policy   fs.PersistentDirCachePolicy
 	root     string
 	path     string
 	identity string
@@ -121,12 +120,8 @@ func New(ctx context.Context, f fs.Fs, opt *vfscommon.Options) (*Store, error) {
 	}
 
 	s := &Store{
-		f:     f,
-		codec: persistent,
-		policy: fs.PersistentDirCachePolicy{
-			NoChecksum: opt.NoChecksum,
-			NoModTime:  opt.NoModTime,
-		},
+		f:        f,
+		codec:    persistent,
 		root:     root,
 		path:     dbPath,
 		identity: makeIdentity(ctx, f, opt, persistent.PersistentDirCacheIdentity()),
@@ -216,7 +211,7 @@ func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options, backendI
 	hasher := sha256.New()
 	_, _ = fmt.Fprintf(
 		hasher,
-		"schema=%d\nfs=%s\nname=%s\nroot=%s\nbackend_identity=%q\nfilter_options=%#v\nfilter_rules=%s\nfilter_mod_time_from=%d\nfilter_mod_time_to=%d\nlinks=%t\ncase_insensitive=%t\nblock_norm_dupes=%t\nmetadata_extension=%q\nno_checksum=%t\nno_modtime=%t\nno_unicode_normalization=%t\nignore_case_sync=%t\n",
+		"schema=%d\nfs=%s\nname=%s\nroot=%s\nbackend_identity=%q\nfilter_options=%#v\nfilter_rules=%s\nfilter_mod_time_from=%d\nfilter_mod_time_to=%d\nlinks=%t\ncase_insensitive=%t\nblock_norm_dupes=%t\nmetadata_extension=%q\nno_unicode_normalization=%t\nignore_case_sync=%t\n",
 		databaseSchema,
 		fs.ConfigString(f),
 		f.Name(),
@@ -230,8 +225,6 @@ func makeIdentity(ctx context.Context, f fs.Fs, opt *vfscommon.Options, backendI
 		opt.CaseInsensitive,
 		opt.BlockNormDupes,
 		opt.MetadataExtension,
-		opt.NoChecksum,
-		opt.NoModTime,
 		ci.NoUnicodeNormalization,
 		ci.IgnoreCaseSync,
 	)
@@ -871,7 +864,7 @@ func (s *Store) encodeDirectory(ctx context.Context, dir string, entries fs.DirE
 		default:
 			return nil, fmt.Errorf("can't persist unsupported directory entry type %T", entry)
 		}
-		backendData, err := s.codec.EncodePersistentDirEntry(ctx, entry, s.policy)
+		backendData, err := s.codec.EncodePersistentDirEntry(ctx, entry)
 		if err != nil {
 			return nil, fmt.Errorf("backend failed to encode %q for persistent directory cache: %w", entry.Remote(), err)
 		}
