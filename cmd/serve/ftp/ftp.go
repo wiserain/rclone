@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rclone/rclone/cmd"
@@ -166,16 +165,22 @@ You can set a single username and password with the --user and --pass flags.
 
 // driver contains everything to run the driver for the FTP server
 type driver struct {
-	f          fs.Fs
-	srv        *ftp.Server
-	ctx        context.Context // for global config
-	opt        Options
-	globalVFS  *vfs.VFS     // the VFS if not using auth proxy
-	proxy      *proxy.Proxy // may be nil if not in use
-	useTLS     bool
-	userPassMu sync.Mutex        // to protect userPass
-	userPass   map[string]string // cache of username => password when using vfs proxy
+	f        fs.Fs
+	srv      *ftp.Server
+	ctx      context.Context // for global config
+	opt      Options
+	provider *proxy.Provider
+	useTLS   bool
 }
+
+// sessionObscuredPassKey is the key under which the obscured password is
+// stored in the per-session ftp.Session.Data map when using the auth proxy.
+//
+// The credential must be bound to the FTP session, not to the username: two
+// sessions can share a username but resolve to different proxy backends, so a
+// username-keyed store would let a later login rebind an earlier session's
+// operations to the later session's backend.
+const sessionObscuredPassKey = "rclone-obscured-pass"
 
 func init() {
 	fs.RegisterGlobalOptions(fs.OptionsInfo{Name: "ftp", Opt: &Opt, Options: OptionsInfo})
@@ -195,16 +200,17 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options, vfsOpt *vfscommon.Opt
 	}
 
 	d := &driver{
-		f:   f,
-		ctx: ctx,
-		opt: *opt,
+		f:        f,
+		ctx:      ctx,
+		opt:      *opt,
+		provider: proxy.NewProvider(ctx, f, vfsOpt, proxyOpt),
 	}
-	if proxy.Opt.AuthProxy != "" {
-		d.proxy = proxy.New(ctx, proxyOpt, vfsOpt)
-		d.userPass = make(map[string]string, 16)
-	} else {
-		d.globalVFS = vfs.New(ctx, f, vfsOpt)
-	}
+	defer func() {
+		if err != nil {
+			d.provider.Shutdown()
+		}
+	}()
+
 	d.useTLS = d.opt.TLSKey != ""
 
 	// Check PassivePorts format since the server library doesn't!
@@ -250,7 +256,9 @@ func (d *driver) Serve() error {
 //lint:ignore U1000 unused when not building linux
 func (d *driver) Shutdown() error {
 	fs.Logf(d.f, "Stopping FTP on %s", d.srv.Hostname+":"+strconv.Itoa(d.srv.Port))
-	return d.srv.Shutdown()
+	err := d.srv.Shutdown()
+	d.provider.Shutdown()
+	return err
 }
 
 // Return the first address of the server
@@ -316,23 +324,24 @@ func (l *Logger) PrintResponse(sessionID string, code int, message string) {
 
 // CheckPasswd handle auth based on configuration
 func (d *driver) CheckPasswd(sctx *ftp.Context, user, pass string) (ok bool, err error) {
-	if d.proxy != nil {
-		_, _, err = d.proxy.Call(user, pass, false)
+	if d.provider.IsProxy() {
+		_, _, err = d.provider.Proxy().Call(user, pass, false, sctx.Sess.RemoteAddr().String())
 		if err != nil {
 			fs.Infof(nil, "proxy login failed: %v", err)
 			return false, nil
 		}
-		// Cache obscured password for later lookup.
+		// Cache the obscured password on the session for later lookup.
 		//
-		// We don't cache the VFS directly in the driver as we want them
-		// to be expired and the auth proxy does that for us.
+		// We don't cache the VFS directly as we want it to be expired and
+		// the auth proxy does that for us. We bind the credential to this
+		// FTP session rather than to the username so a later login with the
+		// same username but a different credential can't rebind this
+		// session's operations to a different backend.
 		oPass, err := obscure.Obscure(pass)
 		if err != nil {
 			return false, err
 		}
-		d.userPassMu.Lock()
-		d.userPass[user] = oPass
-		d.userPassMu.Unlock()
+		sctx.Sess.Data[sessionObscuredPassKey] = oPass
 	} else {
 		userOK := subtle.ConstantTimeCompare([]byte(d.opt.User), []byte(user))
 		// No password configured means any password is accepted
@@ -349,16 +358,19 @@ func (d *driver) CheckPasswd(sctx *ftp.Context, user, pass string) (ok bool, err
 	return true, nil
 }
 
-// Get the VFS for this connection
+// getVFS returns the VFS for this connection.
+//
+// In proxy mode, getVFS calls proxy.Call on each FTP command which refreshes
+// the proxy cache timer (like http/webdav). Therefore, connection-level pinning
+// is not used; only individual transfers exceeding the cache expiry window
+// could be affected.
 func (d *driver) getVFS(sctx *ftp.Context) (VFS *vfs.VFS, err error) {
-	if d.proxy == nil {
+	if !d.provider.IsProxy() {
 		// If no proxy always use the same VFS
-		return d.globalVFS, nil
+		return d.provider.VFS(), nil
 	}
 	user := sctx.Sess.LoginUser()
-	d.userPassMu.Lock()
-	oPass, ok := d.userPass[user]
-	d.userPassMu.Unlock()
+	oPass, ok := sctx.Sess.Data[sessionObscuredPassKey].(string)
 	if !ok {
 		return nil, fmt.Errorf("proxy user not logged in")
 	}
@@ -366,7 +378,7 @@ func (d *driver) getVFS(sctx *ftp.Context) (VFS *vfs.VFS, err error) {
 	if err != nil {
 		return nil, err
 	}
-	VFS, _, err = d.proxy.Call(user, pass, false)
+	VFS, _, err = d.provider.Proxy().Call(user, pass, false, sctx.Sess.RemoteAddr().String())
 	if err != nil {
 		return nil, fmt.Errorf("proxy login failed: %w", err)
 	}

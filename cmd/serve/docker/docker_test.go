@@ -204,6 +204,101 @@ func TestDockerPluginLogic(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestDockerPluginVolumeNameConfined checks that a crafted volume name
+// containing ".." components cannot escape the base directory to create a
+// mountpoint at an arbitrary host path.
+func TestDockerPluginVolumeNameConfined(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	testDir, testFs := initialise(ctx, t)
+	err := config.SetCacheDir(testDir)
+	require.NoError(t, err)
+	defer func() {
+		_ = config.SetCacheDir(oldCacheDir)
+		if !t.Failed() {
+			fstest.Purge(testFs)
+			_ = os.RemoveAll(testDir)
+		}
+	}()
+
+	drv, err := docker.NewDriver(ctx, testDir, nil, nil, true, true)
+	require.NoError(t, err)
+	require.NotNil(t, drv)
+
+	// A volume name with ".." components resolves outside testDir, to a
+	// sibling path that does not exist so the test never touches a real
+	// system directory.
+	escape := filepath.Join("..", "docker-escape-target")
+	outside := filepath.Join(filepath.Dir(testDir), "docker-escape-target")
+	require.NoDirExists(t, outside)
+	volReq := &docker.CreateRequest{
+		Name:    escape,
+		Options: docker.VolOpts{"remote": testDir},
+	}
+	err = drv.Create(volReq)
+	assertErrorContains(t, err, "resolves outside the base directory")
+
+	// The escaping directory must not have been created.
+	_, statErr := os.Stat(outside)
+	assert.True(t, os.IsNotExist(statErr), "escaping mountpoint %q should not exist", outside)
+
+	// The volume must not have been registered.
+	_, err = drv.Get(&docker.GetRequest{Name: escape})
+	assert.Error(t, err)
+
+	// A name that resolves to the base directory itself (empty or ".")
+	// must also be rejected, since mounting there would shadow every
+	// other volume.
+	for _, name := range []string{"", ".", filepath.Join("a", "..")} {
+		volReq.Name = name
+		err = drv.Create(volReq)
+		assertErrorContains(t, err, "resolves outside the base directory",
+			"name %q should be rejected", name)
+	}
+}
+
+// TestDockerPluginRestoreStateConfined checks that a persisted state file
+// with a mountpoint escaping the base directory is not trusted verbatim on
+// restore: the mountpoint is re-derived from the base directory and name.
+func TestDockerPluginRestoreStateConfined(t *testing.T) {
+	ctx := context.Background()
+	oldCacheDir := config.GetCacheDir()
+	testDir, testFs := initialise(ctx, t)
+	err := config.SetCacheDir(testDir)
+	require.NoError(t, err)
+	defer func() {
+		_ = config.SetCacheDir(oldCacheDir)
+		if !t.Failed() {
+			fstest.Purge(testFs)
+			_ = os.RemoveAll(testDir)
+		}
+	}()
+
+	// Persist a state file as an older, vulnerable rclone might have: a
+	// benign name but a mountpoint that escapes the base directory.
+	escaped := filepath.Join(filepath.Dir(testDir), "docker-escape-restore")
+	require.NoDirExists(t, escaped)
+	state := fmt.Sprintf(`[{"name":"vol1","mountpoint":%q,"created":%q,"fs":%q,"options":{"remote":%q},"mounts":[]}]`,
+		escaped, time.Now().Format(time.RFC3339), testDir, testDir)
+	statePath := filepath.Join(testDir, "docker-plugin.state")
+	require.NoError(t, os.WriteFile(statePath, []byte(state), 0600))
+
+	// Restore the state into a new dummy driver.
+	drv, err := docker.NewDriver(ctx, testDir, nil, nil, true, false)
+	require.NoError(t, err)
+	require.NotNil(t, drv)
+
+	// The restored volume must point back inside the base directory, and
+	// the escaping directory must not have been created.
+	getRes, err := drv.Get(&docker.GetRequest{Name: "vol1"})
+	require.NoError(t, err)
+	require.NotNil(t, getRes)
+	assert.Equal(t, filepath.Join(testDir, "vol1"), getRes.Volume.Mountpoint)
+	assert.NotEqual(t, escaped, getRes.Volume.Mountpoint)
+	_, statErr := os.Stat(escaped)
+	assert.True(t, os.IsNotExist(statErr), "escaping mountpoint %q should not exist", escaped)
+}
+
 const (
 	httpTimeout = 2 * time.Second
 	tempDelay   = 10 * time.Millisecond

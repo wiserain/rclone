@@ -442,7 +442,7 @@ correct, and support all features.
 The shell type auto-detection logic, described above, means that
 by default rclone will try to run a shell command the first time
 a new sftp remote is accessed. If you configure a sftp remote
-without a config file, e.g. an [on the fly](/docs/#backend-path-to-dir])
+without a config file, e.g. an [on the fly](/docs/#backend-path-to-dir)
 remote, rclone will have nowhere to store the result, and it
 will re-run the command on every access. To avoid this you should
 explicitly set the `shell_type` option to the correct value,
@@ -1442,7 +1442,7 @@ SFTP isn't supported under plan9 until [this
 issue](https://github.com/pkg/sftp/issues/156) is fixed.
 
 Note that since SFTP isn't HTTP based the following flags don't work
-with it: `--dump-headers`, `--dump-bodies`, `--dump-auth`.
+with it: `--dump headers`, `--dump bodies`, `--dump auth`.
 
 Note that `--timeout` and `--contimeout` are both supported.
 

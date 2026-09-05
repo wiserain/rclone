@@ -19,7 +19,6 @@ import (
 	"path"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,6 +51,7 @@ import (
 	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/pool"
 	"github.com/rclone/rclone/lib/readers"
+	"github.com/rclone/rclone/lib/rest"
 	"github.com/rclone/rclone/lib/transferaccounter"
 	"golang.org/x/sync/errgroup"
 )
@@ -70,6 +70,7 @@ const (
 	defaultChunkSize      = 4 * fs.Mebi
 	defaultAccessTier     = blob.AccessTier("") // FIXME AccessTierNone
 	sasCopyValidity       = time.Hour           // how long SAS should last when doing server side copy
+	sasCopyStartSkew      = 15 * time.Minute    // how far back SAS should start to allow for clock skew
 )
 
 // setAcceptEncodingGzip is a per-call policy that sets Accept-Encoding: gzip
@@ -1827,7 +1828,7 @@ func (f *Fs) getUserDelegation(ctx context.Context) (*service.UserDelegationCred
 	}
 
 	// Validity window
-	start := time.Now().UTC()
+	start := time.Now().UTC().Add(-sasCopyStartSkew)
 	expiry := start.Add(2 * sasCopyValidity)
 	startStr := start.Format(time.RFC3339)
 	expiryStr := expiry.Format(time.RFC3339)
@@ -1876,7 +1877,7 @@ func (o *Object) getAuth(ctx context.Context, noAuth bool) (srcURL string, err e
 		// Build the SAS values
 		perms := sas.BlobPermissions{Read: true}
 		container, containerPath := o.split()
-		start := time.Now().UTC()
+		start := time.Now().UTC().Add(-sasCopyStartSkew)
 		expiry := start.Add(sasCopyValidity)
 		vals := sas.BlobSignatureValues{
 			StartTime:     start,
@@ -2346,6 +2347,16 @@ func (o *Object) decodeMetaDataFromDownloadResponse(info *blob.DownloadStreamRes
 	} else {
 		size = *info.ContentLength
 	}
+	// On a range request Content-Length is the length of the range, not the object, so take the
+	// object's size from the total in Content-Range instead.
+	if info.ContentRange != nil {
+		contentRange, err := rest.ParseContentRange(*info.ContentRange)
+		if err != nil {
+			fs.Debugf(o, "Failed to parse Content-Range %q: %v", *info.ContentRange, err)
+		} else if contentRange.Size >= 0 {
+			size = contentRange.Size
+		}
+	}
 	if isDirectoryMarker(size, metadata, o.remote) {
 		return fs.ErrorNotAFile
 	}
@@ -2379,22 +2390,6 @@ func (o *Object) decodeMetaDataFromDownloadResponse(info *blob.DownloadStreamRes
 	// 	o.accessTier = blob.AccessTier(*info.AccessTier)
 	// }
 	o.setMetadata(metadata)
-
-	// If it was a Range request, the size is wrong, so correct it
-	if info.ContentRange != nil {
-		contentRange := *info.ContentRange
-		slash := strings.IndexRune(contentRange, '/')
-		if slash >= 0 {
-			i, err := strconv.ParseInt(contentRange[slash+1:], 10, 64)
-			if err == nil {
-				o.size = i
-			} else {
-				fs.Debugf(o, "Failed to find parse integer from in %q: %v", contentRange, err)
-			}
-		} else {
-			fs.Debugf(o, "Failed to find length in %q", contentRange)
-		}
-	}
 	o.contentEncoding = info.ContentEncoding
 
 	// If decompressing then size and md5sum are unknown

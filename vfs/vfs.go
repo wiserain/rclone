@@ -188,6 +188,7 @@ type VFS struct {
 	usageMu     sync.Mutex
 	usageTime   time.Time
 	usage       *fs.Usage
+	pollMu      sync.Mutex
 	pollChan    chan time.Duration
 	inUse       atomic.Int32 // count of number of opens
 
@@ -415,13 +416,16 @@ func (vfs *VFS) Shutdown() {
 
 	vfs.shutdownCache()
 
+	// Cancel any background go routines
+	vfs.cancel()
+
+	vfs.pollMu.Lock()
 	if vfs.pollChan != nil {
 		close(vfs.pollChan)
 		vfs.pollChan = nil
 	}
+	vfs.pollMu.Unlock()
 
-	// Cancel any background go routines
-	vfs.cancel()
 	vfs.closePersistentDirCache() // mod
 }
 
@@ -753,6 +757,38 @@ func (vfs *VFS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		return err
 	}
 	return nil
+}
+
+// Chmod changes the mode of the named file.
+//
+// If name is a symlink the mode of the link itself is changed, not
+// its target (like lchmod). It does not follow the link, so it works
+// on symlinks whose target doesn't exist.
+//
+// The VFS doesn't store file permissions so currently this returns
+// ENOSYS if the file exists and ENOENT if it doesn't.
+func (vfs *VFS) Chmod(name string, mode os.FileMode) error {
+	_, err := vfs.Stat(name)
+	if err != nil {
+		return err
+	}
+	return ENOSYS
+}
+
+// Chown changes the uid and gid of the named file.
+//
+// If name is a symlink the ownership of the link itself is changed,
+// not its target (like lchown). It does not follow the link, so it
+// works on symlinks whose target doesn't exist.
+//
+// The VFS doesn't store file ownership so currently this returns
+// ENOSYS if the file exists and ENOENT if it doesn't.
+func (vfs *VFS) Chown(name string, uid, gid int) error {
+	_, err := vfs.Stat(name)
+	if err != nil {
+		return err
+	}
+	return ENOSYS
 }
 
 // mkdir creates a new directory with the specified name and permission bits
