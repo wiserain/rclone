@@ -412,11 +412,11 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	// upload singlepart
 	client := f.newOSSClient()
 	req := &oss.PutObjectRequest{
-		Bucket:      oss.Ptr(ui.Bucket),
-		Key:         oss.Ptr(ui.Object),
+		Bucket:      new(ui.Bucket),
+		Key:         new(ui.Object),
 		Body:        in,
-		Callback:    oss.Ptr(ui.GetCallback()),
-		CallbackVar: oss.Ptr(ui.GetCallbackVar()),
+		Callback:    new(ui.GetCallback()),
+		CallbackVar: new(ui.GetCallbackVar()),
 	}
 	// Apply upload options
 	for _, option := range options {
@@ -426,13 +426,13 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		case "":
 			// ignore
 		case "cache-control":
-			req.CacheControl = oss.Ptr(value)
+			req.CacheControl = new(value)
 		case "content-disposition":
-			req.ContentDisposition = oss.Ptr(value)
+			req.ContentDisposition = new(value)
 		case "content-encoding":
-			req.ContentEncoding = oss.Ptr(value)
+			req.ContentEncoding = new(value)
 		case "content-type":
-			req.ContentType = oss.Ptr(value)
+			req.ContentType = new(value)
 		}
 	}
 

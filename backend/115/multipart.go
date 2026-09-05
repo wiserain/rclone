@@ -193,8 +193,8 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 	}
 
 	req := &oss.InitiateMultipartUploadRequest{
-		Bucket: oss.Ptr(ui.Bucket),
-		Key:    oss.Ptr(ui.Object),
+		Bucket: new(ui.Bucket),
+		Key:    new(ui.Object),
 	}
 	req.Parameters = map[string]string{"x-oss-enable-sha1": ""}
 	if w.con == 1 {
@@ -208,13 +208,13 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		case "":
 			// ignore
 		case "cache-control":
-			req.CacheControl = oss.Ptr(value)
+			req.CacheControl = new(value)
 		case "content-disposition":
-			req.ContentDisposition = oss.Ptr(value)
+			req.ContentDisposition = new(value)
 		case "content-encoding":
-			req.ContentEncoding = oss.Ptr(value)
+			req.ContentEncoding = new(value)
 		case "content-type":
-			req.ContentType = oss.Ptr(value)
+			req.ContentType = new(value)
 		}
 	}
 	err = w.f.pacer.Call(func() (bool, error) {
@@ -348,8 +348,8 @@ func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 			CompleteMultipartUpload: &oss.CompleteMultipartUpload{
 				Parts: w.uploadedParts,
 			},
-			Callback:    oss.Ptr(w.callback),
-			CallbackVar: oss.Ptr(w.callbackVar),
+			Callback:    new(w.callback),
+			CallbackVar: new(w.callbackVar),
 		})
 		return w.shouldRetry(ctx, err)
 	})

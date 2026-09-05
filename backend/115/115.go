@@ -369,8 +369,7 @@ func shouldRetry(ctx context.Context, resp *http.Response, info any, err error) 
 	if fserrors.ContextError(ctx, &err) {
 		return false, err
 	}
-	var cooldownErr *cookieCooldownError
-	if errors.As(err, &cooldownErr) {
+	if _, ok := errors.AsType[*cookieCooldownError](err); ok {
 		return true, err
 	}
 	if err == nil && info != nil {
