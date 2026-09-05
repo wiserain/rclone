@@ -25,6 +25,7 @@ import (
 	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/lib/readers"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -411,10 +412,11 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 
 	// upload singlepart
 	client := f.newOSSClient()
+	counter := readers.NewCountingReader(in)
 	req := &oss.PutObjectRequest{
 		Bucket:      new(ui.Bucket),
 		Key:         new(ui.Object),
-		Body:        in,
+		Body:        counter,
 		Callback:    new(ui.GetCallback()),
 		CallbackVar: new(ui.GetCallbackVar()),
 	}
@@ -439,6 +441,10 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 	res, err := client.PutObject(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	// Check for truncation of input
+	if size >= 0 && int64(counter.BytesRead()) != size {
+		return nil, fmt.Errorf("expected %d bytes in input, but got %d: %w", size, counter.BytesRead(), io.ErrUnexpectedEOF)
 	}
 	data, err := f.postUpload(res.CallbackResult)
 	if err != nil {
