@@ -127,7 +127,7 @@ func (c *RsaCipher) Encrypt(plainText []byte) ([]byte, error) {
 	xorText := make([]byte, 0, len(c.randKey)+len(tmp))
 	xorText = append(xorText, c.randKey...)
 	xorText = append(xorText, xor(tmp, gKeyL)...)
-	cipherText, err := rsa.EncryptPKCS1v15(rand.Reader, c.key.publicKey, xorText)
+	cipherText, err := rsa.EncryptPKCS1v15(rand.Reader, c.key.publicKey, xorText) //nolint:staticcheck // required by the 115 protocol
 	if err != nil {
 		return nil, err
 	}

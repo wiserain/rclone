@@ -123,7 +123,7 @@ func rsaEncrypt(input []byte) []byte {
 		if offset+sliceSize > plainSize {
 			sliceSize = plainSize - offset
 		}
-		slice, _ := rsa.EncryptPKCS1v15(
+		slice, _ := rsa.EncryptPKCS1v15( //nolint:staticcheck // required by the 115 protocol
 			rand.Reader, rsaServerKey, input[offset:offset+sliceSize])
 		buf.Write(slice)
 	}
