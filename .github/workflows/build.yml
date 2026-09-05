@@ -23,41 +23,7 @@ permissions:
   contents: read
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: github.head_ref == '' && github.repository == 'wiserain/rclone'
-    outputs:
-      upload_url: ${{ steps.set_upload_url.outputs.upload_url }}
-    steps:
-      - 
-        name: Create Release
-        if: ${{ contains(github.ref, 'refs/tags/') }}
-        id: new_release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ github.ref }}
-          name: rclone ${{ github.ref_name }}
-          body: |
-            ## What's Changed
-
-            ## How to Update
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash 
-            ```
-          draft: true
-          prerelease: false
-      - 
-        name: Set Upload URL
-        id: set_upload_url
-        run: |
-          if [ "${{ contains(github.ref, 'refs/tags/') }}" = "true" ]; then
-            echo "upload_url=${{ steps.new_release.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
-          fi
   build:
-    needs:
-      - create-release
     if: inputs.manual || (github.repository == 'wiserain/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 60
     defaults:
@@ -66,14 +32,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows']
-        # job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows', 'other_os', 'go1.26']
+        job_name: ['linux', 'linux_386', 'mac_amd64', 'mac_arm64', 'windows', 'other_os', 'go1.26']
 
         include:
           - job_name: linux
             os: ubuntu-latest
             go: '~1.26.6'
-            gotags: cmount,noselfupdate
+            gotags: cmount
             build_flags: '-include "^linux/"'
             check: true
             quicktest: true
@@ -85,13 +50,13 @@ jobs:
             os: ubuntu-latest
             go: '~1.26.6'
             goarch: 386
-            gotags: cmount,noselfupdate
+            gotags: cmount
             quicktest: true
 
           - job_name: mac_amd64
             os: macos-latest
             go: '~1.26.6'
-            gotags: 'cmount,noselfupdate'
+            gotags: 'cmount'
             build_flags: '-include "^darwin/amd64" -cgo'
             quicktest: true
             racequicktest: true
@@ -100,32 +65,23 @@ jobs:
           - job_name: mac_arm64
             os: macos-latest
             go: '~1.26.6'
-            gotags: 'cmount,noselfupdate'
+            gotags: 'cmount'
             build_flags: '-include "^darwin/arm64" -cgo -macos-arch arm64 -cgo-cflags=-I/usr/local/include -cgo-ldflags=-L/usr/local/lib'
             deploy: true
 
           - job_name: windows
             os: windows-latest
             go: '~1.26.6'
-            gotags: cmount,noselfupdate
+            gotags: cmount
             cgo: '0'
             build_flags: '-include "^windows/"'
             build_args: '-buildmode exe'
             quicktest: true
             deploy: true
 
-          # - job_name: other_os
-          #   os: ubuntu-latest
-          #   go: '~1.26.6'
-          #   build_flags: '-exclude "^(windows/|darwin/|linux/)"'
-          #   compile_all: true
-          #   deploy: true
-
-          # - job_name: go1.26
-          #   os: ubuntu-latest
-          #   go: '~1.26.6'
-          #   quicktest: true
-          #   racequicktest: true
+        exclude:
+          - job_name: other_os
+          - job_name: go1.26
 
     name: ${{ matrix.job_name }}
 
@@ -187,7 +143,7 @@ jobs:
 
       - name: Set environment variables
         run: |
-          echo 'GOTAGS=${{ matrix.gotags }}' >> $GITHUB_ENV
+          echo 'GOTAGS=${{ matrix.gotags }},noselfupdate' >> $GITHUB_ENV
           echo 'BUILD_FLAGS=${{ matrix.build_flags }}' >> $GITHUB_ENV
           echo 'BUILD_ARGS=${{ matrix.build_args }}' >> $GITHUB_ENV
           if [[ "${{ matrix.goarch }}" != "" ]]; then echo 'GOARCH=${{ matrix.goarch }}' >> $GITHUB_ENV ; fi
@@ -254,6 +210,7 @@ jobs:
       - name: Rclone version
         run: |
           rclone version
+
       - name: Run tests
         run: |
           make quicktest
@@ -565,88 +522,68 @@ jobs:
           find "$modcache/cache/download" -name '*.zip' -type f -delete 2>/dev/null || true
 
   termux:
-    needs:
-      - create-release
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     if: github.head_ref == '' && github.repository == 'wiserain/rclone'
     steps:
-      - name: Checkout
+      - name: Checkout rclone
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Set Variables (beta)
-        if: github.event_name == 'push' && contains(github.ref, 'refs/heads/')
-        shell: bash
+      - name: Set package variables
+        if: github.event_name == 'push' && (contains(github.ref, 'refs/heads/') || contains(github.ref, 'refs/tags/'))
         run: |
-          LAST_TAG=$(git describe --tags --abbrev=0)
-          echo "version=$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)" >> $GITHUB_ENV
-          echo "revision=0" >> $GITHUB_ENV
-          echo "branch=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
-          echo "version_all=v$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)-beta.$(git rev-list --count HEAD).$(git show --no-patch --no-notes --pretty='%h' HEAD).$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
-      - name: Set Variables (release)
-        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0)
-          echo "version=$(echo $LAST_TAG | cut -c 2- | cut -d- -f1)" >> $GITHUB_ENV
-          echo "revision=$(echo $LAST_TAG | cut -c 2- | cut -d- -f2)" >> $GITHUB_ENV
-          echo "branch=$LAST_TAG" >> $GITHUB_ENV
-          echo "version_all=$LAST_TAG" >> $GITHUB_ENV
-      - name: Checkout
+          set -euo pipefail
+          last_tag="$(git describe --tags --abbrev=0)"
+          version="$(printf '%s\n' "$last_tag" | cut -c 2- | cut -d- -f1)"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            revision="$(printf '%s\n' "$last_tag" | cut -c 2- | cut -d- -f2)"
+            branch="$last_tag"
+            version_all="$last_tag"
+          else
+            revision=0
+            branch="$GITHUB_REF_NAME"
+            branch_label="${branch//\//-}"
+            version_all="v${version}-beta.$(git rev-list --count HEAD).$(git show --no-patch --no-notes --pretty='%h' HEAD).${branch_label}"
+          fi
+          {
+            printf 'VERSION=%s\n' "$version"
+            printf 'REVISION=%s\n' "$revision"
+            printf 'BRANCH=%s\n' "$branch"
+            printf 'VERSION_ALL=%s\n' "$version_all"
+          } >> "$GITHUB_ENV"
+      - name: Checkout termux-packages
         uses: actions/checkout@v7
         with:
           repository: 'termux/termux-packages'
-      - name: build (beta)
-        if: github.event_name == 'push' && contains(github.ref, 'refs/heads/')
-        shell: bash
+      - name: Build Termux package
+        if: github.event_name == 'push' && (contains(github.ref, 'refs/heads/') || contains(github.ref, 'refs/tags/'))
         run: |
+          set -euo pipefail
+          escape_sed_replacement() {
+            printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+          }
+          branch_sed="$(escape_sed_replacement "$BRANCH")"
+          version_all_sed="$(escape_sed_replacement "$VERSION_ALL")"
           sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=\"${{ env.version }}\"/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=\"${VERSION}\"/g" packages/rclone/build.sh
           grep -q "^TERMUX_PKG_REVISION" packages/rclone/build.sh || sed -i "/^TERMUX_PKG_VERSION=/a TERMUX_PKG_REVISION=0" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ env.revision }}/g" packages/rclone/build.sh
+          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${REVISION}/g" packages/rclone/build.sh
           sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=git+https:\/\/github.com\/wiserain\/rclone/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
-          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
-          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
+          sed -i -r "s|^TERMUX_PKG_SHA256=(.*)$|TERMUX_PKG_GIT_BRANCH=${branch_sed}|g" packages/rclone/build.sh
+          sed -i -r "s|-ldflags \"(.*)\"|-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${version_all_sed}\"|g" packages/rclone/build.sh
+          sed -i -r "s|cp rclone.1 (.*)|cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${version_all_sed}-termux-\$TERMUX_ARCH.zip rclone|g" packages/rclone/build.sh
           ./scripts/run-docker.sh ./build-package.sh -a aarch64 rclone
           ./scripts/run-docker.sh ./build-package.sh -a arm rclone
           cd ./output
-          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
-      - name: build (release)
-        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          sed -i -r "s/^TERMUX_PKG_MAINTAINER=(.*)$/TERMUX_PKG_MAINTAINER=\"@wiserain\"/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_VERSION=(.*)$/TERMUX_PKG_VERSION=\"${{ env.version }}\"/g" packages/rclone/build.sh
-          grep -q "^TERMUX_PKG_REVISION" packages/rclone/build.sh || sed -i "/^TERMUX_PKG_VERSION=/a TERMUX_PKG_REVISION=0" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_REVISION=(.*)$/TERMUX_PKG_REVISION=${{ env.revision }}/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_SRCURL=(.*)$/TERMUX_PKG_SRCURL=git+https:\/\/github.com\/wiserain\/rclone/g" packages/rclone/build.sh
-          sed -i -r "s/^TERMUX_PKG_SHA256=(.*)$/TERMUX_PKG_GIT_BRANCH=${{ env.branch }}/g" packages/rclone/build.sh
-          sed -i -r "s/-ldflags \"(.*)\"/-ldflags \"-s -X github.com\/rclone\/rclone\/fs.Version=${{ env.version_all }}\"/g" packages/rclone/build.sh
-          sed -i -r "s/cp rclone.1 (.*)/cp rclone.1 \1\n\tzip \$HOME\/termux-packages\/output\/rclone-${{ env.version_all }}-termux-\$TERMUX_ARCH.zip rclone/g" packages/rclone/build.sh
-          ./scripts/run-docker.sh ./build-package.sh -a aarch64 rclone
-          ./scripts/run-docker.sh ./build-package.sh -a arm rclone
-          cd ./output
-          for file in *.deb; do mvto=$(sed -r "s/^rclone_(.*)_(.*)$/rclone-${{ env.version_all }}-termux-\2/g" <<< ${file}); mv "$file" "$mvto"; done
-      # - 
-      #   if: ${{ contains(github.ref, 'refs/tags/') }}
-      #   name: Upload Assets to Release
-      #   shell: bash
-      #   run: |
-      #     UPLOAD_URL="$(echo "${{ needs.create-release.outputs.upload_url }}" | cut -d'{' -f1)"
-      #     for FILE in output/*; do
-      #       [ ! -f "$FILE" ] && continue
-      #       echo "Uploading \"$FILE\"..."
-      #       curl -sX POST \
-      #         --output /dev/null \
-      #         -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-      #         -H "Accept: application/vnd.github.v3+json" \
-      #         -H "Content-Type: $(file -b --mime-type ${FILE})" \
-      #         -H "Content-Length: $(wc -c <${FILE} | xargs)" \
-      #         -T "${FILE}" \
-      #         "${UPLOAD_URL}?name=$(basename ${FILE})"
-      #     done
+          shopt -s nullglob
+          for file in *.deb; do
+            mvto="$(sed -r "s|^rclone_(.*)_(.*)$|rclone-${version_all_sed}-termux-\2|g" <<< "$file")"
+            mv -- "$file" "$mvto"
+          done
       - 
         if: ${{ contains(github.ref, 'refs/tags/') }}
         name: Upload Release Artifact
@@ -666,17 +603,13 @@ jobs:
           path: |
             output/*.zip
 
-  upload-release:
-    if: ${{ contains(github.ref, 'refs/tags/') }}
-    needs: [create-release, build, termux]
+  release:
+    needs: [build, termux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    if: github.head_ref == '' && github.repository == 'wiserain/rclone' && contains(github.ref, 'refs/tags/')
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: Download Artifacts
         uses: actions/download-artifact@v8
         with:
@@ -690,8 +623,23 @@ jobs:
           sha1sum rclone-v* > SHA1SUMS
           sha256sum rclone-v* > SHA256SUMS
       - 
-        name: Upload Assets to Release
+        name: Create Release
+        id: create_release
+        uses: shogo82148/actions-create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: rclone ${{ github.ref_name }}
+          body: |
+            ## What's Changed
+
+            ## How to Update
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | sudo bash
+            ```
+          draft: true
+          prerelease: false
+      - name: Upload Assets to Release
         uses: shogo82148/actions-upload-release-asset@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: 'build/*'
