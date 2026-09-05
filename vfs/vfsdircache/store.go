@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	databaseSchema  = 2
+	databaseSchema  = 3
 	recordSchema    = 1
 	databaseName    = "dircache.db"
 	cacheRootName   = "vfsDirCache"

@@ -392,7 +392,7 @@ func TestPersistentDirCacheMigratesIncompatibleDatabaseSchema(t *testing.T) {
 	vfs2.Shutdown()
 
 	for path, wantSchema := range map[string]string{
-		databasePath:                   "2",
+		databasePath:                   "3",
 		databasePath + ".incompatible": "1",
 	} {
 		db, err = bolt.Open(path, 0600, &bolt.Options{ReadOnly: true})
