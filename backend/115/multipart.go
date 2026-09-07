@@ -4,6 +4,9 @@ package _115 // nolint:revive
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -268,6 +271,67 @@ func (w *ossChunkWriter) shouldRetry(ctx context.Context, err error) (bool, erro
 	return false, err
 }
 
+func isPartAlreadyExist(err error) bool {
+	ossErr, ok := errors.AsType[*oss.ServiceError](err)
+	return ok && ossErr.StatusCode == 409 && ossErr.Code == "PartAlreadyExist"
+}
+
+// findExistingPart finds and verifies an already uploaded part after a sequential upload conflict.
+func (w *ossChunkWriter) findExistingPart(ctx context.Context, partNumber int32, reader io.ReadSeeker, size int64) (oss.UploadPart, error) {
+	var result *oss.ListPartsResult
+	var err error
+	err = w.f.pacer.Call(func() (bool, error) {
+		result, err = w.client.ListParts(ctx, &oss.ListPartsRequest{
+			Bucket:           w.imur.Bucket,
+			Key:              w.imur.Key,
+			UploadId:         w.imur.UploadId,
+			MaxParts:         1,
+			PartNumberMarker: partNumber - 1,
+		})
+		return w.shouldRetry(ctx, err)
+	})
+	if err != nil {
+		return oss.UploadPart{}, fmt.Errorf("failed to list existing part %d: %w", partNumber, err)
+	}
+	if result == nil {
+		return oss.UploadPart{}, fmt.Errorf("list existing part %d returned no result", partNumber)
+	}
+
+	for _, part := range result.Parts {
+		if part.PartNumber != partNumber {
+			continue
+		}
+		if part.ETag == nil || *part.ETag == "" {
+			return oss.UploadPart{}, fmt.Errorf("existing part %d has no ETag", partNumber)
+		}
+		if part.Size != size {
+			return oss.UploadPart{}, fmt.Errorf("existing part %d has size %d, expected %d", partNumber, part.Size, size)
+		}
+
+		if _, err := reader.Seek(0, io.SeekStart); err != nil {
+			return oss.UploadPart{}, fmt.Errorf("failed to rewind part %d for verification: %w", partNumber, err)
+		}
+		// OSS uses the MD5 of a part as its ETag.
+		hash := md5.New()
+		if _, err := io.Copy(hash, reader); err != nil {
+			return oss.UploadPart{}, fmt.Errorf("failed to checksum part %d for verification: %w", partNumber, err)
+		}
+		if _, err := reader.Seek(0, io.SeekStart); err != nil {
+			return oss.UploadPart{}, fmt.Errorf("failed to reset part %d after verification: %w", partNumber, err)
+		}
+		if got, want := hex.EncodeToString(hash.Sum(nil)), strings.Trim(*part.ETag, `"`); !strings.EqualFold(got, want) {
+			return oss.UploadPart{}, fmt.Errorf("existing part %d has ETag %q, expected %q", partNumber, *part.ETag, got)
+		}
+
+		return oss.UploadPart{
+			PartNumber: part.PartNumber,
+			ETag:       part.ETag,
+		}, nil
+	}
+
+	return oss.UploadPart{}, fmt.Errorf("existing part %d was not found", partNumber)
+}
+
 // add a part number and etag to the completed parts
 func (w *ossChunkWriter) addCompletedPart(part oss.UploadPart) {
 	w.mu.Lock()
@@ -303,6 +367,10 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 			Body:       reader,
 		})
 		if err != nil {
+			if w.con == 1 && isPartAlreadyExist(err) {
+				// A sequential upload cannot make progress by retrying the same part number.
+				return false, err
+			}
 			if chunkNumber <= 8 {
 				return w.shouldRetry(ctx, err)
 			}
@@ -312,6 +380,15 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 		return false, nil
 	})
 	if err != nil {
+		if w.con == 1 && isPartAlreadyExist(err) {
+			part, recoverErr := w.findExistingPart(ctx, ossPartNumber, reader, currentChunkSize)
+			if recoverErr == nil {
+				w.addCompletedPart(part)
+				fs.Debugf(w.o, "multipart upload: recovered existing chunk %d with %v bytes", ossPartNumber, currentChunkSize)
+				return currentChunkSize, nil
+			}
+			return -1, fmt.Errorf("failed to recover existing chunk %d after PartAlreadyExist: %w: %v", ossPartNumber, err, recoverErr)
+		}
 		return -1, fmt.Errorf("failed to upload chunk %d with %v bytes: %w", ossPartNumber, currentChunkSize, err)
 	}
 
