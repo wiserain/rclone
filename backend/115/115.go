@@ -1660,13 +1660,13 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 
 	usage := &fs.Usage{}
 	if totalInfo, ok := info.SpaceInfo["all_total"]; ok {
-		usage.Total = fs.NewUsageValue(int64(totalInfo.Size))
+		usage.Total = fs.NewUsageValue(totalInfo.Size)
 	}
 	if useInfo, ok := info.SpaceInfo["all_use"]; ok {
-		usage.Used = fs.NewUsageValue(int64(useInfo.Size))
+		usage.Used = fs.NewUsageValue(useInfo.Size)
 	}
 	if remainInfo, ok := info.SpaceInfo["all_remain"]; ok {
-		usage.Free = fs.NewUsageValue(int64(remainInfo.Size))
+		usage.Free = fs.NewUsageValue(remainInfo.Size)
 	}
 
 	return usage, nil

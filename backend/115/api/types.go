@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -332,8 +333,53 @@ type IndexData struct {
 
 // SizeInfo represents size information.
 type SizeInfo struct {
-	Size       float64 `json:"size"`
-	SizeFormat string  `json:"size_format"`
+	Size       int64  `json:"size"`
+	SizeFormat string `json:"size_format"`
+}
+
+// UnmarshalJSON parses size values represented as JSON numbers or strings.
+func (s *SizeInfo) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Size       json.RawMessage `json:"size"`
+		SizeFormat string          `json:"size_format"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	size, err := parseSpaceSize(raw.Size)
+	if err != nil {
+		return err
+	}
+	s.Size = size
+	s.SizeFormat = raw.SizeFormat
+	return nil
+}
+
+func parseSpaceSize(data json.RawMessage) (int64, error) {
+	if len(data) == 0 || string(data) == "null" {
+		return 0, nil
+	}
+	var value string
+	if data[0] == '"' {
+		if err := json.Unmarshal(data, &value); err != nil {
+			return 0, err
+		}
+	} else {
+		value = string(data)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	size, _, err := big.ParseFloat(value, 10, 256, big.ToZero)
+	if err != nil {
+		return 0, err
+	}
+	sizeInt, _ := size.Int(nil)
+	if sizeInt == nil || !sizeInt.IsInt64() {
+		return 0, strconv.ErrRange
+	}
+	return sizeInt.Int64(), nil
 }
 
 // ------------------------------------------------------------
