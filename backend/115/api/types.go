@@ -281,6 +281,7 @@ type DirID struct {
 
 // FileStats represents statistics about a file or directory.
 type FileStats struct {
+	Error        string      `json:"error,omitempty"`
 	Count        json.Number `json:"count,omitempty"`
 	Size         string      `json:"size,omitempty"`
 	FolderCount  json.Number `json:"folder_count,omitempty"`
@@ -302,6 +303,14 @@ type FileStats struct {
 		FileID   json.Number `json:"file_id,omitempty"`
 		FileName string      `json:"file_name,omitempty"`
 	} `json:"paths,omitempty"`
+}
+
+// Err returns an error if the response contains a non-empty error field.
+func (f *FileStats) Err() error {
+	if f.Error == "" {
+		return nil
+	}
+	return errors.New(f.Error)
 }
 
 // StringInfo represents a response with a string data field.

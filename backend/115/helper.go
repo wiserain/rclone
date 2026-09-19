@@ -522,6 +522,9 @@ func (f *Fs) getStats(ctx context.Context, cid string) (info *api.FileStats, err
 	if err != nil {
 		return
 	}
+	if err = info.Err(); err != nil {
+		return
+	}
 	info.FileName = f.opt.Enc.ToStandardName(info.FileName)
 	for n, parent := range info.Paths {
 		info.Paths[n].FileName = f.opt.Enc.ToStandardName(parent.FileName)

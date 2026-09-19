@@ -2,6 +2,7 @@ package _115 // nolint:revive
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,30 @@ func TestDownloadURLValidRejectsEmptyURL(t *testing.T) {
 	assert.False(t, (*api.DownloadURL)(nil).Valid())
 	assert.False(t, (&api.DownloadURL{}).Valid())
 	assert.True(t, (&api.DownloadURL{URL: "https://example.com/file"}).Valid())
+}
+
+func TestFileStatsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{name: "success", body: `{"file_name":"file.txt"}`},
+		{name: "error", body: `{"error":"permission denied"}`, wantErr: "permission denied"},
+		{name: "empty error", body: `{"error":""}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var info api.FileStats
+			require.NoError(t, json.Unmarshal([]byte(test.body), &info))
+			if test.wantErr == "" {
+				assert.NoError(t, info.Err())
+				return
+			}
+			assert.EqualError(t, info.Err(), test.wantErr)
+		})
+	}
 }
 
 func TestDownloadURLUserAgentMatchesDownload(t *testing.T) {
