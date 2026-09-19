@@ -72,7 +72,7 @@ const (
 	minChunkSize        = 100 * fs.Kibi
 	maxChunkSize        = 5 * fs.Gibi
 	defaultUploadCutoff = fs.SizeSuffix(200 * 1024 * 1024)
-	maxUploadCutoff     = 20 * fs.Gibi // maximum allowed size for singlepart uploads
+	maxUploadCutoff     = 5 * fs.Gibi // maximum allowed size for singlepart uploads
 )
 
 // Register with Fs
