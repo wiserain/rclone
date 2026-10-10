@@ -79,19 +79,6 @@ jobs:
             quicktest: true
             deploy: true
 
-          - job_name: other_os
-            os: ubuntu-latest
-            go: '~1.26.9'
-            build_flags: '-exclude "^(windows/|darwin/|linux/)"'
-            compile_all: true
-            deploy: true
-
-          - job_name: go1.26
-            os: ubuntu-latest
-            go: '~1.26.9'
-            quicktest: true
-            racequicktest: true
-
         exclude:
           - job_name: other_os
           - job_name: go1.26
