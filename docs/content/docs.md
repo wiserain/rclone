@@ -990,7 +990,7 @@ example:
 Is equivalent to this:
 
 ```text
---bwlimit "Mon-00:00,512Mon-12:00,1M Tue-12:00,1M Wed-12:00,1M Thu-12:00,1M Fri-12:00,1M Sat-12:00,1M Sun-12:00,1M Sun-20:00,off"
+--bwlimit "Mon-00:00,512 Mon-12:00,1M Tue-12:00,1M Wed-12:00,1M Thu-12:00,1M Fri-12:00,1M Sat-12:00,1M Sun-12:00,1M Sun-20:00,off"
 ```
 
 Bandwidth limit apply to the data transfer for all backends. For most
@@ -1464,6 +1464,12 @@ This flag is supported for all HTTP based backends even those not
 supported by `--header-upload` and `--header-download` so may be used
 as a workaround for those with care.
 
+The headers are only sent to the host of the original request. If the
+server redirects to another host (including a subdomain or a different
+port), or redirects an `https` request to `http`, the headers are not
+sent to it, or to any further hop in that redirect chain. Rclone logs
+this at debug level (`-vv`).
+
 ```console
 rclone ls remote:test --header "X-Rclone: Foo" --header "X-LetMeIn: Yes"
 ```
@@ -1702,7 +1708,7 @@ like symlinks under Windows). Ignored files won't be copied, moved or
 deleted in a sync.
 
 If you supply this flag then rclone will copy symbolic links from any
-supported backend backend, and store them as text files, with a
+supported backend, and store them as text files, with a
 `.rclonelink` suffix in the destination.
 
 The text file will contain the target of the symbolic link.
@@ -2234,7 +2240,7 @@ rclone will use multiple threads to transfer the file (default 256M).
 Capable backends are marked in the
 [overview](/overview/#optional-features) as `MultithreadUpload`. (They
 need to implement either the `OpenWriterAt` or `OpenChunkWriter`
-internal interfaces). These include include, `local`, `s3`,
+internal interfaces). These include `local`, `s3`,
 `azureblob`, `b2`, `oracleobjectstorage` and `smb` at the time of
 writing.
 
@@ -2445,8 +2451,9 @@ setting the config password for the first time.
 The argument to this should be a command with a space separated list
 of arguments. If one of the arguments has a space in then enclose it
 in `"`, if you want a literal `"` in an argument then enclose the
-argument in `"` and double the `"`. See [CSV encoding](https://godoc.org/encoding/csv)
-for more info.
+argument in `"` and double the `"`. This includes the command itself:
+if the path to the executable contains a space, it must be quoted too.
+See [CSV encoding](https://godoc.org/encoding/csv) for more info.
 
 Eg
 
@@ -2454,6 +2461,7 @@ Eg
 --password-command "echo hello"
 --password-command 'echo "hello with space"'
 --password-command 'echo "hello with ""quotes"" and space"'
+--password-command '"/path with a space/get-password.sh"'
 ```
 
 Note that when changing the configuration password the environment

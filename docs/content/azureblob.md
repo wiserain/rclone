@@ -354,13 +354,13 @@ be explicitly specified using exactly one of the `msi_object_id`,
 `msi_client_id`, or `msi_mi_res_id` parameters.
 
 If none of `msi_object_id`, `msi_client_id`, or `msi_mi_res_id` is
-set, this is is equivalent to using `env_auth`.
+set, this is equivalent to using `env_auth`.
 
 #### Federated Identity Credentials
 
 If these variables are set, rclone will authenticate with federated identity.
 
-- `tenant`: tenant ID of of the storage
+- `tenant`: tenant ID of the storage
 - `client_id`: client ID of the application the user will authenticate to storage
 - `msi_client_id`: managed identity client ID of the application the user will
   authenticate to
@@ -900,6 +900,52 @@ Properties:
 - Env Var:     RCLONE_AZUREBLOB_LIST_CHUNK
 - Type:        int
 - Default:     5000
+
+#### --azureblob-use-arrow-list
+
+Use the Apache Arrow listing format.
+
+If set, directory listings are fetched using the ListBlobs Apache
+Arrow response format instead of XML. Arrow responses are smaller and
+much cheaper to parse, making listings of large containers several
+times faster. Combine with "list_parallelism" for the biggest gains.
+
+"Blob Listing with Apache Arrow" is in public preview at Microsoft and
+is only supported on flat namespace accounts. On accounts with a
+hierarchical namespace (ADLS Gen2), or where the feature is otherwise
+unavailable, the server returns XML and the listing transparently
+falls back to the normal XML path (logged at debug level).
+
+Properties:
+
+- Config:      use_arrow_list
+- Env Var:     RCLONE_AZUREBLOB_USE_ARROW_LIST
+- Type:        bool
+- Default:     false
+
+#### --azureblob-list-parallelism
+
+Number of parallel shards to list a directory with.
+
+If set greater than 1, the blob name keyspace of each directory is
+split into ranges which are listed concurrently using the Arrow
+startFrom/endBefore range parameters. This can dramatically speed up
+listing containers with millions of objects, for both recursive
+(ListR) and single directory listings. Speed keeps improving up to a
+parallelism of around 30.
+
+This has no effect unless "use_arrow_list" is also set, as Arrow is the
+only listing path that supports server-side name ranges. If the
+account does not support range listing (e.g. it has a hierarchical
+namespace) the listing falls back to sequential. The default of 0 (or
+1) lists sequentially.
+
+Properties:
+
+- Config:      list_parallelism
+- Env Var:     RCLONE_AZUREBLOB_LIST_PARALLELISM
+- Type:        int
+- Default:     0
 
 #### --azureblob-access-tier
 

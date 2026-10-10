@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -105,10 +106,12 @@ func TestReadZipRootBoundary(t *testing.T) {
 	assert.Equal(t, []string{"a.txt"}, remotes)
 }
 
-// A file entry whose name refers to the archive's own root (".", "/",
-// "./" or "") must be skipped, not turn the whole archive into a single
-// file which hides every other entry.
-func TestReadZipRootNamedEntry(t *testing.T) {
+// A file entry whose name refers to a directory (".", "/", "./", "" or
+// "sub/.") must be skipped, not turn the archive or the directory
+// mounted as its root into a single file which hides every other
+// entry, or become an object named for the archive itself when the
+// archive is found by listing its directory.
+func TestReadZipDirNamedFileEntry(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	name := writeZip(t, dir, "dot.zip",
@@ -117,14 +120,53 @@ func TestReadZipRootNamedEntry(t *testing.T) {
 		"./",
 		"",
 		"good.txt",
+		"sub/",
+		"sub/.",
+		"sub/good.txt",
 	)
 
 	localFs, err := cache.Get(ctx, dir)
 	require.NoError(t, err)
 
+	for _, test := range []struct {
+		prefix, root string
+		want         []string
+	}{
+		{"", "", []string{"good.txt", "sub/good.txt"}},
+		{"sub/dot.zip", "", []string{"sub/dot.zip/good.txt", "sub/dot.zip/sub/good.txt"}},
+		{"", "sub", []string{"good.txt"}},
+	} {
+		t.Run(fmt.Sprintf("prefix=%q,root=%q", test.prefix, test.root), func(t *testing.T) {
+			f, err := New(ctx, localFs, name, test.prefix, test.root)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, allRemotes(t, f))
+		})
+	}
+}
+
+// Listings are served from a cache which must survive callers
+// filtering the returned slice in place, as fs/list does.
+func TestListCacheNotAliased(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	name := writeZip(t, dir, "test.zip", "a.txt", "b.txt", "c.txt")
+
+	localFs, err := cache.Get(ctx, dir)
+	require.NoError(t, err)
 	f, err := New(ctx, localFs, name, "", "")
 	require.NoError(t, err)
 
-	remotes := allRemotes(t, f)
-	assert.Equal(t, []string{"good.txt"}, remotes)
+	entries, err := f.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+	// Compact in place, dropping the first entry
+	copy(entries, entries[1:])
+
+	entries, err = f.List(ctx, "")
+	require.NoError(t, err)
+	var remotes []string
+	for _, entry := range entries {
+		remotes = append(remotes, entry.Remote())
+	}
+	assert.Equal(t, []string{"a.txt", "b.txt", "c.txt"}, remotes)
 }

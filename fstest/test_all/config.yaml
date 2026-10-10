@@ -183,6 +183,11 @@ backends:
  - backend:  "filescom"
    remote:   "TestFilesCom:"
    fastlist: false
+   ignore:
+     # Files.com rejects the replacements for ".", "..", "/" and "\"
+     - TestIntegration/FsMkdir/FsEncoding/dot
+     - TestIntegration/FsMkdir/FsEncoding/dot_dot
+     - TestIntegration/FsMkdir/FsEncoding/punctuation
    ignoretests:
      - cmd/bisync
  - backend:  "googlecloudstorage"
@@ -269,13 +274,6 @@ backends:
      - TestIntegration/FsMkdir/FsEncoding/punctuation
      - TestIntegration/FsMkdir/FsEncoding/trailing_LF
      - TestIntegration/FsMkdir/FsEncoding/trailing_VT
- - backend:  "s3"
-   remote:   "TestS3MinioEdge:"
-   fastlist: true
-   ignore:
-     - TestIntegration/FsMkdir/FsPutFiles/SetTier
-   ignoretests:
-     - cmd/gitannex
  - backend:  "s3"
    remote:   "TestS3Wasabi:"
    fastlist: true
@@ -657,7 +655,6 @@ backends:
      - TestIntegration/FsMkdir/FsEncoding/trailing_CR
      - TestIntegration/FsMkdir/FsEncoding/trailing_LF
      - TestIntegration/FsMkdir/FsEncoding/leading_HT
-     - TestIntegration/FsMkdir/FsPutFiles/FsPutStream/0
    ignoretests:
      - cmd/bisync
      - cmd/gitannex

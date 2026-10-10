@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -170,8 +171,8 @@ func (s *HTTP) auth(r *http.Request, user, pass string) (value any, err error) {
 	return VFS, err
 }
 
-func newServer(ctx context.Context, f fs.Fs, opt *Options, vfsOpt *vfscommon.Options, proxyOpt *proxy.Options) (s *HTTP, err error) {
-	s = &HTTP{
+func newServer(ctx context.Context, f fs.Fs, opt *Options, vfsOpt *vfscommon.Options, proxyOpt *proxy.Options) (_ *HTTP, err error) {
+	s := &HTTP{
 		f:        f,
 		ctx:      ctx,
 		opt:      *opt,
@@ -198,6 +199,7 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options, vfsOpt *vfscommon.Opt
 
 	router := s.server.Router()
 	router.Use(
+		s.provider.HoldVFS,
 		middleware.Compress(5),
 		middleware.SetHeader("Accept-Ranges", "bytes"),
 		middleware.SetHeader("Server", "rclone/"+fs.Version),
@@ -295,7 +297,7 @@ func (s *HTTP) serveDir(w http.ResponseWriter, r *http.Request, dirRemote string
 		if dirRemote == "" {
 			zipName = "root"
 		}
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+zipName+".zip\"")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": zipName + ".zip"}))
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
 		err := vfs.CreateZip(ctx, dir, w)

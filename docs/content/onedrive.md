@@ -651,16 +651,13 @@ Properties:
 
 Remove all versions on modifying operations.
 
-Onedrive for business creates versions when rclone uploads new files
+Onedrive creates versions when rclone uploads new files
 overwriting an existing one and when it sets the modification time.
 
 These versions take up space out of the quota.
 
 This flag checks for versions after file upload and setting
 modification time and removes all but the last version.
-
-**NB** Onedrive personal can't currently delete versions so don't use
-this flag there.
 
 
 Properties:
@@ -677,8 +674,7 @@ Permanently delete files on removal.
 Normally files will get sent to the recycle bin on deletion. Setting
 this flag causes them to be permanently deleted. Use with care.
 
-OneDrive personal accounts do not support the permanentDelete API,
-it only applies to OneDrive for Business and SharePoint document libraries.
+This works with OneDrive for Business, SharePoint document libraries, and OneDrive personal accounts, including free accounts.
 
 
 Properties:
@@ -724,12 +720,17 @@ Properties:
     - Creates a read-write link to the item.
   - "embed"
     - Creates an embeddable link to the item.
+    - Only available in OneDrive personal.
 
 #### --onedrive-link-password
 
 Set the password for links created by the link command.
 
-At the time of writing this only works with OneDrive personal paid accounts.
+At the time of writing this works with OneDrive for Business and
+OneDrive personal paid accounts.
+
+OneDrive personal free accounts can't set a password or an expiry time
+(with --expire) on links.
 
 
 Properties:
@@ -1040,7 +1041,7 @@ Here are the possible system metadata items for the onedrive backend.
 
 | Name | Help | Type | Example | Read Only |
 |------|------|------|---------|-----------|
-| btime | Time of file birth (creation) with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | N |
+| btime | Time of file birth (creation) with S accuracy. | RFC 3339 | 2006-01-02T15:04:05Z | N |
 | content-type | The MIME type of the file. | string | text/plain | **Y** |
 | created-by-display-name | Display name of the user that created the item. | string | John Doe | **Y** |
 | created-by-id | ID of the user that created the item. | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
@@ -1049,14 +1050,14 @@ Here are the possible system metadata items for the onedrive backend.
 | last-modified-by-display-name | Display name of the user that last modified the item. | string | John Doe | **Y** |
 | last-modified-by-id | ID of the user that last modified the item. | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
 | malware-detected | Whether OneDrive has detected that the item contains malware. | boolean | true | **Y** |
-| mtime | Time of last modification with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | N |
+| mtime | Time of last modification with S accuracy. | RFC 3339 | 2006-01-02T15:04:05Z | N |
 | package-type | If present, indicates that this item is a package instead of a folder or file. Packages are treated like files in some contexts and folders in others. | string | oneNote | **Y** |
 | permissions | Permissions in a JSON dump of OneDrive format. Enable with --onedrive-metadata-permissions. Properties: id, grantedTo, grantedToIdentities, invitation, inheritedFrom, link, roles, shareId | JSON | {} | N |
 | shared-by-id | ID of the user that shared the item (if shared). | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
 | shared-owner-id | ID of the owner of the shared item (if shared). | string | 48d31887-5fad-4d73-a9f5-3c356e68a038 | **Y** |
 | shared-scope | If shared, indicates the scope of how the item is shared: anonymous, organization, or users. | string | users | **Y** |
-| shared-time | Time when the item was shared, with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
-| utime | Time of upload with S accuracy (mS for OneDrive Personal). | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
+| shared-time | Time when the item was shared, with S accuracy. | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
+| utime | Time of upload with S accuracy. | RFC 3339 | 2006-01-02T15:04:05Z | **Y** |
 
 See the [metadata](/docs/#metadata) docs for more info.
 
@@ -1154,11 +1155,6 @@ Or you can set the `no_versions` parameter to `true` and rclone will
 remove versions after operations which create new versions. This takes
 extra transactions so only enable it if you need it.
 
-**Note** At the time of writing Onedrive Personal creates versions
-(but not for setting the modification time) but the API for removing
-them returns "API not found" so cleanup and `no_versions` should not
-be used on Onedrive Personal.
-
 ### Disabling versioning
 
 Starting October 2018, users will no longer be able to
@@ -1212,8 +1208,6 @@ or `--dry-run` which is a great way to see what it would do.
 rclone cleanup --interactive remote:path/subdir # interactively remove all old version for path/subdir
 rclone cleanup remote:path/subdir               # unconditionally remove all old version for path/subdir
 ```
-
-**NB** Onedrive personal can't currently delete versions
 
 ## Troubleshooting
 
@@ -1317,6 +1311,27 @@ Shared with me files is not supported by rclone
    behaves like a normal folder/file.
     ![in_my_files](https://i.imgur.com/0S8H3li.png "Screenshot (My Files)")
     ![rclone_mount](https://i.imgur.com/2Iq66sW.png "Screenshot (rclone mount)")
+
+Listing such a shortcut may still fail with
+
+```text
+invalidRequest: The provided drive id appears to be malformed, or does not represent a valid drive.
+```
+
+as the drive it points to can't always be read with the drive ID the
+API supplies. `Personal Vault` is a shortcut of the same kind and
+fails to list in the same way, though it reports
+`invalidResourceId: ObjectHandle is Invalid`.
+
+A normal listing reports the error for that folder and carries on, so
+the rest of the drive is still listed, and excluding the folder (for
+example with `--exclude "/Personal Vault/**"`) avoids the error.
+
+A recursive listing with `--fast-list` stops at the first error, so
+listing the root of a drive which has one of these shortcuts in it
+will fail. Filters don't help here as the folder is listed by the
+backend before the filters are applied - use `--disable ListR` (or
+don't use `--fast-list`) on such a drive.
 
 ### Live Photos uploaded from iOS (small video clips in .heic files)
 

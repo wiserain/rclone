@@ -323,7 +323,7 @@ Time stamps and file contents for `RCLONE_TEST` files are not important, just
 the names and locations. If you have symbolic links in your sync tree it is
 recommended to place `RCLONE_TEST` files in the linked-to directory tree to
 protect against bisync assuming a bunch of deleted files if the linked-to tree
-should not be accessible. See also the [--check-filename](--check-filename) flag.
+should not be accessible. See also the [--check-filename](#check-filename) flag.
 
 ### --check-filename
 
@@ -1056,15 +1056,16 @@ The following backends have known issues that need more investigation:
 - `TestHuaweiDrive` (`huaweidrive`)
   - [`TestBisyncRemoteLocal/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncRemoteLocal/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
-  - [`TestBisyncRemoteLocal/normalization`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncLocalRemote/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
   - [`TestBisyncLocalRemote/extended_filenames`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
-  - [3 more](https://pub.rclone.org/integration-tests/current/)
+  - [`TestBisyncRemoteRemote/ext_paths`](https://pub.rclone.org/integration-tests/current/huaweidrive-cmd.bisync-TestHuaweiDrive-1.txt)
+  - [2 more](https://pub.rclone.org/integration-tests/current/)
 - `TestPcloud` (`pcloud`)
-  - [`TestBisyncRemoteLocal/createemptysrcdirs`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
+  - [`TestBisyncLocalRemote/check_access_filters`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
+  - [`TestBisyncLocalRemote/createemptysrcdirs`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
   - [`TestBisyncLocalRemote/resolve`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
   - [`TestBisyncRemoteRemote/createemptysrcdirs`](https://pub.rclone.org/integration-tests/current/pcloud-cmd.bisync-TestPcloud-1.txt)
-- Updated: 2026-09-04-010006
+- Updated: 2026-10-08-010019
 <!--- end list_failures - DO NOT EDIT THIS SECTION - use make commanddocs --->
 
 The following backends either have not been tested recently or have known issues
@@ -1975,7 +1976,7 @@ for performance improvements and less
 options as in `sync`)
 - Equality checks before a sync conflict rename now fall back to `cryptcheck`
 (when possible) or `--download`,
-instead of of `--size-only`, when `check` is not available.
+instead of `--size-only`, when `check` is not available.
 - Bisync no longer fails to find the correct listing file when configs are
 overridden with backend-specific flags.
 - Bisync now fully supports comparing based on any combination of size, modtime,
