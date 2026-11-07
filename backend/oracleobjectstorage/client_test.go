@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -62,9 +63,7 @@ func TestGzipEncoding(t *testing.T) {
 			"namespace": "test",
 			"endpoint":  srv.URL,
 		}
-		for k, v := range extraConfig {
-			m[k] = v
-		}
+		maps.Copy(m, extraConfig)
 		fsInfo, err := NewFs(ctx, "TestOOSGzip", "bucket", m)
 		require.NoError(t, err)
 		return fsInfo.(*Fs)
@@ -102,4 +101,35 @@ func TestGzipEncoding(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "", md5sum)
 	})
+}
+
+// serviceError is a minimal common.ServiceError for shouldRetry
+type serviceError struct {
+	status int
+	code   string
+}
+
+func (e serviceError) Error() string           { return e.code }
+func (e serviceError) GetHTTPStatusCode() int  { return e.status }
+func (e serviceError) GetMessage() string      { return e.code }
+func (e serviceError) GetCode() string         { return e.code }
+func (e serviceError) GetOpcRequestID() string { return "" }
+
+func TestShouldRetryServiceError(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		status int
+		code   string
+		want   bool
+	}{
+		{http.StatusConflict, "ConcurrentObjectUpdate", true},
+		{http.StatusConflict, "BucketAlreadyExists", false},
+		{http.StatusRequestTimeout, "RequestTimeout", true},
+		{http.StatusNotFound, "ObjectNotFound", false},
+	} {
+		err := serviceError{status: test.status, code: test.code}
+		retry, gotErr := shouldRetry(ctx, nil, err)
+		assert.Equal(t, test.want, retry, test.code)
+		assert.Equal(t, error(err), gotErr)
+	}
 }

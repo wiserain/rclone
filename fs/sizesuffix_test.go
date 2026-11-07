@@ -116,6 +116,11 @@ func TestSizeSuffixSet(t *testing.T) {
 		{"10G", 10 * 1024 * 1024 * 1024, false},
 		{"10T", 10 * 1024 * 1024 * 1024 * 1024, false},
 		{"10P", 10 * 1024 * 1024 * 1024 * 1024 * 1024, false},
+		{"7E", 7 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024, false},
+		{"8E", 0, true},
+		{"8Ei", 0, true},
+		{"8EiB", 0, true},
+		{"10E", 0, true},
 		{"off", -1, false},
 		{"OFF", -1, false},
 		{"", 0, true},
@@ -126,6 +131,8 @@ func TestSizeSuffixSet(t *testing.T) {
 		{"1i", 0, true},
 		{"1iB", 0, true},
 		{"1MB", 0, true},
+		{"nank", 0, true},
+		{"NaNM", 0, true},
 	} {
 		ss := SizeSuffix(0)
 		err := ss.Set(test.in)

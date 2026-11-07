@@ -1,6 +1,7 @@
 package webdav_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,15 +11,100 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/rclone/rclone/backend/local"
 	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/obscure"
+	"github.com/rclone/rclone/fs/object"
+	"github.com/rclone/rclone/fs/operations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChunkedUploadRetriesOnlyFailedChunk(t *testing.T) {
+	tests := []struct {
+		name       string
+		failChunk1 bool
+		wantError  bool
+		wantChunk2 int32
+	}{
+		{name: "retry failed chunk", wantChunk2: 1},
+		{name: "stop after chunk retry budget", failChunk1: true, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var chunk0, chunk1, chunk2 atomic.Int32
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/dav/uploads/alice/"):
+					switch {
+					case strings.HasSuffix(r.URL.Path, "000000000000000-000000000000003"):
+						chunk0.Add(1)
+					case strings.HasSuffix(r.URL.Path, "000000000000004-000000000000007"):
+						if test.failChunk1 || chunk1.Add(1) == 1 {
+							if test.failChunk1 {
+								chunk1.Add(1)
+							}
+							w.WriteHeader(http.StatusServiceUnavailable)
+							return
+						}
+					case strings.HasSuffix(r.URL.Path, "000000000000008-000000000000009"):
+						chunk2.Add(1)
+					default:
+						t.Errorf("unexpected chunk path %q", r.URL.Path)
+					}
+					w.WriteHeader(http.StatusCreated)
+				case r.Method == "MKCOL":
+					w.WriteHeader(http.StatusCreated)
+				case r.Method == "MOVE":
+					w.WriteHeader(http.StatusCreated)
+				case r.Method == "DELETE":
+					w.WriteHeader(http.StatusNotFound)
+				case r.Method == "PROPFIND":
+					w.WriteHeader(http.StatusMultiStatus)
+					_, _ = io.WriteString(w, `<d:multistatus xmlns:d="DAV:"><d:response><d:href>/file</d:href><d:propstat><d:prop><d:getcontentlength>10</d:getcontentlength><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`)
+				case r.Method == "PATCH":
+					w.Header().Set("OC-Checksum", "SHA1:0000000000000000000000000000000000000000")
+					w.WriteHeader(http.StatusOK)
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})
+			ts := httptest.NewServer(handler)
+			defer ts.Close()
+			configfile.Install()
+			ctx, ci := fs.AddConfig(context.Background())
+			ci.LowLevelRetries = 2
+			m := configmap.Simple{
+				"type":                 "webdav",
+				"url":                  ts.URL + "/remote.php/dav/files/alice",
+				"vendor":               "nextcloud",
+				"nextcloud_chunk_size": "4B",
+			}
+			f, err := webdav.NewFs(ctx, remoteName, "", m)
+			require.NoError(t, err)
+			src := object.NewStaticObjectInfo("file", time.Now(), 10, true, nil, f)
+			body := []byte("abcdefghij")
+			err = operations.Retry(ctx, src, ci.LowLevelRetries, func() error {
+				_, err := f.Put(ctx, bytes.NewReader(body), src)
+				return err
+			})
+			if test.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.EqualValues(t, 1, chunk0.Load(), "successful first chunk should not be uploaded again")
+			assert.EqualValues(t, 2, chunk1.Load(), "only the failed chunk should be retried")
+			assert.EqualValues(t, test.wantChunk2, chunk2.Load(), "later chunks should not upload after failure")
+		})
+	}
+}
 
 var (
 	remoteName = "TestWebDAV"
@@ -122,20 +208,6 @@ func TestListAllAuthRedirect(t *testing.T) {
 	assert.GreaterOrEqual(t, targetHits, 1, "redirect target should receive the request")
 	assert.NotEmpty(t, targetAuth, "Authorization header should be preserved across redirect")
 }
-
-// fileInfoResponse is a PROPFIND response describing a single file.
-const fileInfoResponse = `<d:multistatus xmlns:d="DAV:">
-<d:response>
- <d:href>/file.txt</d:href>
- <d:propstat>
-  <d:prop>
-   <d:getcontentlength>10</d:getcontentlength>
-   <d:resourcetype/>
-  </d:prop>
-  <d:status>HTTP/1.1 200 OK</d:status>
- </d:propstat>
-</d:response>
-</d:multistatus>`
 
 // redirectTestHeaders are the headers option for the redirect tests.
 // The one starting with "*" is sent without canonicalising.
@@ -263,6 +335,135 @@ func TestReservedCharactersInPathAreEscaped(t *testing.T) {
 	assert.NotContains(t, capturedPath, "my;test", "raw semicolons should not appear in path")
 }
 
+const fileInfoResponse = `<d:multistatus xmlns:d="DAV:">
+<d:response>
+ <d:href>/file.txt</d:href>
+ <d:propstat>
+  <d:prop>
+   <d:getcontentlength>10</d:getcontentlength>
+   <d:resourcetype/>
+  </d:prop>
+  <d:status>HTTP/1.1 200 OK</d:status>
+ </d:propstat>
+</d:response>
+</d:multistatus>`
+
+func prepareFileObject(ctx context.Context, t *testing.T, getHandler http.HandlerFunc) (fs.Object, func()) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusMultiStatus)
+			_, err := fmt.Fprint(w, fileInfoResponse)
+			require.NoError(t, err)
+			return
+		}
+		if r.Method == http.MethodGet {
+			getHandler(w, r)
+			return
+		}
+		http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+	})
+	ts := httptest.NewServer(handler)
+
+	configfile.Install()
+	f, err := webdav.NewFs(ctx, remoteName, "", configmap.Simple{
+		"type": "webdav",
+		"url":  ts.URL,
+	})
+	require.NoError(t, err)
+	o, err := f.NewObject(ctx, "file.txt")
+	require.NoError(t, err)
+	return o, ts.Close
+}
+
+func TestOpenDoesNotRetryIgnoredRange(t *testing.T) {
+	var getRequests atomic.Int32
+	o, tidy := prepareFileObject(context.Background(), t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "bytes=2-4", r.Header.Get("Range"))
+		getRequests.Add(1)
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, err := io.WriteString(w, "abcdefghij")
+		require.NoError(t, err)
+	})
+	defer tidy()
+
+	in, err := o.Open(context.Background(), &fs.RangeOption{Start: 2, End: 4})
+	assert.Nil(t, in)
+	assert.ErrorIs(t, err, fs.ErrorRangeIgnored)
+	assert.Equal(t, int32(1), getRequests.Load())
+}
+
+func TestOpenRetriesMismatchedContentRange(t *testing.T) {
+	var getRequests atomic.Int32
+	o, tidy := prepareFileObject(context.Background(), t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "bytes=2-4", r.Header.Get("Range"))
+		if getRequests.Add(1) == 1 {
+			w.Header().Set("Content-Length", "3")
+			w.Header().Set("Content-Range", "bytes 0-2/10")
+			w.WriteHeader(http.StatusPartialContent)
+			_, err := io.WriteString(w, "abc")
+			require.NoError(t, err)
+			return
+		}
+		w.Header().Set("Content-Length", "3")
+		w.Header().Set("Content-Range", "bytes 2-4/10")
+		w.WriteHeader(http.StatusPartialContent)
+		_, err := io.WriteString(w, "cde")
+		require.NoError(t, err)
+	})
+	defer tidy()
+
+	in, err := o.Open(context.Background(), &fs.RangeOption{Start: 2, End: 4})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, in.Close()) }()
+	contents, err := io.ReadAll(in)
+	require.NoError(t, err)
+	assert.Equal(t, "cde", string(contents))
+	assert.Equal(t, int32(2), getRequests.Load())
+}
+
+func TestCopyFallsBackWhenRangeIgnored(t *testing.T) {
+	var rangeRequests atomic.Int32
+	var fullRequests atomic.Int32
+	ctx, ci := fs.AddConfig(context.Background())
+	ci.LowLevelRetries = 2
+	ci.MultiThreadStreams = 2
+	ci.MultiThreadSet = true
+	ci.MultiThreadCutoff = 1
+	ci.MultiThreadChunkSize = 4
+
+	src, tidy := prepareFileObject(ctx, t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "" {
+			fullRequests.Add(1)
+		} else {
+			rangeRequests.Add(1)
+		}
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, err := io.WriteString(w, "abcdefghij")
+		require.NoError(t, err)
+	})
+	defer tidy()
+
+	dstFs, err := local.NewFs(ctx, "local", t.TempDir(), configmap.Simple{
+		"no_preallocate": "true",
+		"no_sparse":      "true",
+	})
+	require.NoError(t, err)
+	dst, err := operations.Copy(ctx, dstFs, nil, "file.txt", src)
+	require.NoError(t, err)
+
+	in, err := dst.Open(ctx)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, in.Close()) }()
+	contents, err := io.ReadAll(in)
+	require.NoError(t, err)
+	assert.Equal(t, "abcdefghij", string(contents))
+	assert.Positive(t, rangeRequests.Load())
+	assert.LessOrEqual(t, rangeRequests.Load(), int32(3))
+	assert.Equal(t, int32(1), fullRequests.Load())
+}
+
 // TestListAllRetryDoesNotConcatenate verifies that when a listing PROPFIND
 // fails after having partially decoded and is retried, the final listing is
 // exactly the retried response, with no entries carried over from the
@@ -377,4 +578,41 @@ func TestNotFoundInMultistatus(t *testing.T) {
 
 	_, err = f.List(ctx, "missing")
 	assert.Equal(t, fs.ErrorDirNotFound, err)
+}
+
+// TestNextcloudPublicShareHeader checks X-Requested-With is sent for
+// Nextcloud public shares unless the user overrides it.
+func TestNextcloudPublicShareHeader(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		path    string
+		headers string
+		want    string
+	}{
+		{"public share", "/public.php/dav/files/token", "", "XMLHttpRequest"},
+		{"user override", "/public.php/dav/files/token", "X-Requested-With,custom", "custom"},
+		{"regular nextcloud", "/remote.php/dav/files/user", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got atomic.Value
+			got.Store("")
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got.Store(r.Header.Get("X-Requested-With"))
+				w.WriteHeader(http.StatusMultiStatus)
+				_, _ = io.WriteString(w, `<d:multistatus xmlns:d="DAV:"></d:multistatus>`)
+			}))
+			defer ts.Close()
+			configfile.Install()
+			m := configmap.Simple{
+				"type":    "webdav",
+				"url":     ts.URL + test.path,
+				"vendor":  "nextcloud",
+				"headers": test.headers,
+			}
+			f, err := webdav.NewFs(context.Background(), remoteName, "", m)
+			require.NoError(t, err)
+			_, _ = f.List(context.Background(), "")
+			assert.Equal(t, test.want, got.Load().(string))
+		})
+	}
 }

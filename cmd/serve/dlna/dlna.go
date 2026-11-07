@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,7 +20,6 @@ import (
 	"github.com/anacrolix/dms/soap"
 	"github.com/anacrolix/dms/ssdp"
 	"github.com/anacrolix/dms/upnp"
-	"github.com/anacrolix/log"
 	"github.com/rclone/rclone/cmd"
 	"github.com/rclone/rclone/cmd/serve"
 	"github.com/rclone/rclone/cmd/serve/dlna/data"
@@ -307,8 +307,7 @@ func (s *server) serviceControlHandler(w http.ResponseWriter, r *http.Request) {
 	var env soap.Envelope
 	r.Body = http.MaxBytesReader(w, r.Body, maxSOAPBodySize)
 	if err := xml.NewDecoder(r.Body).Decode(&env); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			http.Error(w, "SOAP request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -495,7 +494,7 @@ func (s *server) ssdpInterface(intf net.Interface) {
 		Server:         serverField,
 		UUID:           s.RootDeviceUUID,
 		NotifyInterval: s.AnnounceInterval,
-		Logger:         log.Default,
+		Logger:         slog.Default(),
 	}
 
 	// An interface with these flags should be valid for SSDP.

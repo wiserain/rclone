@@ -678,12 +678,20 @@ to make proxy to many different sftp backends, you could make the
 in the output and the user to `user`. For security you'd probably want
 to restrict the `host` to a limited list.
 
-An internal cache of backends is keyed on the `user`, a hash of the
-`pass` or `public_key`, and the `client_ip`.  This means that if a
-user's password or public-key changes, the client connects from a new IP
-address, or the proxy returns different config parameters (eg a rotated
-`api_key`), a fresh backend will be created on the next request rather
-than the cached one being reused.
+An internal cache of backends is keyed on the `user`, the kind of
+credential presented, a hash of the `pass` or `public_key`, and the
+`client_ip`.  This means that if a user's password or public-key
+changes, the client connects from a new IP address, or the proxy
+returns different config parameters (eg a rotated `api_key`), a fresh
+backend will be created on the next request rather than the cached one
+being reused.  A backend created for a public key login is never
+reused for a password login, so a public key cannot be sent as a
+password to skip the program.
+
+A cached answer is checked with the program again after 5 minutes even
+if the user is in constant use, so revoking a user in the program
+takes effect within 5 minutes. For `serve sftp` this applies to new
+logins - an existing connection is not closed.
 
 This can be used to build general purpose proxies to any kind of
 backend that rclone supports.

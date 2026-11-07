@@ -202,6 +202,13 @@ to be used within the template to server pages:
 | .Sort       |              | The current sort used. This is changeable via '?sort=' parameter. Possible values: namedirfirst, name, size, time (default namedirfirst). |
 | .Order      |              | The current ordering used. This is changeable via '?order=' parameter. Possible values: asc, desc (default asc). |
 | .Query      |              | Currently unused. |
+| .Path       |              | The path of the directory from the root with leading and trailing slashes, e.g. '/dir/'. |
+| .IsRoot     |              | Boolean for if this is the root directory. |
+| .UpLink     |              | The link to the parent directory. |
+| .Static     |              | Boolean for if the listing is being written as a static page by rclone index. |
+| .NumDirs    |              | The number of directories in the listing. |
+| .NumFiles   |              | The number of files in the listing. |
+| .TotalSize  |              | The total size in bytes of the files in the listing. |
 | .Breadcrumb |              | Allows for creating a relative navigation. |
 |             | .Link        | The link of the Text relative to the root. |
 |             | .Text        | The Name of the directory. |
@@ -211,6 +218,7 @@ to be used within the template to server pages:
 |             | .IsDir       | Boolean for if an entry is a directory or not. |
 |             | .Size        | Size in bytes of the entry. |
 |             | .ModTime     | The UTC timestamp of an entry. |
+|             | .MimeType    | The MIME type of an entry guessed from its name, or 'inode/directory'. |
 
 The server also makes the following functions available so that they can be used
 within the template. These functions help extend the options for dynamic
@@ -250,6 +258,10 @@ touch htpasswd
 htpasswd -B htpasswd user
 htpasswd -B htpasswd anotherUser
 ```
+
+Use the same hash format and cost for every entry in the file. If the
+entries differ, the time taken to reject a wrong password can reveal
+which usernames exist.
 
 The password file can be updated while rclone is running.
 
@@ -866,12 +878,20 @@ to make proxy to many different sftp backends, you could make the
 in the output and the user to `user`. For security you'd probably want
 to restrict the `host` to a limited list.
 
-An internal cache of backends is keyed on the `user`, a hash of the
-`pass` or `public_key`, and the `client_ip`.  This means that if a
-user's password or public-key changes, the client connects from a new IP
-address, or the proxy returns different config parameters (eg a rotated
-`api_key`), a fresh backend will be created on the next request rather
-than the cached one being reused.
+An internal cache of backends is keyed on the `user`, the kind of
+credential presented, a hash of the `pass` or `public_key`, and the
+`client_ip`.  This means that if a user's password or public-key
+changes, the client connects from a new IP address, or the proxy
+returns different config parameters (eg a rotated `api_key`), a fresh
+backend will be created on the next request rather than the cached one
+being reused.  A backend created for a public key login is never
+reused for a password login, so a public key cannot be sent as a
+password to skip the program.
+
+A cached answer is checked with the program again after 5 minutes even
+if the user is in constant use, so revoking a user in the program
+takes effect within 5 minutes. For `serve sftp` this applies to new
+logins - an existing connection is not closed.
 
 This can be used to build general purpose proxies to any kind of
 backend that rclone supports.

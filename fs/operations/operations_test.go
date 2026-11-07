@@ -39,7 +39,9 @@ import (
 	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/fserrors"
 	"github.com/rclone/rclone/fs/fshttp"
+	"github.com/rclone/rclone/fs/fspath"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/fstest/fstests"
@@ -48,6 +50,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Some times used in the tests
@@ -66,9 +69,11 @@ func TestMkdir(t *testing.T) {
 	ctx := context.Background()
 	r := fstest.NewRun(t)
 
+	checks := accounting.GlobalStats().GetChecks()
 	err := operations.Mkdir(ctx, r.Fremote, "")
 	require.NoError(t, err)
 	fstest.CheckListing(t, r.Fremote, []fstest.Item{})
+	assert.Equal(t, checks+1, accounting.GlobalStats().GetChecks(), "Mkdir should be counted as a check")
 
 	err = operations.Mkdir(ctx, r.Fremote, "")
 	require.NoError(t, err)
@@ -631,6 +636,8 @@ func TestCat(t *testing.T) {
 		{0, 5, "", "ABCDE", "01234"},
 		{-3, -1, "", "HIJ", "678"},
 		{1, 3, "", "BCD", "123"},
+		{-10, 3, "", "ABC", "012"},
+		{-12, 5, "", "ABCDE", "01234"},
 		{0, -1, "\n", "ABCDEFGHIJ", "012345678"},
 	} {
 		var buf bytes.Buffer
@@ -1079,6 +1086,25 @@ func TestMoveFileWithIgnoreExisting(t *testing.T) {
 	r.CheckRemoteItems(t, file1)
 }
 
+func TestMoveFileImmutable(t *testing.T) {
+	ctx := context.Background()
+	ctx, ci := fs.AddConfig(ctx)
+	r := fstest.NewRun(t)
+	defer accounting.GlobalStats().ResetCounters()
+
+	ci.Immutable = true
+
+	file1 := r.WriteObject(ctx, "existing", "potato", t1)
+	r.CheckRemoteItems(t, file1)
+
+	// Should fail with ErrorImmutableModified and leave the source in place
+	file2 := r.WriteFile("existing", "tomatoes", t2)
+	err := operations.MoveFile(ctx, r.Fremote, r.Flocal, file2.Path, file2.Path)
+	assert.ErrorIs(t, err, fs.ErrorImmutableModified)
+	r.CheckLocalItems(t, file2)
+	r.CheckRemoteItems(t, file1)
+}
+
 func TestCaseInsensitiveMoveFile(t *testing.T) {
 	ctx := context.Background()
 	r := fstest.NewRun(t)
@@ -1112,6 +1138,75 @@ func TestCaseInsensitiveMoveFile(t *testing.T) {
 	require.NoError(t, err)
 	r.CheckLocalItems(t)
 	r.CheckRemoteItems(t, file2Capitalized)
+}
+
+func TestMoveOntoItself(t *testing.T) {
+	ctx := context.Background()
+	for _, viaSubdir := range []bool{false, true} {
+		for _, disableMove := range []bool{false, true} {
+			t.Run(fmt.Sprintf("viaSubdir=%v,disableMove=%v", viaSubdir, disableMove), func(t *testing.T) {
+				r := fstest.NewRunIndividual(t)
+				file1 := r.WriteObject(ctx, "sub/file1", "file1 contents", t1)
+				src := fstest.NewObject(ctx, t, r.Fremote, file1.Path)
+
+				var err error
+				fdst, remote := r.Fremote, src.Remote()
+				if viaSubdir {
+					fdst, err = fs.NewFs(ctx, fspath.JoinRootPath(fs.ConfigStringFull(r.Fremote), "sub"))
+					require.NoError(t, err)
+					remote = "file1"
+				}
+				if disableMove {
+					fdst.Features().Disable("Move")
+				}
+				_, err = operations.Move(ctx, fdst, nil, remote, src)
+				require.NoError(t, err)
+				r.CheckRemoteItems(t, file1)
+			})
+		}
+	}
+}
+
+func TestMoveUnicodeEquivalentWithoutServerSideMove(t *testing.T) {
+	ctx := context.Background()
+	r := fstest.NewRunIndividual(t)
+	r.Fremote.Features().Disable("Move")
+
+	nfd := norm.NFD.String("sub/équivalent.txt")
+	nfc := norm.NFC.String("sub/équivalent.txt")
+	file1 := fstest.NewItem(nfd, "file1 contents", t1)
+	_, err := r.Fremote.Put(ctx, bytes.NewBufferString("file1 contents"), object.NewStaticObjectInfo(nfd, t1, file1.Size, true, nil, nil))
+	if err != nil {
+		t.Skipf("remote can't store an NFD name: %v", err)
+	}
+	src, err := r.Fremote.NewObject(ctx, nfd)
+	if errors.Is(err, fs.ErrorObjectNotFound) {
+		t.Skip("remote doesn't keep an NFD name as written")
+	}
+	require.NoError(t, err)
+
+	_, err = operations.Move(ctx, r.Fremote, nil, nfc, src)
+	require.NoError(t, err)
+	file1.Path = nfc
+	r.CheckRemoteItems(t, file1)
+}
+
+func TestCaseInsensitiveMoveWithoutServerSideMove(t *testing.T) {
+	ctx := context.Background()
+	r := fstest.NewRunIndividual(t)
+	if !r.Fremote.Features().CaseInsensitive {
+		t.Skip("remote is case sensitive")
+	}
+	r.Fremote.Features().Disable("Move")
+
+	file1 := r.WriteObject(ctx, "sub/file1", "file1 contents", t1)
+	src, err := r.Fremote.NewObject(ctx, "sub/file1")
+	require.NoError(t, err)
+
+	_, err = operations.Move(ctx, r.Fremote, nil, "sub/File1", src)
+	require.NoError(t, err)
+	file1.Path = "sub/File1"
+	r.CheckRemoteItems(t, file1)
 }
 
 func TestCaseInsensitiveMoveFileDryRun(t *testing.T) {
@@ -1179,7 +1274,7 @@ func (i *testFsInfo) Precision() time.Duration { return i.precision }
 // Returns the supported hash types of the filesystem
 func (i *testFsInfo) Hashes() hash.Set { return i.hashes }
 
-// Returns the supported hash types of the filesystem
+// Features returns the optional features of this Fs.
 func (i *testFsInfo) Features() *fs.Features { return &i.features }
 
 func TestSameConfig(t *testing.T) {
@@ -1899,6 +1994,97 @@ func TestRcatSizeUploadHeaders(t *testing.T) {
 	assert.True(t, found, "X-Upload-Header not found in options passed to Put")
 }
 
+// corruptingFs wraps an fs.Fs, storing data which doesn't match the
+// data streamed into Put.
+type corruptingFs struct {
+	fs.Fs
+}
+
+func (f *corruptingFs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	n, err := io.Copy(io.Discard, in)
+	if err != nil {
+		return nil, err
+	}
+	return f.Fs.Put(ctx, bytes.NewReader(bytes.Repeat([]byte("!"), int(n))), src, options...)
+}
+
+// noHashFs wraps an fs.Fs, reporting that it supports no hashes.
+type noHashFs struct {
+	fs.Fs
+}
+
+func (f *noHashFs) Hashes() hash.Set {
+	return hash.NewHashSet()
+}
+
+// truncatingFs wraps an fs.Fs, storing one byte less than was streamed
+// into Put and reporting that it supports no hashes, so only the size
+// can reveal the corruption.
+type truncatingFs struct {
+	fs.Fs
+}
+
+func (f *truncatingFs) Hashes() hash.Set {
+	return hash.NewHashSet()
+}
+
+func (f *truncatingFs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options ...fs.OpenOption) (fs.Object, error) {
+	n, err := io.Copy(io.Discard, in)
+	if err != nil {
+		return nil, err
+	}
+	short := bytes.Repeat([]byte("!"), int(n)-1)
+	info := object.NewStaticObjectInfo(src.Remote(), src.ModTime(ctx), int64(len(short)), true, nil, f.Fs)
+	return f.Fs.Put(ctx, bytes.NewReader(short), info, options...)
+}
+
+func TestRcatSizeChecksum(t *testing.T) {
+	const body = "------------------------------------------------------------"
+
+	t.Run("Corrupted", func(t *testing.T) {
+		ctx := context.Background()
+		r := fstest.NewRun(t)
+		if r.Fremote.Hashes().Count() == 0 {
+			t.Skip("Skipping as destination doesn't support hashes")
+		}
+		bodyReader := io.NopCloser(strings.NewReader(body))
+		_, err := operations.RcatSize(ctx, &corruptingFs{Fs: r.Fremote}, "potato1", bodyReader, int64(len(body)), t1, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "corrupted on transfer")
+		r.CheckRemoteItems(t)
+	})
+
+	// A destination which reports no hashes can only be checked by its
+	// size, so the size has to be compared as well as the hash.
+	t.Run("SizeDiffers", func(t *testing.T) {
+		ctx := context.Background()
+		r := fstest.NewRun(t)
+		bodyReader := io.NopCloser(strings.NewReader(body))
+		_, err := operations.RcatSize(ctx, &truncatingFs{Fs: r.Fremote}, "potato4", bodyReader, int64(len(body)), t1, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "corrupted on transfer: sizes differ")
+		r.CheckRemoteItems(t)
+	})
+
+	t.Run("IgnoreChecksum", func(t *testing.T) {
+		ctx, ci := fs.AddConfig(context.Background())
+		ci.IgnoreChecksum = true
+		r := fstest.NewRun(t)
+		bodyReader := io.NopCloser(strings.NewReader(body))
+		_, err := operations.RcatSize(ctx, &corruptingFs{Fs: r.Fremote}, "potato2", bodyReader, int64(len(body)), t1, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("NoHashes", func(t *testing.T) {
+		ctx := context.Background()
+		r := fstest.NewRun(t)
+		bodyReader := io.NopCloser(strings.NewReader(body))
+		obj, err := operations.RcatSize(ctx, &noHashFs{Fs: r.Fremote}, "potato3", bodyReader, int64(len(body)), t1, nil)
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(body)), obj.Size())
+	})
+}
+
 func TestTouchDir(t *testing.T) {
 	ctx := context.Background()
 	r := fstest.NewRun(t)
@@ -1945,9 +2131,11 @@ func TestMkdirMetadata(t *testing.T) {
 		t.Skip("Skipping test as remote does not support MkdirMetadata")
 	}
 
+	updatedDirs := statsUpdatedDirs(t)
 	newDst, err := operations.MkdirMetadata(ctx, r.Fremote, name, testMetadata)
 	require.NoError(t, err)
 	require.NotNil(t, newDst)
+	assert.Equal(t, updatedDirs+1, statsUpdatedDirs(t), "MkdirMetadata should be counted as an updated dir")
 
 	require.True(t, features.ReadDirMetadata, "Expecting ReadDirMetadata to be supported if MkdirMetadata is supported")
 
@@ -1958,13 +2146,17 @@ func TestMkdirMetadata(t *testing.T) {
 
 func TestMkdirModTime(t *testing.T) {
 	const name = "directory with modtime"
-	ctx := context.Background()
+	ctx, ci := fs.AddConfig(context.Background())
 	r := fstest.NewRun(t)
 	if r.Fremote.Features().DirSetModTime == nil && r.Fremote.Features().MkdirMetadata == nil {
 		t.Skip("Skipping test as remote does not support DirSetModTime or MkdirMetadata")
 	}
+	updatedDirs := statsUpdatedDirs(t)
+	checks := accounting.GlobalStats().GetChecks()
 	newDst, err := operations.MkdirModTime(ctx, r.Fremote, name, t2)
 	require.NoError(t, err)
+	assert.Equal(t, updatedDirs+1, statsUpdatedDirs(t), "MkdirModTime should be counted as an updated dir")
+	realChecks := accounting.GlobalStats().GetChecks() - checks
 
 	// Check the returned directory and one read from the listing
 	// newDst may be nil here depending on how the modtime was set
@@ -1972,6 +2164,25 @@ func TestMkdirModTime(t *testing.T) {
 		fstest.CheckDirModTime(ctx, t, r.Fremote, newDst, t2)
 	}
 	fstest.CheckDirModTime(ctx, t, r.Fremote, fstest.NewDirectory(ctx, t, r.Fremote, name), t2)
+
+	// Check that --dry-run counts the same number of checks as the
+	// real run but doesn't update any dirs
+	updatedDirs = statsUpdatedDirs(t)
+	checks = accounting.GlobalStats().GetChecks()
+	ci.DryRun = true
+	newDst, err = operations.MkdirModTime(ctx, r.Fremote, "dry run "+name, t2)
+	ci.DryRun = false
+	require.NoError(t, err)
+	require.Nil(t, newDst)
+	assert.Equal(t, realChecks, accounting.GlobalStats().GetChecks()-checks, "--dry-run should count the same checks as the real run")
+	assert.Equal(t, updatedDirs, statsUpdatedDirs(t), "--dry-run should not count updated dirs")
+}
+
+// statsUpdatedDirs reads the updatedDirs stat from the global stats
+func statsUpdatedDirs(t *testing.T) int64 {
+	out, err := accounting.GlobalStats().RemoteStats(true)
+	require.NoError(t, err)
+	return out["updatedDirs"].(int64)
 }
 
 func TestCopyDirMetadata(t *testing.T) {
@@ -1991,9 +2202,11 @@ func TestCopyDirMetadata(t *testing.T) {
 	require.NotNil(t, newSrc)
 
 	// First try with the directory not existing
+	updatedDirs := statsUpdatedDirs(t)
 	newDst, err := operations.CopyDirMetadata(ctx, r.Fremote, nil, nameNonExistent, newSrc)
 	require.NoError(t, err)
 	require.NotNil(t, newDst)
+	assert.Equal(t, updatedDirs+1, statsUpdatedDirs(t), "CopyDirMetadata should be counted as an updated dir")
 
 	// Check the returned directory and one read from the listing
 	fstest.CheckEntryMetadata(ctx, t, r.Fremote, newDst, testMetadata)
@@ -2029,17 +2242,24 @@ func TestSetDirModTime(t *testing.T) {
 	ci.NoUpdateDirModTime = false
 
 	// First try with the directory not existing - should return an error
+	errs := accounting.GlobalStats().GetErrors()
 	newDst, err = operations.SetDirModTime(ctx, r.Fremote, nil, "set modtime on non existent directory", t2)
 	require.Error(t, err)
 	require.Nil(t, newDst)
+	assert.Equal(t, errs+1, accounting.GlobalStats().GetErrors(), "the error should be counted")
+	assert.True(t, fserrors.IsCounted(err), "the returned error should be marked as counted")
 
 	// Then try with the directory existing
 	require.NoError(t, r.Fremote.Mkdir(ctx, name))
 	existingDir := fstest.NewDirectory(ctx, t, r.Fremote, name)
 
+	checks := accounting.GlobalStats().GetChecks()
+	updatedDirs := statsUpdatedDirs(t)
 	newDst, err = operations.SetDirModTime(ctx, r.Fremote, existingDir, "SHOULD BE IGNORED", t2)
 	require.NoError(t, err)
 	require.NotNil(t, newDst)
+	assert.Equal(t, checks+1, accounting.GlobalStats().GetChecks(), "SetDirModTime should be counted as a check")
+	assert.Equal(t, updatedDirs+1, statsUpdatedDirs(t), "SetDirModTime should be counted as an updated dir")
 
 	// Check the returned directory and one read from the listing
 	// The modtime will only be correct on newDst if it had a SetModTime method

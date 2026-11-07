@@ -123,6 +123,13 @@ to be used within the template to server pages:
 | .Sort       |              | The current sort used. This is changeable via '?sort=' parameter. Possible values: namedirfirst, name, size, time (default namedirfirst). |
 | .Order      |              | The current ordering used. This is changeable via '?order=' parameter. Possible values: asc, desc (default asc). |
 | .Query      |              | Currently unused. |
+| .Path       |              | The path of the directory from the root with leading and trailing slashes, e.g. '/dir/'. |
+| .IsRoot     |              | Boolean for if this is the root directory. |
+| .UpLink     |              | The link to the parent directory. |
+| .Static     |              | Boolean for if the listing is being written as a static page by rclone index. |
+| .NumDirs    |              | The number of directories in the listing. |
+| .NumFiles   |              | The number of files in the listing. |
+| .TotalSize  |              | The total size in bytes of the files in the listing. |
 | .Breadcrumb |              | Allows for creating a relative navigation. |
 |             | .Link        | The link of the Text relative to the root. |
 |             | .Text        | The Name of the directory. |
@@ -132,6 +139,7 @@ to be used within the template to server pages:
 |             | .IsDir       | Boolean for if an entry is a directory or not. |
 |             | .Size        | Size in bytes of the entry. |
 |             | .ModTime     | The UTC timestamp of an entry. |
+|             | .MimeType    | The MIME type of an entry guessed from its name, or 'inode/directory'. |
 
 The server also makes the following functions available so that they can be used
 within the template. These functions help extend the options for dynamic
@@ -171,6 +179,10 @@ touch htpasswd
 htpasswd -B htpasswd user
 htpasswd -B htpasswd anotherUser
 ```
+
+Use the same hash format and cost for every entry in the file. If the
+entries differ, the time taken to reject a wrong password can reveal
+which usernames exist.
 
 The password file can be updated while rclone is running.
 
@@ -230,11 +242,6 @@ Flags to control the Remote Control API
       --rc-template string                 User-specified template
       --rc-user string                     User name for authentication
       --rc-user-from-header string         User name from a defined HTTP header
-      --rc-web-fetch-url string            URL to fetch the releases for webgui (default "https://api.github.com/repos/rclone/rclone-webui-react/releases/latest")
-      --rc-web-gui                         Launch WebGUI on localhost
-      --rc-web-gui-force-update            Force update to latest version of web gui
-      --rc-web-gui-no-open-browser         Don't open the browser automatically
-      --rc-web-gui-update                  Check and update to latest version of web gui
 ```
 
 ## See Also

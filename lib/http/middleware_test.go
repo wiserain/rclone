@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -240,6 +242,61 @@ func TestMiddlewareAuth(t *testing.T) {
 				require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "preflight with no creds and no CORS should return unauthorized")
 			})
 		})
+	}
+}
+
+// minAuthTime returns the shortest time handler took to reject user
+// with a wrong password over a few attempts.
+func minAuthTime(t *testing.T, handler http.Handler, user string) time.Duration {
+	var best time.Duration
+	for i := range 10 {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.SetBasicAuth(user, "definitely-wrong-password")
+		rec := httptest.NewRecorder()
+		start := time.Now()
+		handler.ServeHTTP(rec, req)
+		elapsed := time.Since(start)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		if i == 0 || elapsed < best {
+			best = elapsed
+		}
+	}
+	return best
+}
+
+// Rejecting an unknown user must take about as long as rejecting a
+// known user with a wrong password otherwise the timing reveals which
+// users exist.
+func TestMiddlewareAuthHtpasswdUnknownUserTiming(t *testing.T) {
+	handler := MiddlewareAuthHtpasswd("./testdata/.htpasswd", "test")(testEchoHandler([]byte("ok")))
+	known := minAuthTime(t, handler, "bcrypt")
+	unknown := minAuthTime(t, handler, "nosuchuser")
+	assert.Greater(t, unknown, known/4, "unknown user rejected in %v but known user in %v", unknown, known)
+}
+
+// As TestMiddlewareAuthHtpasswdUnknownUserTiming but for --user/--pass
+func TestMiddlewareAuthBasicUnknownUserTiming(t *testing.T) {
+	handler := MiddlewareAuthBasic("user", "pass", "test", "dlPL2MqE")(testEchoHandler([]byte("ok")))
+	known := minAuthTime(t, handler, "user")
+	unknown := minAuthTime(t, handler, "nosuchuser")
+	assert.Greater(t, unknown, known/4, "unknown user rejected in %v but known user in %v", unknown, known)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.SetBasicAuth("user", "pass")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// An unknown user must never be authenticated by the decoy secret
+func TestMiddlewareAuthHtpasswdUnknownUser(t *testing.T) {
+	handler := MiddlewareAuthHtpasswd("./testdata/.htpasswd", "test")(testEchoHandler([]byte("ok")))
+	for _, pass := range []string{"", "bcrypt", "md5", "sha"} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.SetBasicAuth("nosuchuser", pass)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code, pass)
 	}
 }
 
@@ -763,6 +820,39 @@ func TestMiddlewareResponseHeaders(t *testing.T) {
 			for key, vals := range ss.header {
 				require.Contains(t, resp.Header, key, "response should contain custom header")
 				require.Equal(t, vals, resp.Header.Values(key), "header value should match")
+			}
+		})
+	}
+}
+
+func TestParseAuthorization(t *testing.T) {
+	for _, test := range []struct {
+		header string
+		user   string
+		pass   string
+		ok     bool
+	}{
+		{"", "", "", false},
+		{"Basic dXNlcjpwYXNz", "user", "pass", true},
+		// The auth scheme is case-insensitive (RFC 7617 section 2, RFC 9110 section 11.1)
+		{"basic dXNlcjpwYXNz", "user", "pass", true},
+		{"BASIC dXNlcjpwYXNz", "user", "pass", true},
+		{"Basic dXNlcjo=", "user", "", true},
+		{"Basic dXNlcg==", "user", "", false},
+		{"Basic !!!", "", "", false},
+		{"Bearer dXNlcjpwYXNz", "", "", false},
+		{"Basicx dXNlcjpwYXNz", "", "", false},
+	} {
+		t.Run(test.header, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/", nil)
+			if test.header != "" {
+				r.Header.Set("Authorization", test.header)
+			}
+			user, pass, ok := parseAuthorization(r)
+			require.Equal(t, test.ok, ok)
+			if test.ok {
+				require.Equal(t, test.user, user)
+				require.Equal(t, test.pass, pass)
 			}
 		})
 	}

@@ -5,12 +5,14 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/md5"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"github.com/rclone/rclone/fstest"
 	"github.com/rclone/rclone/fstest/fstests"
 	"github.com/rclone/rclone/lib/bucket"
+	"github.com/rclone/rclone/lib/pool"
 	"github.com/rclone/rclone/lib/random"
 	"github.com/rclone/rclone/lib/version"
 	"github.com/stretchr/testify/assert"
@@ -579,10 +582,9 @@ func (f *Fs) InternalTestVersions(t *testing.T) {
 			return f.shouldRetry(ctx, err)
 		})
 		var errString string
-		var awsError smithy.APIError
 		if err == nil {
 			errString = "No Error"
-		} else if errors.As(err, &awsError) {
+		} else if awsError, ok := errors.AsType[smithy.APIError](err); ok {
 			errString = awsError.ErrorCode()
 		} else {
 			assert.Fail(t, "Unknown error %T %v", err, err)
@@ -890,6 +892,31 @@ func (f *Fs) InternalTestObjectLock(t *testing.T) {
 	})
 }
 
+// InternalTestRmdirRoot checks the directory marker of the root of a
+// remote is removed by Rmdir.
+func (f *Fs) InternalTestRmdirRoot(t *testing.T) {
+	if !f.opt.DirectoryMarkers {
+		t.Skip("needs --s3-directory-markers")
+	}
+	ctx := context.Background()
+	dir := "rmdir-root-" + random.String(8)
+	hasDir := func() bool {
+		entries, err := f.List(ctx, "")
+		require.NoError(t, err)
+		return slices.ContainsFunc(entries, func(entry fs.DirEntry) bool {
+			_, isDir := entry.(fs.Directory)
+			return isDir && entry.Remote() == dir
+		})
+	}
+
+	require.NoError(t, f.Mkdir(ctx, dir))
+	require.True(t, hasDir(), "directory marker not made")
+	fDir, err := cache.Get(ctx, bucket.Join(fs.ConfigStringFull(f), dir))
+	require.NoError(t, err)
+	require.NoError(t, fDir.Rmdir(ctx, ""))
+	assert.False(t, hasDir(), "directory marker not removed")
+}
+
 func (f *Fs) InternalTest(t *testing.T) {
 	t.Run("Metadata", f.InternalTestMetadata)
 	t.Run("NoHead", f.InternalTestNoHead)
@@ -897,6 +924,52 @@ func (f *Fs) InternalTest(t *testing.T) {
 	t.Run("HasChildren", f.InternalTestHasChildren)
 	t.Run("Versions", f.InternalTestVersions)
 	t.Run("ObjectLock", f.InternalTestObjectLock)
+	t.Run("RmdirRoot", f.InternalTestRmdirRoot)
 }
 
 var _ fstests.InternalTester = (*Fs)(nil)
+
+func TestBufferForObjectLockMD5(t *testing.T) {
+	content := []byte("object lock body")
+	md5sum := md5.Sum(content)
+	wantMD5 := base64.StdEncoding.EncodeToString(md5sum[:])
+
+	t.Run("NoObjectLock", func(t *testing.T) {
+		req := &s3.PutObjectInput{}
+		in := bytes.NewReader(content)
+		body, cleanup, err := bufferForObjectLockMD5(req, in)
+		defer cleanup()
+		require.NoError(t, err)
+		assert.Equal(t, io.Reader(in), body, "body should be passed through untouched")
+		assert.Nil(t, req.ContentMD5)
+	})
+
+	t.Run("SourceMD5", func(t *testing.T) {
+		req := &s3.PutObjectInput{
+			ObjectLockMode: types.ObjectLockModeCompliance,
+			ContentMD5:     aws.String(wantMD5),
+		}
+		in := bytes.NewReader(content)
+		body, cleanup, err := bufferForObjectLockMD5(req, in)
+		defer cleanup()
+		require.NoError(t, err)
+		assert.Equal(t, io.Reader(in), body, "body should not be buffered when the MD5 is known")
+		assert.Equal(t, wantMD5, *req.ContentMD5)
+	})
+
+	t.Run("Buffered", func(t *testing.T) {
+		inUse := pool.Global().InUse()
+		req := &s3.PutObjectInput{
+			ObjectLockLegalHoldStatus: types.ObjectLockLegalHoldStatusOn,
+		}
+		body, cleanup, err := bufferForObjectLockMD5(req, bytes.NewReader(content))
+		require.NoError(t, err)
+		require.NotNil(t, req.ContentMD5)
+		assert.Equal(t, wantMD5, *req.ContentMD5)
+		got, err := io.ReadAll(body)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+		cleanup()
+		assert.Equal(t, inUse, pool.Global().InUse(), "pool buffers leaked")
+	})
+}

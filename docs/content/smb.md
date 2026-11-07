@@ -221,6 +221,23 @@ Properties:
 
 Here are the Advanced options specific to smb (SMB / CIFS).
 
+#### --smb-workstation
+
+Workstation name sent in NTLM authentication.
+
+The NetBIOS name sent as the client workstation in the NTLM AUTHENTICATE
+message. Some servers (e.g. domain-joined Windows servers with per-account
+workstation restrictions or NTLM allow-lists) require this to match a
+specific name. Leave blank to send no workstation name (the default).
+
+
+Properties:
+
+- Config:      workstation
+- Env Var:     RCLONE_SMB_WORKSTATION
+- Type:        string
+- Required:    false
+
 #### --smb-idle-timeout
 
 Max time before closing idle connections.

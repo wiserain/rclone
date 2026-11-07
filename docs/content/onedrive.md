@@ -10,6 +10,10 @@ Paths are specified as `remote:path`
 
 Paths may be as deep as required, e.g. `remote:directory/subdirectory`.
 
+**Note**: OneDrive for Business and SharePoint users need rclone
+v1.76 or later from April 1, 2027 - see
+[Pre-authenticated URLs](#pre-authenticated-urls).
+
 ## Configuration
 
 The initial setup for OneDrive involves getting a token from
@@ -242,7 +246,7 @@ OneDrive files. Take care to safeguard these credentials.
 If you do not have admin access to your organization's OneDrive for
 Business, you can still connect by manually providing the SharePoint
 tenant URL and drive ID. This works by overriding the base API URL
-from the standard Microsoft Graph endpoint to the SharePoint v2.0
+from the standard Microsoft Graph endpoint to the SharePoint API
 endpoint.
 
 #### Steps to manually obtain credentials
@@ -256,6 +260,13 @@ endpoint.
    ".driveAccessToken": "access_token={access_token}"
    ```
 
+   In some guest access scenarios SharePoint may also expose a matching
+   v2.1 URL and token pair:
+   ```json
+   ".driveUrlV21": "{tenant_url}/v2.1/drives/{drive_id}",
+   ".driveAccessTokenV21": "access_token={access_token}"
+   ```
+
 #### Rclone configuration
 
 Use the extracted values to configure your remote:
@@ -267,6 +278,14 @@ drive_id = {drive_id}
 tenant_url = {tenant_url}
 drive_type = business
 ```
+
+If you use a v2.1 token, set the matching SharePoint API version:
+
+```ini
+tenant_api_version = v2.1
+```
+
+If `tenant_api_version` is omitted, rclone defaults to `v2.0`.
 
 Since the exact expiry time cannot be determined from web traffic,
 set the expiry to a future date. Note that the token will eventually
@@ -311,10 +330,11 @@ This can be useful with `rclone mount` and [rclone rc vfs/refresh
 recursive=true](/rc/#vfs-refresh)) to very quickly fill the mount with
 information about all the files.
 
-The API used for the recursive listing (`ListR`) only supports listing
-from the root of the drive. This will become increasingly inefficient
-the further away you get from the root as rclone will have to discard
-files outside of the directory you are using.
+Rclone asks for the delta listing of the directory being listed. Some
+drives only support delta listings from the root of the drive, in
+which case rclone lists the whole drive and discards the files outside
+of the directory you are using, which is increasingly inefficient the
+further away from the root you get.
 
 Some commands (like `rclone lsf -R`) will use `ListR` by default - you
 can turn this off with `--disable ListR` if you need to.
@@ -508,7 +528,7 @@ Properties:
 
 The tenant URL for non-admin OneDrive access.
 
-Set this to your SharePoint tenant URL to use the SharePoint v2.0 API
+Set this to your SharePoint tenant URL to use the SharePoint API
 endpoint instead of the standard Microsoft Graph API. This allows
 accessing business OneDrive without admin consent.
 
@@ -524,6 +544,22 @@ Properties:
 - Env Var:     RCLONE_ONEDRIVE_TENANT_URL
 - Type:        string
 - Required:    false
+
+#### --onedrive-tenant-api-version
+
+The SharePoint API version to use with tenant_url.
+
+Set this to the SharePoint API version matching the browser-extracted
+access token. For example, use v2.1 with a driveAccessTokenV21 token.
+
+This only applies when tenant_url is set.
+
+Properties:
+
+- Config:      tenant_api_version
+- Env Var:     RCLONE_ONEDRIVE_TENANT_API_VERSION
+- Type:        string
+- Default:     "v2.0"
 
 #### --onedrive-chunk-size
 
@@ -829,21 +865,12 @@ Setting this flag speeds up these things greatly:
     rclone size onedrive:
     rclone rc vfs/refresh recursive=true
 
-**However** the delta listing API **only** works at the root of the
-drive. If you use it not at the root then it recurses from the root
-and discards all the data that is not under the directory you asked
-for. So it will be correct but may not be very efficient.
-
-This is why this flag is not set as the default.
-
-As a rule of thumb if nearly all of your data is under rclone's root
-directory (the `root/directory` in `onedrive:root/directory`) then
-using this flag will be a big performance win. If your data is
-mostly not under the root then using this flag will be a big
-performance loss.
-
-It is recommended if you are mounting your onedrive at the root
-(or near the root when using crypt) and using rclone `rc vfs/refresh`.
+Rclone asks for the delta listing of the directory being listed. If
+the drive only supports delta listings at the root of the drive (as
+some older OneDrive for Business and SharePoint drives do) then
+rclone lists from the root and discards all the data that is not
+under the directory you asked for. So it will be correct but may not
+be very efficient.
 
 
 Properties:
@@ -1211,6 +1238,35 @@ rclone cleanup remote:path/subdir               # unconditionally remove all old
 
 ## Troubleshooting
 
+### Pre-authenticated URLs
+
+Microsoft is [retiring pre-authenticated (tempauth) URLs](https://devblogs.microsoft.com/microsoft365dev/pre-authenticated-tempauth-urls-are-retiring-move-to-microsoft-entra-id-tokens-before-april-1-2027/)
+in OneDrive for Business and SharePoint from April 1, 2027.
+
+**Upgrade to rclone v1.76 or later before April 1, 2027.** Earlier
+versions rely on pre-authenticated URLs, so after that date their
+downloads, chunked uploads and server-side copies will fail with
+OneDrive for Business and SharePoint. Rclone v1.76 and later keep
+working with the existing configuration, apart from the client
+credentials flow with a client secret (see below).
+
+Rclone uses these URLs when downloading files, when uploading files
+bigger than `--onedrive-upload-cutoff` in chunks and when doing
+server-side copies. When SharePoint returns them without
+pre-authentication rclone authenticates them with a SharePoint token
+which it gets using the existing login, so no reconfiguration is
+needed. OneDrive Personal is not affected.
+
+If rclone can't get a SharePoint token, or SharePoint refuses it, you
+will see the error `SharePoint refused to authenticate a request`. In
+this case rclone uploads files smaller than 250 MiB in a single
+request instead and copies files by downloading and uploading them,
+but bigger files can't be uploaded and downloads may fail.
+
+SharePoint does not accept tokens from the client credentials flow
+which were got with a client secret, so this affects
+`client_credentials` users.
+
 ### Excessive throttling or blocked on SharePoint
 
 If you experience excessive throttling or is being blocked on SharePoint then
@@ -1272,7 +1328,7 @@ This means that rclone can't use the OneDrive for Business API with your account
 You can't do much about it, maybe write an email to your admins.
 
 However, there are other ways to interact with your OneDrive account. Have a look
-at the WebDAV backend: <https://rclone.org/webdav/#sharepoint>
+at the WebDAV backend: <https://rclone.org/webdav/#sharepoint-online>
 
 ### invalid\_grant (AADSTS50076)
 

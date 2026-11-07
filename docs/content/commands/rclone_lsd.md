@@ -13,7 +13,7 @@ Lists the directories in the source path to standard output. Does not
 recurse by default.  Use the `-R` flag to recurse.
 
 This command lists the total size of the directory (if known, -1 if
-not), the modification time (if known, the current time if not), the
+not), the modification time (if known, the `--default-time` if not), the
 number of objects in the directory (if known, -1 if not) and the name
 of the directory, E.g.
 

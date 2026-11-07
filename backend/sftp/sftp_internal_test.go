@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/obscure"
 	"github.com/rclone/rclone/fstest/fstests"
@@ -144,6 +145,31 @@ func TestRemoteShellPathEncodesPathOverrideNames(t *testing.T) {
 
 	f.opt.PathOverride = "@/volume"
 	assert.Equal(t, "/volume/srv/root/dir/file\uFF1Aname", f.remoteShellPath("dir/file:name"))
+}
+
+func TestRemoteShellPathRelativePathOverrideLeadingDash(t *testing.T) {
+	f := &Fs{
+		absRoot: "/",
+		opt: Options{
+			Enc:          encoder.Display,
+			PathOverride: "@.",
+		},
+	}
+
+	assert.Equal(t, "./-file", f.remoteShellPath("-file"))
+	assert.Equal(t, "dir/-file", f.remoteShellPath("dir/-file"))
+	assert.Equal(t, "file", f.remoteShellPath("file"))
+
+	f.opt.PathOverride = "."
+	assert.Equal(t, "./-file", f.remoteShellPath("-file"))
+}
+
+func TestDefaultEncodingStandardizesControlCharacters(t *testing.T) {
+	ri, err := fs.Find("sftp")
+	require.NoError(t, err)
+	enc := ri.Options.Get(config.ConfigEncoding).Default.(encoder.MultiEncoder)
+	assert.Equal(t, "a␊b", enc.ToStandardName("a\nb"))
+	assert.Equal(t, "a\nb", enc.FromStandardName("a␊b"))
 }
 
 func TestParseHash(t *testing.T) {
@@ -428,7 +454,7 @@ func TestHostKeyCallbackRefusesAtCap(t *testing.T) {
 		opt:      Options{PinHostKey: true},
 		hostKeys: map[string][][]byte{},
 	}
-	for i := 0; i < maxHostKeys; i++ {
+	for i := range maxHostKeys {
 		algo := fmt.Sprintf("test-algo-%d", i)
 		f.hostKeys[algo] = [][]byte{{byte(i)}}
 	}
@@ -480,7 +506,7 @@ func TestHostKeyCallbackPinHostKeyRace(t *testing.T) {
 	const N = 16
 	pendings := make([]*pendingKey, N)
 	wg.Add(N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		go func(i int) {
 			defer wg.Done()
 			cb := f.hostKeyCallback(&pendings[i])
@@ -489,7 +515,7 @@ func TestHostKeyCallbackPinHostKeyRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	for i := 0; i < N; i++ {
+	for i := range N {
 		require.NotNil(t, pendings[i], "dial %d should have stashed its own key", i)
 		assert.Equal(t, keyBytes, pendings[i].marshalled)
 	}
@@ -631,7 +657,7 @@ func TestCommitHostKeyConcurrent(t *testing.T) {
 	keys := makeTestKeys(t, N)
 	var wg sync.WaitGroup
 	wg.Add(N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		go func(i int) {
 			defer wg.Done()
 			f.commitHostKey(&pendingKey{

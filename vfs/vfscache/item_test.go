@@ -181,6 +181,20 @@ func TestItemTruncateExisting(t *testing.T) {
 	checkObject(t, r, "existing", contents[:40]+zeroes[:20])
 }
 
+func TestItemTruncateShrinkUncached(t *testing.T) {
+	r, c := newItemTestCache(t)
+
+	contents, obj, item := newFile(t, r, c, "existing")
+
+	// Shrink a file which hasn't been read so the downloader has to
+	// fetch the kept part of the file on close.
+	require.NoError(t, item.Open(obj))
+	require.NoError(t, item.Truncate(40))
+	require.NoError(t, item.Close(nil))
+
+	checkObject(t, r, "existing", contents[:40])
+}
+
 func TestItemReadAt(t *testing.T) {
 	r, c := newItemTestCache(t)
 
@@ -769,7 +783,7 @@ func TestItemHandleCachingReopenDuringGraceClose(t *testing.T) {
 	buf := make([]byte, 1)
 
 	const iterations = 50
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		// Open, read (to create a downloader) and close so a grace
 		// timer is pending with the fd and downloaders still alive.
 		require.NoError(t, item.Open(obj))

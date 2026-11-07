@@ -447,7 +447,6 @@ func (vfs *VFS) Shutdown() {
 		vfs.pollChan = nil
 	}
 	vfs.pollMu.Unlock()
-
 	vfs.closePersistentDirCache() // mod
 }
 
