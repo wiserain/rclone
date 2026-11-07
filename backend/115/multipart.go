@@ -65,10 +65,10 @@ func (w *ossChunkWriter) Upload(ctx context.Context) (err error) {
 	defer cancel()
 	defer atexit.OnError(&err, func() {
 		cancel()
-		fs.Debugf(w.o, "multipart upload: Cancelling...")
+		fs.DebugfCtx(ctx, w.o, "multipart upload: Cancelling...")
 		errCancel := w.Abort(ctx)
 		if errCancel != nil {
-			fs.Debugf(w.o, "multipart upload: failed to cancel: %v", errCancel)
+			fs.DebugfCtx(ctx, w.o, "multipart upload: failed to cancel: %v", errCancel)
 		}
 	})()
 
@@ -123,7 +123,7 @@ func (w *ossChunkWriter) Upload(ctx context.Context) (err error) {
 		off += n
 		g.Go(func() (err error) {
 			defer free()
-			fs.Debugf(w.o, "multipart upload: starting chunk %d size %v offset %v/%v", partNum, fs.SizeSuffix(n), fs.SizeSuffix(partOff), fs.SizeSuffix(size))
+			fs.DebugfCtx(ctx, w.o, "multipart upload: starting chunk %d size %v offset %v/%v", partNum, fs.SizeSuffix(n), fs.SizeSuffix(partOff), fs.SizeSuffix(size))
 			_, err = w.WriteChunk(gCtx, int32(partNum), rw)
 			return err
 		})
@@ -185,7 +185,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 	// 48 GiB which seems like a not too unreasonable limit.
 	if size == -1 {
 		warnStreamUpload.Do(func() {
-			fs.Logf(f, "Streaming uploads using chunk size %v will have maximum file size of %v",
+			fs.LogfCtx(ctx, f, "Streaming uploads using chunk size %v will have maximum file size of %v",
 				f.opt.ChunkSize, fs.SizeSuffix(int64(chunkSize)*int64(maxUploadParts)))
 		})
 	} else {
@@ -235,7 +235,7 @@ func (f *Fs) newChunkWriter(ctx context.Context, remote string, src fs.ObjectInf
 		return nil, fmt.Errorf("create multipart upload failed: %w", err)
 	}
 	w.callback, w.callbackVar = ui.GetCallback(), ui.GetCallbackVar()
-	fs.Debugf(w.o, "multipart upload: %q initiated", *w.imur.UploadId)
+	fs.DebugfCtx(ctx, w.o, "multipart upload: %q initiated", *w.imur.UploadId)
 	return
 }
 
@@ -384,7 +384,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 			part, recoverErr := w.findExistingPart(ctx, ossPartNumber, reader, currentChunkSize)
 			if recoverErr == nil {
 				w.addCompletedPart(part)
-				fs.Debugf(w.o, "multipart upload: recovered existing chunk %d with %v bytes", ossPartNumber, currentChunkSize)
+				fs.DebugfCtx(ctx, w.o, "multipart upload: recovered existing chunk %d with %v bytes", ossPartNumber, currentChunkSize)
 				return currentChunkSize, nil
 			}
 			return -1, fmt.Errorf("failed to recover existing chunk %d after PartAlreadyExist: %w: %v", ossPartNumber, err, recoverErr)
@@ -397,7 +397,7 @@ func (w *ossChunkWriter) WriteChunk(ctx context.Context, chunkNumber int32, read
 		ETag:       res.ETag,
 	})
 
-	fs.Debugf(w.o, "multipart upload: wrote chunk %d with %v bytes", ossPartNumber, currentChunkSize)
+	fs.DebugfCtx(ctx, w.o, "multipart upload: wrote chunk %d with %v bytes", ossPartNumber, currentChunkSize)
 	return currentChunkSize, err
 }
 
@@ -416,7 +416,7 @@ func (w *ossChunkWriter) Abort(ctx context.Context) (err error) {
 		return fmt.Errorf("failed to abort multipart upload %q: %w", *w.imur.UploadId, err)
 	}
 	// w.shutdownRenew()
-	fs.Debugf(w.o, "multipart upload: %q aborted", *w.imur.UploadId)
+	fs.DebugfCtx(ctx, w.o, "multipart upload: %q aborted", *w.imur.UploadId)
 	return
 }
 
@@ -441,6 +441,6 @@ func (w *ossChunkWriter) Close(ctx context.Context) (err error) {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 	w.callbackRes = res.CallbackResult
-	fs.Debugf(w.o, "multipart upload: %q finished", *w.imur.UploadId)
+	fs.DebugfCtx(ctx, w.o, "multipart upload: %q finished", *w.imur.UploadId)
 	return
 }

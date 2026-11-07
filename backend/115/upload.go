@@ -341,7 +341,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 		if f.opt.UploadHashOnly {
 			return nil, fserrors.NoRetryError(errors.New("skipping as no SHA1 from src"))
 		}
-		fs.Debugf(o, "Buffering to calculate SHA1...")
+		fs.DebugfCtx(ctx, o, "Buffering to calculate SHA1...")
 		var cleanup func()
 		hashStr, in, cleanup, err = bufferIOwithSHA1(in, size, int64(f.opt.HashMemoryThreshold))
 		defer cleanup()
@@ -349,7 +349,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 			return nil, fmt.Errorf("failed to calculate SHA1: %w", err)
 		}
 	} else {
-		fs.Debugf(o, "Using SHA1 from src: %s", hashStr)
+		fs.DebugfCtx(ctx, o, "Using SHA1 from src: %s", hashStr)
 	}
 
 	// set calculated sha1 hash
@@ -370,10 +370,10 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 			if f.opt.UploadHashOnly {
 				return nil, fserrors.NoRetryError(errors.New("skipping as --115-upload-hash-only flag turned on"))
 			}
-			fs.Debugf(o, "Upload will begin shortly. Outgoing traffic will occur...")
+			fs.DebugfCtx(ctx, o, "Upload will begin shortly. Outgoing traffic will occur...")
 		case 2:
 			// ui gives valid pickcode in this case but not available when listing
-			fs.Debugf(o, "Upload finished early. No outgoing traffic will occur!")
+			fs.DebugfCtx(ctx, o, "Upload finished early. No outgoing traffic will occur!")
 			if acc, ok := in.(*accounting.Account); ok && acc != nil {
 				// if `in io.Reader` is still in type of `*accounting.Account` (meaning that it is unused)
 				// it is considered as a server side copy as no incoming/outgoing traffic occur at all
@@ -389,7 +389,7 @@ func (f *Fs) upload(ctx context.Context, in io.Reader, src fs.ObjectInfo, remote
 			if signVal, err = calcBlockSHA1(ctx, in, src, ui.SignCheck); err != nil {
 				return nil, fmt.Errorf("failed to calculate block hash: %w", err)
 			}
-			fs.Debugf(o, "Retrying init upload: Status 7")
+			fs.DebugfCtx(ctx, o, "Retrying init upload: Status 7")
 		default:
 			return nil, fmt.Errorf("unexpected status: %#v", ui)
 		}

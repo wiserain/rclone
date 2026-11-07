@@ -77,7 +77,7 @@ type ServiceAccountPool struct {
 	numLoad int
 }
 
-func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
+func newServiceAccountPool(ctx context.Context, opt *Options) (*ServiceAccountPool, error) {
 	var saFiles, ipUsers []string
 	if opt.ServiceAccountFilePath != "" {
 		dirList, err := os.ReadDir(opt.ServiceAccountFilePath)
@@ -94,10 +94,10 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 		if len(saFiles) == 0 {
 			return nil, fmt.Errorf("unable to locate service account files in %s", opt.ServiceAccountFilePath)
 		}
-		fs.Debugf(nil, "%d service account files from %q", len(saFiles), opt.ServiceAccountFilePath)
+		fs.DebugfCtx(ctx, nil, "%d service account files from %q", len(saFiles), opt.ServiceAccountFilePath)
 	} else if opt.ServiceAccountFile != "" {
 		saFiles = append(saFiles, opt.ServiceAccountFile)
-		fs.Debugf(nil, "1 service account file from %q", opt.ServiceAccountFile)
+		fs.DebugfCtx(ctx, nil, "1 service account file from %q", opt.ServiceAccountFile)
 	}
 	if opt.ImpersonateList != "" {
 		var users []string
@@ -108,7 +108,7 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 		if len(ipUsers) == 0 {
 			return nil, fmt.Errorf("unable to find impersonate users in %s", opt.ImpersonateList)
 		}
-		fs.Debugf(nil, "%d impersonate users from %q", len(ipUsers), opt.ImpersonateList)
+		fs.DebugfCtx(ctx, nil, "%d impersonate users from %q", len(ipUsers), opt.ImpersonateList)
 	} else {
 		ipUsers = append(ipUsers, opt.Impersonate)
 	}
@@ -120,7 +120,7 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 		maxLoad: opt.ServiceAccountMaxLoad,
 	}
 	// initial load
-	if err := p.LoadSA(); err != nil {
+	if err := p.loadSA(ctx); err != nil {
 		return nil, fmt.Errorf("service account pool: initial load failed: %w", err)
 	}
 	return p, nil
@@ -128,6 +128,10 @@ func newServiceAccountPool(opt *Options) (*ServiceAccountPool, error) {
 
 // LoadSA loads service accounts into the pool.
 func (p *ServiceAccountPool) LoadSA() error {
+	return p.loadSA(context.Background())
+}
+
+func (p *ServiceAccountPool) loadSA(ctx context.Context) error {
 	if p.numLoad >= p.maxLoad {
 		return fmt.Errorf("maximum service account load exceeded")
 	}
@@ -157,7 +161,7 @@ func (p *ServiceAccountPool) LoadSA() error {
 	})
 	p.SAs = saList
 	p.numLoad++
-	fs.Debugf(nil, "%d service account loaded (%d/%d)", len(p.SAs), p.numLoad, p.maxLoad)
+	fs.DebugfCtx(ctx, nil, "%d service account loaded (%d/%d)", len(p.SAs), p.numLoad, p.maxLoad)
 	return nil
 }
 
@@ -184,12 +188,12 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 	defer f.changeSAmu.Unlock()
 	// check min sleep while holding the lock to avoid concurrent races
 	if !f.changeSAtime.IsZero() && fs.Duration(time.Since(f.changeSAtime)) < f.opt.ServiceAccountMinSleep {
-		fs.Debugf(nil, "retrying with the same service account")
+		fs.DebugfCtx(ctx, nil, "retrying with the same service account")
 		return nil
 	}
 	// reloading SA
 	if len(f.changeSApool.SAs) < 1 {
-		if err := f.changeSApool.LoadSA(); err != nil {
+		if err := f.changeSApool.loadSA(ctx); err != nil {
 			return err
 		}
 	}
@@ -226,11 +230,11 @@ func (f *Fs) changeServiceAccount(ctx context.Context) (err error) {
 		svcAcc = fmt.Sprintf("service account file \"%s\"", filepath.Base(sa[0].ServiceAccountFile))
 	}
 	if sa[0].Impersonate != "" {
-		fs.Debugf(nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)
+		fs.DebugfCtx(ctx, nil, "Now working with %s as %q", svcAcc, sa[0].Impersonate)
 	} else {
-		fs.Debugf(nil, "Now working with %s", svcAcc)
+		fs.DebugfCtx(ctx, nil, "Now working with %s", svcAcc)
 	}
-	fs.Debugf(nil, "%d service account remaining", len(f.changeSApool.SAs))
+	fs.DebugfCtx(ctx, nil, "%d service account remaining", len(f.changeSApool.SAs))
 	return
 }
 
@@ -294,7 +298,7 @@ func (gds *GdsClient) getGdsRemote(ctx context.Context) (remote *GdsRemote, err 
 	if info.Result != "success" {
 		return nil, fmt.Errorf("%s", info.Result)
 	}
-	fs.Debugf(nil, "member: %+v\n", string(info.Data.Member))
+	fs.DebugfCtx(ctx, nil, "member: %+v\n", string(info.Data.Member))
 	return info.Data.Remote, nil
 }
 
@@ -368,7 +372,7 @@ func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDe
 	for _, info := range infos {
 		parentID := strings.Join(info.Parents, ",")
 		parentID = actualID(parentID)
-		fs.Infof(f, "changing parent of %q from %q to %q", info.Name, parentID, dstID)
+		fs.InfofCtx(ctx, f, "changing parent of %q from %q to %q", info.Name, parentID, dstID)
 		// Do the change
 		err = f.pacer.Call(func() (bool, error) {
 			_, err = f.svc.Files.Update(info.Id, dstInfo).
@@ -385,7 +389,7 @@ func (f *Fs) changeParents(ctx context.Context, dstFs *Fs, dstCreate bool, srcDe
 	}
 	if srcDepth == "1" && srcDelete && len(infos) != 0 {
 		// rmdir (into trash) the now empty source directory
-		fs.Infof(f, "removing empty directory")
+		fs.InfofCtx(ctx, f, "removing empty directory")
 		err = f.delete(ctx, srcID, f.opt.UseTrash)
 		if err != nil {
 			return nil, fmt.Errorf("failed removing empty directory: %w", err)
@@ -431,7 +435,7 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 				}
 				startTime, err = f.activityNotifyRunner(ctx, notifyFunc, startTime)
 				if err != nil {
-					fs.Infof(f, "Activity notify listener failure: %s", err)
+					fs.InfofCtx(ctx, f, "Activity notify listener failure: %s", err)
 				}
 			}
 		}
@@ -439,7 +443,7 @@ func (f *Fs) activityNotify(ctx context.Context, notifyFunc func(string, fs.Entr
 }
 
 // parseTarget extracts file/directory information from driveactivity.Target and driveactivity.TargetReference
-func parseTarget(target any) (id, name, mimeType string, isDir bool) {
+func parseTarget(ctx context.Context, target any) (id, name, mimeType string, isDir bool) {
 	switch item := target.(type) {
 	case *driveactivity.TargetReference:
 		if item.DriveItem != nil {
@@ -449,7 +453,7 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			return
 		}
 		itemJSON, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected TargetReference: %s", string(itemJSON))
+		fs.InfofCtx(ctx, nil, "driveactivity: unexpected TargetReference: %s", string(itemJSON))
 	case *driveactivity.Target:
 		if item.DriveItem != nil {
 			id = strings.TrimPrefix(item.DriveItem.Name, "items/")
@@ -459,7 +463,7 @@ func parseTarget(target any) (id, name, mimeType string, isDir bool) {
 			return
 		}
 		itemJSON, _ := item.MarshalJSON()
-		fs.Infof(nil, "driveactivity: unexpected Target: %s", string(itemJSON))
+		fs.InfofCtx(ctx, nil, "driveactivity: unexpected Target: %s", string(itemJSON))
 	}
 	return
 }
@@ -484,7 +488,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 		for _, act := range activity.Actions {
 			if act.Detail.Move != nil {
 				for _, ref := range act.Detail.Move.AddedParents {
-					if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+					if parentID, _, _, _ := parseTarget(ctx, ref); parentID != "" {
 						newParents = append(newParents, parentID)
 					}
 				}
@@ -495,12 +499,12 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	case actDetail.Move != nil:
 		actionType = "MOVE"
 		for _, ref := range actDetail.Move.RemovedParents {
-			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+			if parentID, _, _, _ := parseTarget(ctx, ref); parentID != "" {
 				oldParents = append(oldParents, parentID)
 			}
 		}
 		for _, ref := range actDetail.Move.AddedParents {
-			if parentID, _, _, _ := parseTarget(ref); parentID != "" {
+			if parentID, _, _, _ := parseTarget(ctx, ref); parentID != "" {
 				newParents = append(newParents, parentID)
 			}
 		}
@@ -525,13 +529,13 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 	// parse target info assuming a single driveItem
 	if len(activity.Targets) != 1 {
 		actJSON, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: more than one activity targets: %s", actJSON)
+		fs.InfofCtx(ctx, nil, "driveactivity: more than one activity targets: %s", actJSON)
 		return
 	}
-	fileID, fileName, _, isDir := parseTarget(activity.Targets[0])
+	fileID, fileName, _, isDir := parseTarget(ctx, activity.Targets[0])
 	if fileID == "" || fileName == "" {
 		actJSON, _ := activity.MarshalJSON()
-		fs.Infof(nil, "driveactivity: empty target id or name: %s", actJSON)
+		fs.InfofCtx(ctx, nil, "driveactivity: empty target id or name: %s", actJSON)
 		return
 	}
 	if oldName == "" {
@@ -576,7 +580,7 @@ func (f *Fs) parseActivity(ctx context.Context, activity *driveactivity.DriveAct
 			// (edit,rename,delete,restore) files
 			file, err := f.getFile(ctx, fileID, "parents")
 			if err != nil {
-				fs.Infof(nil, "driveactivity: failed to get file info: %v", err)
+				fs.InfofCtx(ctx, nil, "driveactivity: failed to get file info: %v", err)
 			} else {
 				newParents = append(newParents, file.Parents...)
 			}
@@ -622,7 +626,7 @@ func (f *Fs) _activityNotifyRunner(ctx context.Context, notifyFunc func(string, 
 			if oldPath == "" && newPath == "" {
 				continue
 			}
-			fs.Infof(nil, "driveactivity: %s: %q -> %q", actType, oldPath, newPath)
+			fs.InfofCtx(ctx, nil, "driveactivity: %s: %q -> %q", actType, oldPath, newPath)
 			entryType := fs.EntryDirectory
 			if !isDir {
 				entryType = fs.EntryObject
@@ -663,7 +667,7 @@ func (f *Fs) activityNotifyRunner(ctx context.Context, notifyFunc func(string, f
 			time.Sleep(time.Duration(f.opt.ActivitySleep))
 		}
 		req.AncestorName = "items/" + target
-		fs.Debugf(f, "Checking for activities on %q", req.AncestorName)
+		fs.DebugfCtx(ctx, f, "Checking for activities on %q", req.AncestorName)
 		err = f._activityNotifyRunner(ctx, notifyFunc, req)
 		if err != nil {
 			return

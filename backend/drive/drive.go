@@ -1484,7 +1484,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 	}
 
 	// mod
-	pool, err := newServiceAccountPool(opt)
+	pool, err := newServiceAccountPool(ctx, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -1492,9 +1492,9 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		opt.ServiceAccountFile = sa[0].ServiceAccountFile
 		opt.Impersonate = sa[0].Impersonate
 		if opt.Impersonate != "" {
-			fs.Debugf(nil, "Starting newFs with %q as %q", filepath.Base(opt.ServiceAccountFile), opt.Impersonate)
+			fs.DebugfCtx(ctx, nil, "Starting newFs with %q as %q", filepath.Base(opt.ServiceAccountFile), opt.Impersonate)
 		} else {
-			fs.Debugf(nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
+			fs.DebugfCtx(ctx, nil, "Starting newFs with %q", filepath.Base(opt.ServiceAccountFile))
 		}
 	}
 
@@ -1528,7 +1528,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		opt.ServiceAccountCredentials = string(gdsRemote.SA)
 		opt.Impersonate = gdsRemote.Impersonate
 		opt.RootFolderID = gdsRemote.RootFolderID
-		fs.Debugf(nil, "Starting newFs with remote from gds")
+		fs.DebugfCtx(ctx, nil, "Starting newFs with remote from gds")
 	}
 
 	oAuthClient, err := createOAuthClient(ctx, opt, name, m)
@@ -1579,7 +1579,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		f.changeSAenabled = true
 		f.changeSApool = pool
 		f.changeSAmu = new(sync.Mutex)
-		fs.Infof(nil, "Changing service account is enabled")
+		fs.InfofCtx(ctx, nil, "Changing service account is enabled")
 	}
 	f.gdsSvc = gdsSvc
 	f.actSvc = actSvc
@@ -1623,14 +1623,14 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		}
 		f.opt.RootFolderID = rootID
 		if srcFile.MimeType != "" && srcFile.MimeType != "application/vnd.google-apps.folder" {
-			fs.Debugf(nil, "Root ID (File): %s", rootID)
+			fs.DebugfCtx(ctx, nil, "Root ID (File): %s", rootID)
 		} else {
 			if srcFile.DriveId == rootID {
-				fs.Debugf(nil, "Root ID (Drive): %s", rootID)
+				fs.DebugfCtx(ctx, nil, "Root ID (Drive): %s", rootID)
 				f.opt.RootFolderID = ""
 				f.opt.TeamDriveID = rootID
 			} else {
-				fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+				fs.DebugfCtx(ctx, nil, "Root ID (Folder): %s", rootID)
 			}
 			srcFile = nil
 		}
@@ -2403,7 +2403,7 @@ func (f *Fs) listRRunner(ctx context.Context, wg *sync.WaitGroup, in chan listRE
 				}
 			}
 			if relisted > 0 {
-				fs.Debugf(f, "Recycled %d directories individually to work around partial empty result from multi listing (%d)", relisted, len(dirs))
+				fs.DebugfCtx(ctx, f, "Recycled %d directories individually to work around partial empty result from multi listing (%d)", relisted, len(dirs))
 			}
 		}
 		// Found no items in more than one directory. Retry these as
@@ -3146,7 +3146,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
 		if err := f.changeServiceAccount(ctx); err != nil {
-			fs.Errorf(f, "failed to change service account: %v", err)
+			fs.ErrorfCtx(ctx, f, "failed to change service account: %v", err)
 		}
 	}
 	var info *drive.File
@@ -3666,7 +3666,7 @@ func (f *Fs) changeChunkSize(chunkSizeString string) (err error) {
 }
 
 func (f *Fs) changeServiceAccountFile(ctx context.Context, file string) (err error) {
-	fs.Debugf(nil, "Changing Service Account File from %s to %s", filepath.Base(f.opt.ServiceAccountFile), filepath.Base(file)) // mod - shorter debug log
+	fs.DebugfCtx(ctx, nil, "Changing Service Account File from %s to %s", filepath.Base(f.opt.ServiceAccountFile), filepath.Base(file)) // mod - shorter debug log
 	if file == f.opt.ServiceAccountFile {
 		return nil
 	}

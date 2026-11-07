@@ -652,9 +652,9 @@ func NewFs(ctx context.Context, name, path string, m configmap.Mapper) (fs.Fs, e
 		}
 		f.opt.RootFolderID = rootID
 		if srcFile.Kind == api.KindOfFile {
-			fs.Debugf(nil, "Root ID (File): %s", rootID)
+			fs.DebugfCtx(ctx, nil, "Root ID (File): %s", rootID)
 		} else {
-			fs.Debugf(nil, "Root ID (Folder): %s", rootID)
+			fs.DebugfCtx(ctx, nil, "Root ID (Folder): %s", rootID)
 			srcFile = nil
 		}
 	}
@@ -1877,7 +1877,7 @@ func (f *Fs) Command(ctx context.Context, name string, arg []string, opt map[str
 				task, terr := f.addURL(ctx, res.Meta.URL, "", "")
 				if terr != nil {
 					err = fmt.Errorf("unexpected error while requesting offline download task for %q: %w", res.Meta.URL, terr)
-					fs.Errorf(f, "%v", err)
+					fs.ErrorfCtx(ctx, f, "%v", err)
 				} else {
 					res.TaskAdded = true
 					if debug {

@@ -54,7 +54,7 @@ func (f *Fs) Upload(ctx context.Context, in io.Reader, size int64, contentType, 
 	// mod
 	if f.changeSAenabled && f.opt.ServiceAccountPerFile {
 		if err := f.changeServiceAccount(ctx); err != nil {
-			fs.Errorf(f, "failed to change service account: %v", err)
+			fs.ErrorfCtx(ctx, f, "failed to change service account: %v", err)
 		}
 	}
 	params := url.Values{

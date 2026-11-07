@@ -590,7 +590,7 @@ func getAPIErrorInfo(info any) apiErrorInfo {
 	return nil
 }
 
-func (p *poolClient) checkResponse(index int, resp *http.Response, info any, err error) error {
+func (p *poolClient) checkResponse(ctx context.Context, index int, resp *http.Response, info any, err error) error {
 	if resp != nil && resp.StatusCode == http.StatusMethodNotAllowed {
 		p.mu.Lock()
 		until := time.Now().Add(cookieCooldown)
@@ -599,7 +599,7 @@ func (p *poolClient) checkResponse(index int, resp *http.Response, info any, err
 		}
 		p.cooldownUntil[index] = until
 		p.mu.Unlock()
-		fs.Debugf(nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
+		fs.DebugfCtx(ctx, nil, "Temporarily disabling cookie with UID %q for %v after HTTP 405", p.credentials[index].UID, cookieCooldown)
 		if err == nil {
 			err = errors.New(resp.Status)
 		}
@@ -628,7 +628,7 @@ func (p *poolClient) CallJSON(ctx context.Context, opts *rest.Opts, request any,
 		return nil, err
 	}
 	resp, err = client.CallJSON(ctx, opts, request, response)
-	return resp, p.checkResponse(index, resp, response, err)
+	return resp, p.checkResponse(ctx, index, resp, response, err)
 }
 
 func (p *poolClient) CallBASE(ctx context.Context, opts *rest.Opts) (err error) {
@@ -688,7 +688,7 @@ func (p *poolClient) Call(ctx context.Context, opts *rest.Opts) (resp *http.Resp
 			return false, clientErr
 		}
 		resp, err = client.Call(ctx, opts)
-		err = p.checkResponse(index, resp, nil, err)
+		err = p.checkResponse(ctx, index, resp, nil, err)
 		return shouldRetry(ctx, resp, nil, err)
 	})
 	return
@@ -730,7 +730,7 @@ func newPoolClient(ctx context.Context, opt *Options, cookies fs.CommaSepList) (
 	minSleep := time.Duration(opt.PacerMinSleep)
 	if numClients := len(clients); numClients > 1 {
 		minSleep /= time.Duration(numClients)
-		fs.Debugf(nil, "Starting newFs with %d clients", numClients)
+		fs.DebugfCtx(ctx, nil, "Starting newFs with %d clients", numClients)
 	}
 	return &poolClient{
 		clients:         clients,
@@ -888,7 +888,7 @@ func newFs(ctx context.Context, name, path string, m configmap.Mapper) (*Fs, err
 		return nil, fmt.Errorf("%q does not contain a valid app version", opt.UserAgent)
 	}
 	f.appVer = match
-	fs.Debugf(nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
+	fs.DebugfCtx(ctx, nil, "Using App Version %q from User-Agent %q", f.appVer, opt.UserAgent)
 
 	err = f.newClientWithPacer(ctx, opt)
 	if err != nil {
@@ -1197,7 +1197,7 @@ func (f *Fs) putUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 		}
 		defer func() {
 			if cerr := rc.Close(); cerr != nil {
-				fs.Debugf(o, "error closing reader: %v", cerr)
+				fs.DebugfCtx(ctx, o, "error closing reader: %v", cerr)
 			}
 		}()
 		buf := make([]byte, 1)
@@ -1232,7 +1232,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 		// list the objects
 		var IDs []string
 		_, err = f.listAll(ctx, srcDir.ID(), f.opt.ListChunk, false, false, func(item *api.File) bool {
-			fs.Infof(srcDir, "listing for merging %q", item.Name)
+			fs.InfofCtx(ctx, srcDir, "listing for merging %q", item.Name)
 			IDs = append(IDs, item.ID())
 			// API doesn't allow to move a large number of objects at once, so doing it in chunked
 			if len(IDs) >= f.opt.ListChunk {
@@ -1255,7 +1255,7 @@ func (f *Fs) MergeDirs(ctx context.Context, dirs []fs.Directory) (err error) {
 	// rmdir (into trash) the now empty source directory
 	var IDs []string
 	for _, srcDir := range dirs[1:] {
-		fs.Infof(srcDir, "removing empty directory")
+		fs.InfofCtx(ctx, srcDir, "removing empty directory")
 		IDs = append(IDs, srcDir.ID())
 		// API doesn't allow to delete a large number of objects at once, so doing it in chunked
 		if len(IDs) >= f.opt.ListChunk {
@@ -1309,23 +1309,23 @@ func (f *Fs) removeExisting(ctx context.Context, remote string, operation string
 	}
 	remoteSaved := path.Join(dir, newLeaf)
 
-	fs.Debugf(existingObj, "%s: renaming existing object to %q before starting", operation, remoteSaved)
+	fs.DebugfCtx(ctx, existingObj, "%s: renaming existing object to %q before starting", operation, remoteSaved)
 	existingObj, err = f.Move(ctx, existingObj, remoteSaved)
 	if err != nil {
 		return nil, fmt.Errorf("%s: failed to rename existing file: %w", operation, err)
 	}
 	return func(perr *error) {
 		if *perr == nil {
-			fs.Debugf(existingObj, "%s: removing renamed existing file after operation", operation)
+			fs.DebugfCtx(ctx, existingObj, "%s: removing renamed existing file after operation", operation)
 			err := existingObj.Remove(ctx)
 			if err != nil {
 				*perr = fmt.Errorf("%s: failed to remove renamed existing file: %w", operation, err)
 			}
 		} else {
-			fs.Debugf(existingObj, "%s: renaming existing back after failed operation", operation)
+			fs.DebugfCtx(ctx, existingObj, "%s: renaming existing back after failed operation", operation)
 			_, renameErr := f.Move(ctx, existingObj, remote)
 			if renameErr != nil {
-				fs.Errorf(existingObj, "%s: failed to restore existing file after failed operation: %v", operation, renameErr)
+				fs.ErrorfCtx(ctx, existingObj, "%s: failed to restore existing file after failed operation: %v", operation, renameErr)
 			}
 		}
 	}, nil
@@ -1342,7 +1342,7 @@ func (f *Fs) removeExisting(ctx context.Context, remote string, operation string
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Object, err error) {
 	if f.isShare {
-		fs.Debugf(src, "Can't move - shared filesystem")
+		fs.DebugfCtx(ctx, src, "Can't move - shared filesystem")
 		return nil, fs.ErrorCantMove
 	}
 	if src.Fs().Name() != f.Name() {
@@ -1351,7 +1351,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 
 	srcObj, ok := src.(*Object)
 	if !ok {
-		fs.Debugf(src, "Can't move - not same remote type")
+		fs.DebugfCtx(ctx, src, "Can't move - not same remote type")
 		return nil, fs.ErrorCantMove
 	}
 
@@ -1361,7 +1361,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	_, dstLeaf := dircache.SplitPath(remote)
 	if srcLeaf != dstLeaf {
 		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
-			fs.Debugf(src, "Can't move - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			fs.DebugfCtx(ctx, src, "Can't move - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
 			return nil, fs.ErrorCantMove
 		}
 	}
@@ -1386,7 +1386,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 		defer func() {
 			if err != nil {
 				if mvErr := f.moveFiles(ctx, []string{srcObj.id}, srcObj.parent); mvErr != nil {
-					fs.Logf(f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), mvErr)
+					fs.LogfCtx(ctx, f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), mvErr)
 				}
 			}
 		}()
@@ -1395,7 +1395,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	defer func() {
 		if err != nil {
 			if rnErr := f.renameObjectWithCheck(ctx, srcObj.id, srcLeaf); rnErr != nil {
-				fs.Logf(f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), rnErr)
+				fs.LogfCtx(ctx, f, "move: couldn't restore original object to %q after move failure: %v", src.Remote(), rnErr)
 			}
 		}
 	}()
@@ -1460,7 +1460,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 // If destination exists then return fs.ErrorDirExists
 func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string) error {
 	if f.isShare {
-		fs.Debugf(src, "Can't move directory - shared filesystem")
+		fs.DebugfCtx(ctx, src, "Can't move directory - shared filesystem")
 		return fs.ErrorCantDirMove
 	}
 	if src.Name() != f.Name() {
@@ -1469,7 +1469,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 
 	srcFs, ok := src.(*Fs)
 	if !ok {
-		fs.Debugf(srcFs, "Can't move directory - not same remote type")
+		fs.DebugfCtx(ctx, srcFs, "Can't move directory - not same remote type")
 		return fs.ErrorCantDirMove
 	}
 
@@ -1509,12 +1509,12 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Object, err error) {
 	if f.isShare {
-		fs.Debugf(src, "Can't copy - shared filesystem")
+		fs.DebugfCtx(ctx, src, "Can't copy - shared filesystem")
 		return nil, fs.ErrorCantCopy
 	}
 	srcObj, ok := src.(*Object)
 	if !ok {
-		fs.Debugf(src, "Can't copy - not same remote type")
+		fs.DebugfCtx(ctx, src, "Can't copy - not same remote type")
 		return nil, fs.ErrorCantCopy
 	}
 
@@ -1524,7 +1524,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	_, dstLeaf := dircache.SplitPath(remote)
 	if srcLeaf != dstLeaf {
 		if guessFileName(srcLeaf, dstLeaf) != dstLeaf {
-			fs.Debugf(src, "Can't copy - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
+			fs.DebugfCtx(ctx, src, "Can't copy - API does not allow renaming %q to %q", srcLeaf, dstLeaf)
 			return nil, fs.ErrorCantCopy
 		}
 	}
@@ -1541,7 +1541,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 	}
 	if srcObj.parent == dstParentID {
 		// api restriction
-		fs.Debugf(src, "Can't copy - same parent")
+		fs.DebugfCtx(ctx, src, "Can't copy - same parent")
 		return nil, fs.ErrorCantCopy
 	}
 
@@ -1563,7 +1563,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (dst fs.Obj
 			}
 			defer func() {
 				if rnErr := f.renameObjectWithCheck(ctx, conflict.ID(), conflict.Name); rnErr != nil {
-					fs.Logf(f, "copy: couldn't rename conflicting file back to original: %v", rnErr)
+					fs.LogfCtx(ctx, f, "copy: couldn't rename conflicting file back to original: %v", rnErr)
 				}
 			}()
 		} else if err != fs.ErrorObjectNotFound {
@@ -1609,7 +1609,7 @@ func (f *Fs) purgeCheck(ctx context.Context, dir string, check bool) error {
 
 	if check {
 		found, err := f.listAll(ctx, rootID, 32, false, false, func(item *api.File) bool {
-			fs.Debugf(dir, "Rmdir: contains file: %q", item.Name)
+			fs.DebugfCtx(ctx, dir, "Rmdir: contains file: %q", item.Name)
 			return true
 		})
 		if err != nil {
@@ -1881,7 +1881,7 @@ func (o *Object) Remote() string {
 func (o *Object) ModTime(ctx context.Context) time.Time {
 	err := o.readMetaData(ctx)
 	if err != nil {
-		fs.Logf(o, "failed to read metadata: %v", err)
+		fs.LogfCtx(ctx, o, "failed to read metadata: %v", err)
 		return time.Now()
 	}
 	return o.modTime
