@@ -4168,7 +4168,7 @@ rclone backend getfile drive:path {subpath} -o real -o all
 ` + "```" + `
 
 It retrieves a 'Files resource' using the method of 'Files.Get(ID)' and
-returns in a json-formatted string. The usage is basically the same as 
+returns in a json-formatted string. The usage is basically the same as
 for 'getid'. For development you can pass '-o all' to return all fields.`,
 }, { // mod
 	Name:  "chpar",

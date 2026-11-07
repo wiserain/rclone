@@ -1763,7 +1763,7 @@ rclone backend checkurl pikpak:dirpath URL1 -o add=all
 ` + "```" + `
 
 At least one URL must be specified. If you set '-o add=all', it will add an
-offline download task for all URLs depending on their cache status. Possible 
+offline download task for all URLs depending on their cache status. Possible
 choices for this option includes 'all', 'cached-only', and 'not-cached'.`,
 }, {
 	Name:  "decompress",
@@ -1815,7 +1815,7 @@ Usage examples:
 rclone backend redeem pikpak: code
 ` + "```" + `
 
-The 'code' is an activation code for the redeem reqeust. The result 
+The 'code' is an activation code for the redeem reqeust. The result
 will be returned in json-formatted string.`,
 }}
 

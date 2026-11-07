@@ -247,7 +247,7 @@ jobs:
         # working-directory: '$(modulePath)'
         # Deploy binaries if enabled in config && not a PR && not a fork
         if: matrix.deploy && github.head_ref == '' && github.repository == 'wiserain/rclone'
-      - 
+      -
         if: ${{ contains(github.ref, 'refs/tags/') }}
         name: Upload Release Artifact
         uses: actions/upload-artifact@v7
@@ -256,7 +256,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             build/
-      - 
+      -
         if: ${{ ! contains(github.ref, 'refs/tags/') }}
         name: Upload Test Artifact
         uses: actions/upload-artifact@v7
@@ -588,7 +588,7 @@ jobs:
             mvto="$(sed -r "s|^rclone_(.*)_(.*)$|rclone-${version_all_sed}-termux-\2|g" <<< "$file")"
             mv -- "$file" "$mvto"
           done
-      - 
+      -
         if: ${{ contains(github.ref, 'refs/tags/') }}
         name: Upload Release Artifact
         uses: actions/upload-artifact@v7
@@ -597,7 +597,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             output/
-      - 
+      -
         if: ${{ ! contains(github.ref, 'refs/tags/') }}
         name: Upload Test Artifact
         uses: actions/upload-artifact@v7
@@ -626,7 +626,7 @@ jobs:
           md5sum rclone-v* > MD5SUMS
           sha1sum rclone-v* > SHA1SUMS
           sha256sum rclone-v* > SHA256SUMS
-      - 
+      -
         name: Create Release
         id: create_release
         uses: shogo82148/actions-create-release@v1

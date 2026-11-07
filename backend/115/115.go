@@ -111,7 +111,7 @@ func init() {
 			Help: `Provide a cookie in the format "UID=...; CID=...; SEID=...; KID=...;".
 
 This setting takes precedence over any individually defined UID, CID, SEID or KID options.
-Additionally, you can provide a comma-separated list of cookies to distribute requests 
+Additionally, you can provide a comma-separated list of cookies to distribute requests
 across multiple client instances for load balancing.`,
 			Required:  true,
 			Sensitive: true,
@@ -200,7 +200,7 @@ The minimum is 0 and the maximum is 5 GiB.`,
 			Name: "chunk_size",
 			Help: `Chunk size to use for uploading.
 
-When uploading files larger than upload_cutoff they will be uploaded 
+When uploading files larger than upload_cutoff they will be uploaded
 as multipart uploads using this chunk size.
 
 Note that "--115-upload-concurrency" chunks of this size are buffered
@@ -1771,9 +1771,9 @@ Usage:
 
     rclone backend addurls 115:dirpath url1 url2
 
-By default, downloads are saved to the folder "dirpath". 
-If this folder doesn't exist or you don't have permission 
-to access it, the download will be saved to the default folder 
+By default, downloads are saved to the folder "dirpath".
+If this folder doesn't exist or you don't have permission
+to access it, the download will be saved to the default folder
 named "云下载".
 
 This command always exits with code 0, regardless of success.
@@ -1800,7 +1800,7 @@ Usage:
 
     rclone backend addshare 115:dirpath link
 
-All content from the link will be copied to the folder "dirpath". 
+All content from the link will be copied to the folder "dirpath".
 If the path doesn't exist, rclone will create it for you.
 `,
 }}
